@@ -1,4 +1,3 @@
-
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom};
@@ -41,7 +40,10 @@ impl BoundedLocalReader {
         let file = File::open(path)?;
         let metadata = file.metadata()?;
         if !metadata.is_file() {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a regular file"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "not a regular file",
+            ));
         }
         Ok(Self {
             file,
@@ -86,7 +88,10 @@ impl BoundedLocalReader {
             .checked_add(bytes as u64)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "range integer overflow"))?;
         if bytes > self.buffer.len() || end > self.file_len {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "range exceeds file or chunk budget"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "range exceeds file or chunk budget",
+            ));
         }
         self.assert_unchanged()?;
         self.file.seek(SeekFrom::Start(offset))?;
@@ -110,11 +115,17 @@ impl BoundedLocalReader {
 
     pub fn verify_sha256(&mut self, expected: &str) -> io::Result<String> {
         if expected.len() != 64 || !expected.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "expected SHA-256 must be 64 hex digits"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "expected SHA-256 must be 64 hex digits",
+            ));
         }
         let actual = self.sha256()?;
         if !actual.eq_ignore_ascii_case(expected) {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "SHA-256 mismatch; reject model bytes"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "SHA-256 mismatch; reject model bytes",
+            ));
         }
         Ok(actual)
     }
@@ -167,7 +178,12 @@ mod tests {
         let path = fixture(b"abc");
         assert!(BoundedLocalReader::open(&path, 3, 4).is_err());
         let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
-        fs::OpenOptions::new().append(true).open(&path).unwrap().write_all(b"d").unwrap();
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(b"d")
+            .unwrap();
         assert!(reader.read_range(0, 1).is_err());
         fs::remove_file(path).unwrap();
     }

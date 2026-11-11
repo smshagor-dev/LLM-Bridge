@@ -45,8 +45,9 @@ fn run(args: Vec<String>) -> Result<(), String> {
             let mut reader = llmbridge_core::storage::BoundedLocalReader::open(
                 &args[2],
                 256 * 1024,
-                2 * 1024 * 1024
-            ).map_err(|e| e.to_string())?;
+                2 * 1024 * 1024,
+            )
+            .map_err(|e| e.to_string())?;
             let digest = reader.verify_sha256(&args[3]).map_err(|e| e.to_string())?;
             println!("sha256: {digest}");
             println!("file bytes: {}", reader.file_bytes());
