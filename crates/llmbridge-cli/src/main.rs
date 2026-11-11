@@ -16,7 +16,7 @@ fn main() {
     }
 }
 fn usage() -> &'static str {
-    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream]"
+    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream]"
 }
 fn json_number(value: Option<u64>) -> String {
     value.map_or_else(|| "null".to_string(), |x| x.to_string())
@@ -39,6 +39,20 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 json_number(h.total_ram_bytes),
                 json_number(h.available_ram_bytes)
             );
+            Ok(())
+        }
+        Some("models") if args.len() == 4 && args[1] == "verify" => {
+            let mut reader = llmbridge_core::storage::BoundedLocalReader::open(
+                &args[2],
+                256 * 1024,
+                2 * 1024 * 1024
+            ).map_err(|e| e.to_string())?;
+            let digest = reader.verify_sha256(&args[3]).map_err(|e| e.to_string())?;
+            println!("sha256: {digest}");
+            println!("file bytes: {}", reader.file_bytes());
+            println!("allocated chunk bytes: {}", reader.allocated_chunk_bytes());
+            println!("disk bytes read: {}", reader.disk_bytes_read());
+            println!("status: entire local file SHA-256 verified with bounded reusable buffer; not an executable model proof");
             Ok(())
         }
         Some("models") if args.len() == 3 && args[1] == "inspect" => {

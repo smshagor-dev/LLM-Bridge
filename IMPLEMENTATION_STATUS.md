@@ -1,23 +1,22 @@
+
 # LLM Bridge implementation status (2026-11-12)
 
-## M0 — code committed; CI pending
-- Repository inspected: empty, main initialized, feature branch created.
-- Rust workspace, bounded GGUF header inspection, Linux memory availability + conservative admission, tests, benchmark process harness, GitHub Actions, ADR.
-- Local sandbox: no rustc/cargo, and no direct GitHub DNS. CI must provide compilation evidence.
+## M0 — verified in CI
+- Empty repo inspected, main initialized, feature branch and draft PR #1.
+- Workspace, GGUF header inspector, CPU hardware profile and admission, tests, benchmark process harness, CI.
+- GitHub Actions native compile and 10 initial tests passed on run 43113641423.
+- Foundation checks (fmt, no-default-features tests and clippy) passed on run 43114276598.
+- Local sandbox has no rustc/cargo or outbound github.com DNS; CI executes these checks.
 
-## M1 — real code implemented, verification pending
-- C++20 llama.cpp v0.9.0 pinned at cd959bae99ff4bed22bef2604f45241c09bbb8c8; CMake CPU-only build.
-- Stable versioned C ABI with bounded args, native exception containment, single-request lock, real llama.cpp tokenizer, prefill/decode, greedy sampler, raw token byte callback, cooperative callback cancellation and RAII cleanup.
-- Rust FFI with panic-catching callback, streaming CLI, SIGINT cancellation and honest GGUF header inspection.
-- CLI: doctor, hardware --json, models inspect, chat <local-GGUF> --prompt ... --stream.
-- Not yet verified: native compile, real model output, reference parity, real peak RSS, cross-platform behavior.
-- No chat-template behavior or stochastic decoding validated. Native generation is **raw prompt completion**, not fully featured chat.
-- No unattended model download; see docs/M1_TEST_PROTOCOL.md.
+## M1 — native built, end-to-end GGUF parity pending
+- C++20 pinned llama.cpp v0.9.0 CPU kernels and Rust FFI; streaming greedy decode, cancellation, scoped cleanup, strict argument checking and model admission.
+- CLI doctor, hardware, models inspect, chat.
+- Native ABI and invalid-model unit tests passed. Real model parity job added and running independently.
+- No validated chat-template mode, numerical reference parity, time-to-first-token, RSS/PSS, or two-gigabyte hardware proof yet.
 
-## M2–M11 — pending
-- **No genuine tensor block streaming**, hard per-process cap, out-of-core proof, 2GB huge-model validation, remote storage, GPU, MoE, API or desktop.
-- mmap alone is not M2. No performance or output metrics fabricated.
+## Early M2 slice (separate stacked PR branch)
+- Bounded local file range reader, real SHA-256 verification and CLI integration. Tests pending.
+- **Not** wired to inference graph; no out-of-core model inference or strict process memory limit proven.
 
-## Environment constraints
-- Container has CMake and C++ compilers but no Rust toolchain, no outbound github.com DNS.
-- Remote GitHub edits are through the GitHub connector; GitHub Actions may validate builds independently.
+## M2–M11
+Full out-of-core, hard RSS budget, remote connectors, GPU, MoE, API, desktop and huge-model research remain unimplemented. No fabricated performance claims.
