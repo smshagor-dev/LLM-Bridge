@@ -5,15 +5,24 @@ pub struct Hardware {
     pub available_ram_bytes: Option<u64>,
 }
 pub fn profile() -> Hardware {
-    let logical_cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    let logical_cpus = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
     #[cfg(target_os = "linux")]
     let (total_ram_bytes, available_ram_bytes) = {
         let content = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
-        (parse_meminfo(&content, "MemTotal:"), parse_meminfo(&content, "MemAvailable:"))
+        (
+            parse_meminfo(&content, "MemTotal:"),
+            parse_meminfo(&content, "MemAvailable:"),
+        )
     };
     #[cfg(not(target_os = "linux"))]
     let (total_ram_bytes, available_ram_bytes) = (None, None);
-    Hardware { logical_cpus, total_ram_bytes, available_ram_bytes }
+    Hardware {
+        logical_cpus,
+        total_ram_bytes,
+        available_ram_bytes,
+    }
 }
 pub fn admit(available: Option<u64>, reserved: u64, estimated_required: u64) -> Result<(), String> {
     let available = available.ok_or("Available RAM unknown; refusing unverified admission")?;
@@ -28,7 +37,9 @@ fn parse_meminfo(contents: &str, key: &str) -> Option<u64> {
     contents.lines().find_map(|line| {
         let mut parts = line.strip_prefix(key)?.split_whitespace();
         let amount: u64 = parts.next()?.parse().ok()?;
-        if parts.next()? != "kB" { return None; }
+        if parts.next()? != "kB" {
+            return None;
+        }
         amount.checked_mul(1024)
     })
 }
@@ -44,8 +55,17 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn reject_bad_meminfo_units_or_overflow() {
-        assert_eq!(parse_meminfo("MemAvailable:  1024 kB\n", "MemAvailable:"), Some(1_048_576));
-        assert_eq!(parse_meminfo("MemAvailable:  999 MB\n", "MemAvailable:"), None);
-        assert_eq!(parse_meminfo("MemAvailable:  18446744073709551615 kB\n", "MemAvailable:"), None);
+        assert_eq!(
+            parse_meminfo("MemAvailable:  1024 kB\n", "MemAvailable:"),
+            Some(1_048_576)
+        );
+        assert_eq!(
+            parse_meminfo("MemAvailable:  999 MB\n", "MemAvailable:"),
+            None
+        );
+        assert_eq!(
+            parse_meminfo("MemAvailable:  18446744073709551615 kB\n", "MemAvailable:"),
+            None
+        );
     }
 }

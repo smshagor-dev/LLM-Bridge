@@ -34,7 +34,11 @@ extern "C" fn dispatch<F: FnMut(&[u8]) -> bool>(
         let callback = unsafe { &mut *(user_data.cast::<F>()) };
         callback(bytes)
     }));
-    if matches!(invoked, Ok(true)) { 1 } else { 0 }
+    if matches!(invoked, Ok(true)) {
+        1
+    } else {
+        0
+    }
 }
 
 /// Real CPU-only llama.cpp GGUF generation; callback receives raw token bytes.
@@ -92,10 +96,17 @@ mod tests {
     #[test]
     fn malformed_model_is_rejected_without_generating_tokens() {
         let mut count = 0;
-        let result = generate(Path::new("/llmbridge/nonexistent/does-not-exist.gguf"), "test", 128, 8, 1, |_| {
-            count += 1;
-            true
-        });
+        let result = generate(
+            Path::new("/llmbridge/nonexistent/does-not-exist.gguf"),
+            "test",
+            128,
+            8,
+            1,
+            |_| {
+                count += 1;
+                true
+            },
+        );
         assert!(result.is_err());
         assert_eq!(count, 0);
     }

@@ -20,9 +20,18 @@ fn main() {
         return;
     }
     let native = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../native");
-    println!("cargo:rerun-if-changed={}", native.join("src/bridge.cpp").display());
-    println!("cargo:rerun-if-changed={}", native.join("include/llmbridge.h").display());
-    println!("cargo:rerun-if-changed={}", native.join("CMakeLists.txt").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        native.join("src/bridge.cpp").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        native.join("include/llmbridge.h").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        native.join("CMakeLists.txt").display()
+    );
     let out = cmake::Config::new(native)
         .profile("Release")
         .define("GGML_OPENMP", "OFF")
@@ -40,8 +49,16 @@ fn main() {
         let path = paths
             .iter()
             .find(|p| p.file_name().is_some_and(|v| v == filename.as_str()))
-            .unwrap_or_else(|| panic!("missing native static library {filename} under {}", out.display()));
-        println!("cargo:rustc-link-search=native={}", path.parent().unwrap().display());
+            .unwrap_or_else(|| {
+                panic!(
+                    "missing native static library {filename} under {}",
+                    out.display()
+                )
+            });
+        println!(
+            "cargo:rustc-link-search=native={}",
+            path.parent().unwrap().display()
+        );
         println!("cargo:rustc-link-lib=static={name}");
     }
     if cfg!(target_os = "linux") {

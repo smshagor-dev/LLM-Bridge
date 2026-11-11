@@ -46,7 +46,9 @@ fn run(args: Vec<String>) -> Result<(), String> {
             println!("GGUF version: {}", h.format_version);
             println!("declared tensors: {}", h.tensor_count);
             println!("metadata entries: {}", h.metadata_entries);
-            println!("status: header inspected only (payload and executable compatibility unverified)");
+            println!(
+                "status: header inspected only (payload and executable compatibility unverified)"
+            );
             Ok(())
         }
         Some("chat") => chat(&args[1..]),
@@ -71,10 +73,14 @@ fn chat(args: &[String]) -> Result<(), String> {
             continue;
         }
         let flag = args[pos].as_str();
-        let value = args.get(pos + 1).ok_or_else(|| format!("missing value for {flag}"))?;
+        let value = args
+            .get(pos + 1)
+            .ok_or_else(|| format!("missing value for {flag}"))?;
         match flag {
             "--prompt" => prompt = Some(value.clone()),
-            "--max-tokens" => max_tokens = value.parse::<u32>().map_err(|_| "invalid max-tokens")?,
+            "--max-tokens" => {
+                max_tokens = value.parse::<u32>().map_err(|_| "invalid max-tokens")?
+            }
             "--ctx" => ctx = value.parse::<u32>().map_err(|_| "invalid ctx")?,
             "--threads" => threads = value.parse::<i32>().map_err(|_| "invalid threads")?,
             _ => return Err(format!("unknown flag {flag}")),
@@ -85,14 +91,22 @@ fn chat(args: &[String]) -> Result<(), String> {
     if prompt.is_empty() {
         return Err("empty prompt".to_string());
     }
-    if !(64..=8192).contains(&ctx) || !(1..=2048).contains(&max_tokens) || !(1..=64).contains(&threads) {
+    if !(64..=8192).contains(&ctx)
+        || !(1..=2048).contains(&max_tokens)
+        || !(1..=64).contains(&threads)
+    {
         return Err("context, token or thread request exceeds M1 bounds".to_string());
     }
-    let info = models::inspect_gguf(model_path).map_err(|e| format!("GGUF inspection failed: {e}"))?;
+    let info =
+        models::inspect_gguf(model_path).map_err(|e| format!("GGUF inspection failed: {e}"))?;
     let h = hardware::profile();
     if let Some(available) = h.available_ram_bytes {
         // This is deliberately conservative pre-load admission, not an enforceable RSS cap.
-        let os_reserve = h.total_ram_bytes.unwrap_or(0).saturating_div(4).max(512 * 1024 * 1024);
+        let os_reserve = h
+            .total_ram_bytes
+            .unwrap_or(0)
+            .saturating_div(4)
+            .max(512 * 1024 * 1024);
         let scratch_estimate = 256_u64 * 1024 * 1024 + u64::from(ctx) * 128 * 1024;
         let estimate = info.file_bytes.saturating_add(scratch_estimate);
         hardware::admit(Some(available), os_reserve, estimate)?;
@@ -132,7 +146,12 @@ mod tests {
     use super::*;
     #[test]
     fn malformed_gguf_input_returns_error() {
-        assert!(run(vec!["models".into(), "inspect".into(), "/does-not-exist.gguf".into()]).is_err());
+        assert!(run(vec![
+            "models".into(),
+            "inspect".into(),
+            "/does-not-exist.gguf".into()
+        ])
+        .is_err());
     }
     #[test]
     fn hardware_json_uses_json_null_for_unknown() {
