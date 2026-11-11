@@ -1,0 +1,8 @@
+[workspace]
+members = ["crates/llmbridge-core", "crates/llmbridge-cli"]
+resolver = "2"
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"

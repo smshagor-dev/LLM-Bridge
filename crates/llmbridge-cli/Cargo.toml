@@ -1,0 +1,11 @@
+[package]
+name = "llmbridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+llmbridge-core = { path = "../llmbridge-core", default-features = false }
+ctrlc = "3.4.5"
+[features]
+default = ["native"]
+native = ["llmbridge-core/native"]
