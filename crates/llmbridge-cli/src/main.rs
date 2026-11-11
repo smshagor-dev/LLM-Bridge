@@ -1,5 +1,7 @@
 use llmbridge_core::{hardware, models};
+#[cfg(feature = "native")]
 use std::io::{self, Write};
+#[cfg(feature = "native")]
 use std::path::Path;
 #[cfg(feature = "native")]
 use std::sync::{
