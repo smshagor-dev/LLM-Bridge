@@ -39,7 +39,7 @@ void set_tokens(llama_batch_ext *batch, const llama_token *tokens, int32_t count
 
 int32_t generate(const char *path, const char *prompt, uint32_t context_tokens,
                  uint32_t max_tokens, int32_t threads, llmbridge_token_callback callback,
-                 void *userdata) {
+                 void *userdata, llmbridge_cancel_poll poll = nullptr) {
     if (!path || !prompt || !callback || !path[0] ||
         context_tokens < 64 || context_tokens > 8192 ||
         max_tokens == 0 || max_tokens > 2048 ||
@@ -47,10 +47,13 @@ int32_t generate(const char *path, const char *prompt, uint32_t context_tokens,
         std::strlen(prompt) > 65536) {
         throw std::invalid_argument("invalid inference arguments or unsupported context/thread limits");
     }
+    if (poll && poll(userdata) == 0) return 2;
     // Single model execution at a time while the baseline does not have a worker scheduler.
     std::lock_guard<std::mutex> lock(engine_mutex);
+    if (poll && poll(userdata) == 0) return 2;
     std::call_once(init_once, [] { llama_backend_init(); });
 
+    if (poll && poll(userdata) == 0) return 2;
     auto mp = llama_model_default_params();
     mp.n_gpu_layers = 0;
     std::unique_ptr<llama_model, decltype(&llama_model_free)> model(
@@ -81,6 +84,7 @@ int32_t generate(const char *path, const char *prompt, uint32_t context_tokens,
         throw std::runtime_error("tokenization failed");
     }
 
+    if (poll && poll(userdata) == 0) return 2;
     auto cp = llama_context_default_params();
     cp.n_ctx = context_tokens;
     cp.n_batch = static_cast<uint32_t>(token_count);
@@ -108,6 +112,7 @@ int32_t generate(const char *path, const char *prompt, uint32_t context_tokens,
     int32_t position = 0;
     int32_t current_count = token_count;
     for (uint32_t generated = 0; generated < max_tokens; ++generated) {
+        if (poll && poll(userdata) == 0) return 2;
         set_tokens(batch.get(), tokens.data(), current_count, position);
         if (llama_process(ctx.get(), LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
             throw std::runtime_error("CPU model decode failed");
@@ -269,6 +274,25 @@ extern "C" int32_t llmbridge_q8_0_matvec(
         return -1;
     } catch (...) {
         write_error(error, error_capacity, "unknown native tensor operator exception");
+        return -1;
+    }
+}
+
+/* Additive entry point preserves the existing ABI and legacy callers. */
+extern "C" int32_t llmbridge_generate_cpu_polled(
+    const char *model_path, const char *prompt, uint32_t context_tokens,
+    uint32_t max_tokens, int32_t threads, llmbridge_token_callback callback,
+    llmbridge_cancel_poll poll, void *userdata, char *error, size_t error_capacity) {
+    write_error(error, error_capacity, "");
+    try {
+        if (!poll) throw std::invalid_argument("cancellation poll callback required");
+        return generate(model_path, prompt, context_tokens, max_tokens,
+                        threads, callback, userdata, poll);
+    } catch (const std::exception &e) {
+        write_error(error, error_capacity, e.what());
+        return -1;
+    } catch (...) {
+        write_error(error, error_capacity, "unknown native exception");
         return -1;
     }
 }
