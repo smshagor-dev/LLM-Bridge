@@ -1,0 +1,8 @@
+/target/
+/build/
+/native/build/
+*.gguf
+*.safetensors
+models/
+*.log
+*.tmp
