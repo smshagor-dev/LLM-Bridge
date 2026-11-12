@@ -5,3 +5,4 @@ pub mod inference;
 pub mod models;
 
 pub mod storage;
+pub mod tensor_cache;
