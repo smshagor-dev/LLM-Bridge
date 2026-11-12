@@ -20,12 +20,23 @@ pub struct TensorChunkCache {
 
 impl TensorChunkCache {
     pub fn new(capacity: usize) -> Self {
-        Self { capacity, used: 0, entries: HashMap::new(), lru: VecDeque::new() }
+        Self {
+            capacity,
+            used: 0,
+            entries: HashMap::new(),
+            lru: VecDeque::new(),
+        }
     }
 
-    pub fn used_bytes(&self) -> usize { self.used }
-    pub fn capacity_bytes(&self) -> usize { self.capacity }
-    pub fn len(&self) -> usize { self.entries.len() }
+    pub fn used_bytes(&self) -> usize {
+        self.used
+    }
+    pub fn capacity_bytes(&self) -> usize {
+        self.capacity
+    }
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
 
     pub fn clear(&mut self) {
         self.entries.clear();
@@ -36,13 +47,16 @@ impl TensorChunkCache {
     /// Reclaim chunks belonging to previous authenticated model revisions.
     /// The caller must supply a trusted revision digest, not a filename.
     pub fn retain_revision(&mut self, revision: [u8; 32]) {
-        self.entries.retain(|key, _| key.source_revision == revision);
+        self.entries
+            .retain(|key, _| key.source_revision == revision);
         self.lru.retain(|key| key.source_revision == revision);
         self.used = self.entries.values().map(Vec::len).sum();
     }
 
     pub fn get(&mut self, key: &ChunkKey) -> Option<&[u8]> {
-        if !self.entries.contains_key(key) { return None; }
+        if !self.entries.contains_key(key) {
+            return None;
+        }
         self.lru.retain(|item| item != key);
         self.lru.push_back(*key);
         self.entries.get(key).map(Vec::as_slice)
@@ -52,14 +66,21 @@ impl TensorChunkCache {
     /// Oversized entries are rejected without modifying existing entries.
     pub fn insert(&mut self, key: ChunkKey, bytes: &[u8]) -> io::Result<()> {
         if key.length == 0 || key.length != bytes.len() {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "cache key length mismatch"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "cache key length mismatch",
+            ));
         }
         if bytes.len() > self.capacity {
-            return Err(io::Error::new(io::ErrorKind::Other, "chunk exceeds cache budget"));
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "chunk exceeds cache budget",
+            ));
         }
         // Allocate before evicting so a failed allocation leaves existing entries intact.
         let mut owned = Vec::new();
-        owned.try_reserve_exact(bytes.len())
+        owned
+            .try_reserve_exact(bytes.len())
             .map_err(|_| io::Error::new(io::ErrorKind::Other, "cache allocation failed"))?;
         owned.extend_from_slice(bytes);
         if let Some(previous) = self.entries.remove(&key) {
@@ -82,7 +103,11 @@ impl TensorChunkCache {
 mod tests {
     use super::*;
     fn key(revision: u8, offset: u64, length: usize) -> ChunkKey {
-        ChunkKey { source_revision: [revision; 32], file_offset: offset, length }
+        ChunkKey {
+            source_revision: [revision; 32],
+            file_offset: offset,
+            length,
+        }
     }
 
     #[test]

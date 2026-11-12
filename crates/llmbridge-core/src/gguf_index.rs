@@ -658,24 +658,14 @@ mod tests {
         let stop = AtomicBool::new(true);
         let expected = format!("{:x}", Sha256::digest([0xA5; 68]));
         let error = index
-            .verify_tensor_sha256_cancellable(
-                &mut reader,
-                "layers.0.weight",
-                &expected,
-                &stop,
-            )
+            .verify_tensor_sha256_cancellable(&mut reader, "layers.0.weight", &expected, &stop)
             .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::Interrupted);
         assert_eq!(reader.disk_bytes_read(), 0);
         stop.store(false, Ordering::Release);
         assert_eq!(
             index
-                .verify_tensor_sha256_cancellable(
-                    &mut reader,
-                    "layers.0.weight",
-                    &expected,
-                    &stop,
-                )
+                .verify_tensor_sha256_cancellable(&mut reader, "layers.0.weight", &expected, &stop,)
                 .unwrap(),
             expected
         );

@@ -20,16 +20,25 @@ where
     F: FnMut(&str, &[u8]) -> io::Result<()>,
 {
     if cancelled.load(Ordering::Acquire) {
-        return Err(io::Error::new(io::ErrorKind::Interrupted, "batch cancelled"));
+        return Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            "batch cancelled",
+        ));
     }
     if reader.identity() != &index.source_identity {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "GGUF source identity mismatch"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "GGUF source identity mismatch",
+        ));
     }
     let mut seen = HashSet::new();
     let mut total = 0u64;
     for name in names {
         if !seen.insert(*name) {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "duplicate tensor in batch"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "duplicate tensor in batch",
+            ));
         }
         let tensor = index.tensor(name).ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, "tensor missing from GGUF index")
@@ -38,12 +47,18 @@ where
             io::Error::new(io::ErrorKind::InvalidInput, "tensor batch size overflow")
         })?;
         if total > max_total_bytes {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "tensor batch exceeds byte budget"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "tensor batch exceeds byte budget",
+            ));
         }
     }
     for name in names {
         if cancelled.load(Ordering::Acquire) {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "batch cancelled"));
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "batch cancelled",
+            ));
         }
         index.stream_tensor_cancellable(reader, name, cancelled, |chunk| consume(name, chunk))?;
     }
@@ -70,12 +85,19 @@ mod tests {
         bytes.extend_from_slice(&4u64.to_le_bytes()); // four elements
         bytes.extend_from_slice(&0u32.to_le_bytes()); // F32
         bytes.extend_from_slice(&0u64.to_le_bytes()); // relative offset
-        while bytes.len() % 32 != 0 { bytes.push(0); }
+        while bytes.len() % 32 != 0 {
+            bytes.push(0);
+        }
         bytes.extend_from_slice(&[7u8; 16]);
         let path = std::env::temp_dir().join(format!(
-            "llmbridge-batch-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)
+            "llmbridge-batch-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
         ));
-        std::fs::File::create(&path).unwrap().write_all(&bytes).unwrap();
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(&bytes)
+            .unwrap();
         path
     }
 
@@ -86,9 +108,20 @@ mod tests {
         let mut reader = BoundedLocalReader::open(&path, 5, 10).unwrap();
         let cancel = AtomicBool::new(false);
         for names in [&["weights", "weights"][..], &["weights", "missing"][..]] {
-            assert!(stream_tensor_batch(&index, &mut reader, names, 32, &cancel, |_, _| Ok(())).is_err());
+            assert!(
+                stream_tensor_batch(&index, &mut reader, names, 32, &cancel, |_, _| Ok(()))
+                    .is_err()
+            );
         }
-        assert!(stream_tensor_batch(&index, &mut reader, &["weights"], 15, &cancel, |_, _| Ok(())).is_err());
+        assert!(stream_tensor_batch(
+            &index,
+            &mut reader,
+            &["weights"],
+            15,
+            &cancel,
+            |_, _| Ok(())
+        )
+        .is_err());
         assert_eq!(reader.disk_bytes_read(), 0);
         std::fs::remove_file(path).unwrap();
     }
@@ -100,16 +133,36 @@ mod tests {
         let mut reader = BoundedLocalReader::open(&path, 5, 10).unwrap();
         let cancel = AtomicBool::new(false);
         let mut chunks = Vec::new();
-        let total = stream_tensor_batch(&index, &mut reader, &["weights"], 16, &cancel, |name, chunk| {
-            assert_eq!(name, "weights");
-            chunks.extend_from_slice(chunk);
-            Ok(())
-        }).unwrap();
+        let total = stream_tensor_batch(
+            &index,
+            &mut reader,
+            &["weights"],
+            16,
+            &cancel,
+            |name, chunk| {
+                assert_eq!(name, "weights");
+                chunks.extend_from_slice(chunk);
+                Ok(())
+            },
+        )
+        .unwrap();
         assert_eq!(total, 16);
         assert_eq!(chunks, vec![7u8; 16]);
         assert_eq!(reader.disk_bytes_read(), 16);
         cancel.store(true, Ordering::Release);
-        assert_eq!(stream_tensor_batch(&index, &mut reader, &["weights"], 16, &cancel, |_, _| Ok(())).unwrap_err().kind(), io::ErrorKind::Interrupted);
+        assert_eq!(
+            stream_tensor_batch(
+                &index,
+                &mut reader,
+                &["weights"],
+                16,
+                &cancel,
+                |_, _| Ok(())
+            )
+            .unwrap_err()
+            .kind(),
+            io::ErrorKind::Interrupted
+        );
         assert_eq!(reader.disk_bytes_read(), 16);
         std::fs::remove_file(path).unwrap();
     }

@@ -51,17 +51,25 @@ fn indexed_streams_never_include_neighbor_or_alignment_padding() {
     let mut reader = BoundedLocalReader::open(&fixture.0, 7, 14).unwrap();
     for (name, expected) in [("first", 0x11u8), ("second", 0x22u8)] {
         let mut received = Vec::new();
-        let length = index.stream_tensor(&mut reader, name, |chunk| {
-            assert!(chunk.len() <= 7);
-            received.extend_from_slice(chunk);
-            Ok(())
-        }).unwrap();
+        let length = index
+            .stream_tensor(&mut reader, name, |chunk| {
+                assert!(chunk.len() <= 7);
+                received.extend_from_slice(chunk);
+                Ok(())
+            })
+            .unwrap();
         assert_eq!(length, 16);
         assert_eq!(received, vec![expected; 16]);
     }
     assert_eq!(reader.disk_bytes_read(), 32);
     let before = reader.disk_bytes_read();
-    assert_eq!(index.stream_tensor(&mut reader, "missing", |_| Ok(())).unwrap_err().kind(), io::ErrorKind::NotFound);
+    assert_eq!(
+        index
+            .stream_tensor(&mut reader, "missing", |_| Ok(()))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::NotFound
+    );
     assert_eq!(reader.disk_bytes_read(), before);
 }
 
@@ -72,20 +80,24 @@ fn cancellation_between_chunks_does_not_read_another_chunk() {
     let mut reader = BoundedLocalReader::open(&fixture.0, 7, 14).unwrap();
     let cancelled = AtomicBool::new(true);
     let mut calls = 0usize;
-    let err = index.stream_tensor_cancellable(&mut reader, "first", &cancelled, |_| {
-        calls += 1;
-        Ok(())
-    }).unwrap_err();
+    let err = index
+        .stream_tensor_cancellable(&mut reader, "first", &cancelled, |_| {
+            calls += 1;
+            Ok(())
+        })
+        .unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::Interrupted);
     assert_eq!(calls, 0);
     assert_eq!(reader.disk_bytes_read(), 0);
 
     cancelled.store(false, Ordering::Release);
-    let err = index.stream_tensor_cancellable(&mut reader, "first", &cancelled, |_| {
-        calls += 1;
-        cancelled.store(true, Ordering::Release);
-        Ok(())
-    }).unwrap_err();
+    let err = index
+        .stream_tensor_cancellable(&mut reader, "first", &cancelled, |_| {
+            calls += 1;
+            cancelled.store(true, Ordering::Release);
+            Ok(())
+        })
+        .unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::Interrupted);
     assert_eq!(calls, 1);
     assert_eq!(reader.disk_bytes_read(), 7);
