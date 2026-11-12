@@ -70,6 +70,19 @@ impl BoundedLocalReader {
                 "not a regular file",
             ));
         }
+        // Recheck the path after open: a rename/symlink substitution between
+        // symlink_metadata and File::open must not bypass the source policy.
+        // Compare the opened descriptor with the final path identity on Unix.
+        let path_metadata = fs::symlink_metadata(path)?;
+        if path_metadata.file_type().is_symlink() || !path_metadata.is_file()
+            || SourceIdentity::from_metadata(&path_metadata)
+                != SourceIdentity::from_metadata(&metadata)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "local source changed during open or became a symlink",
+            ));
+        }
         Ok(Self {
             file,
             file_len: metadata.len(),
@@ -126,6 +139,25 @@ impl BoundedLocalReader {
         Ok(&self.buffer[..bytes])
     }
 
+    /// Hash with cooperative cancellation checked before each bounded read.
+    /// A cancelled pass returns Interrupted and never yields a partial digest.
+    pub fn sha256_cancellable(&mut self, mut cancelled: impl FnMut() -> bool) -> io::Result<String> {
+        let mut hash = Sha256::new();
+        let mut offset = 0u64;
+        loop {
+            if cancelled() {
+                return Err(io::Error::new(io::ErrorKind::Interrupted, "model hash cancelled"));
+            }
+            if offset == self.file_len {
+                break;
+            }
+            let bytes = (self.file_len - offset).min(self.buffer.len() as u64) as usize;
+            hash.update(self.read_range(offset, bytes)?);
+            offset += bytes as u64;
+        }
+        Ok(format!("{:x}", hash.finalize()))
+    }
+
     /// Whole-file hash verified with bounded chunks. Does not imply signed manifest validation.
     pub fn sha256(&mut self) -> io::Result<String> {
         let mut hash = Sha256::new();
@@ -174,6 +206,23 @@ mod tests {
     }
 
     #[test]
+    fn cancelled_hash_stops_before_next_chunk() {
+        let path = fixture(b"abcdef");
+        let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
+        let mut checks = 0;
+        let err = reader.sha256_cancellable(|| {
+            checks += 1;
+            checks == 2
+        }).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(reader.disk_bytes_read(), 2);
+        assert_eq!(checks, 2);
+        let digest = reader.sha256_cancellable(|| false).unwrap();
+        assert_eq!(digest.len(), 64);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn bounded_ranges_only_read_exact_bytes() {
         let path = fixture(b"abcdefghij");
         let mut reader = BoundedLocalReader::open(&path, 3, 8).unwrap();
@@ -183,6 +232,19 @@ mod tests {
         assert!(reader.read_range(4, 4).is_err());
         assert!(reader.read_range(u64::MAX, 1).is_err());
         assert!(reader.read_range(9, 2).is_err());
+        fs::remove_file(path).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symbolic_link_sources_are_rejected() {
+        use std::os::unix::fs::symlink;
+        let path = fixture(b"abc");
+        let link = path.with_extension("link");
+        symlink(&path, &link).unwrap();
+        let result = BoundedLocalReader::open(&link, 2, 4);
+        assert!(result.is_err());
+        fs::remove_file(link).unwrap();
         fs::remove_file(path).unwrap();
     }
 
