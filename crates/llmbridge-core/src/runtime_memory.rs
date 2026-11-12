@@ -99,6 +99,33 @@ impl RuntimeMemoryLimits {
         Ok(sample)
     }
 
+    /// Sample live counters before admission and after the operation. A successful
+    /// preflight does not reserve physical pages or guarantee a hard RSS ceiling.
+    pub fn around_growth<T>(
+        self,
+        growth_bytes: u64,
+        reserve_bytes: u64,
+        operation: impl FnOnce() -> io::Result<T>,
+    ) -> io::Result<T> {
+        self.around_growth_with_sampler(growth_bytes, reserve_bytes, process_memory, operation)
+    }
+
+    /// Injectable sampler allows deterministic verification of both boundaries.
+    /// The postflight check uses actual observed usage, not predicted growth.
+    pub fn around_growth_with_sampler<T>(
+        self,
+        growth_bytes: u64,
+        reserve_bytes: u64,
+        mut sample: impl FnMut() -> ProcessMemory,
+        operation: impl FnOnce() -> io::Result<T>,
+    ) -> io::Result<T> {
+        self.check_growth(&sample(), growth_bytes, reserve_bytes)
+            .map_err(violation_io)?;
+        let result = operation();
+        self.check(&sample()).map_err(violation_io)?;
+        result
+    }
+
     /// Execute a fallible native boundary only when both surrounding samples pass.
     /// The closure is never invoked on preflight failure. Its side effects cannot
     /// be rolled back if the postflight sample exceeds the limit.
@@ -177,6 +204,45 @@ mod tests {
             Err(MemoryViolation::ProcessRssExceeded { observed: u64::MAX, limit: 100 }));
         assert_eq!(limits.check_growth(&sample(Some(1), None), 1, 0),
             Err(MemoryViolation::UnknownCgroupUsage));
+    }
+
+    #[test]
+    fn growth_boundary_rejects_before_execution_and_checks_after_failure() {
+        use std::cell::Cell;
+        let limits = RuntimeMemoryLimits {
+            max_process_rss_bytes: 100,
+            max_cgroup_current_bytes: None,
+        };
+        let invoked = Cell::new(false);
+        let rejected = limits.around_growth_with_sampler(30, 10,
+            || sample(Some(70), None),
+            || { invoked.set(true); Ok(()) });
+        assert_eq!(rejected.unwrap_err().kind(), io::ErrorKind::OutOfMemory);
+        assert!(!invoked.get());
+
+        let samples = Cell::new(0usize);
+        let result: io::Result<()> = limits.around_growth_with_sampler(20, 10,
+            || {
+                let n = samples.get();
+                samples.set(n + 1);
+                sample(Some(if n == 0 { 50 } else { 101 }), None)
+            },
+            || { invoked.set(true); Err(io::Error::new(io::ErrorKind::Other, "native failed")) });
+        assert!(invoked.get());
+        assert_eq!(samples.get(), 2);
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::OutOfMemory);
+    }
+
+    #[test]
+    fn growth_boundary_preserves_operation_error_when_postflight_is_safe() {
+        let limits = RuntimeMemoryLimits {
+            max_process_rss_bytes: 100,
+            max_cgroup_current_bytes: None,
+        };
+        let result: io::Result<()> = limits.around_growth_with_sampler(10, 5,
+            || sample(Some(40), None),
+            || Err(io::Error::new(io::ErrorKind::InvalidData, "native failed")));
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidData);
     }
 
 }
