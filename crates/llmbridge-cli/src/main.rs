@@ -16,7 +16,7 @@ fn main() {
     }
 }
 fn usage() -> &'static str {
-    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream]"
+    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics]"
 }
 fn json_number(value: Option<u64>) -> String {
     value.map_or_else(|| "null".to_string(), |x| x.to_string())
@@ -140,8 +140,15 @@ fn chat(args: &[String]) -> Result<(), String> {
     let mut max_tokens = 16u32;
     let mut ctx = 128u32;
     let mut threads = 2i32;
+    let mut show_metrics = false;
     let mut pos = 1usize;
     while pos < args.len() {
+
+        if args[pos] == "--metrics" {
+            show_metrics = true;
+            pos += 1;
+            continue;
+        }
         if args[pos] == "--stream" {
             pos += 1;
             continue;
@@ -206,6 +213,19 @@ fn chat(args: &[String]) -> Result<(), String> {
             handle.write_all(bytes).and_then(|_| handle.flush()).is_ok()
         },
     );
+
+    if show_metrics {
+        let usage = hardware::process_memory();
+        // VmHWM is a process-lifetime peak; the other values are post-run samples.
+        eprintln!(
+            "LLMBRIDGE_MEMORY {{\"peak_rss_bytes\":{},\"rss_after_run_bytes\":{},\"pss_after_run_bytes\":{},\"cgroup_current_after_run_bytes\":{},\"cgroup_limit_bytes\":{}}}",
+            json_number(usage.peak_rss_bytes),
+            json_number(usage.rss_bytes),
+            json_number(usage.pss_bytes),
+            json_number(usage.cgroup_current_bytes),
+            json_number(usage.cgroup_limit_bytes)
+        );
+    }
     writeln!(handle).map_err(|e| format!("stdout error: {e}"))?;
     generated
 }
