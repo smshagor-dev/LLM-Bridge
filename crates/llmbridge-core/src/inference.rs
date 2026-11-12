@@ -266,6 +266,31 @@ pub fn q8_0_matvec_verified(
     )
 }
 
+/// Execute an authenticated Q8_0 tensor while enforcing a caller-provided
+/// workspace budget. Authentication and workspace admission both happen
+/// before native execution; a failed budget check performs no tensor I/O.
+/// This does not enforce a process-wide RSS limit or prevent in-place file
+/// mutation between verification and computation.
+pub fn q8_0_matvec_verified_with_budget(
+    index: &GgufTensorIndex,
+    reader: &mut BoundedLocalReader,
+    tensor_name: &str,
+    activation: &[f32],
+    cancelled: &AtomicBool,
+    expected_sha256: &str,
+    workspace_budget_bytes: usize,
+) -> Result<Vec<f32>, String> {
+    q8_0_matvec_internal(
+        index,
+        reader,
+        tensor_name,
+        activation,
+        cancelled,
+        workspace_budget_bytes,
+        Some(expected_sha256),
+    )
+}
+
 /// Caps explicitly managed tensor-operator data (source buffer, input,
 /// output, native packed/dequantized row and reserved allocator overhead).
 /// This is not an OS-level RSS/cgroup limit or a graph-wide budget.
@@ -501,6 +526,19 @@ mod tests {
                 .is_err()
         );
         assert_eq!(reader.disk_bytes_read(), 68);
+        // Authenticated execution must not bypass the explicit workspace
+        // admission check or read any bytes when admission is denied.
+        assert!(q8_0_matvec_verified_with_budget(
+            &index,
+            &mut reader,
+            "weights",
+            &[1f32; 32],
+            &cancel,
+            &"0".repeat(64),
+            64,
+        )
+        .is_err());
+        assert_eq!(reader.disk_bytes_read(), 68);
         assert!(q8_0_matvec_verified(
             &index,
             &mut reader,
@@ -528,9 +566,21 @@ mod tests {
         .unwrap();
         assert_eq!(verified, vec![264.0, -264.0]);
         assert_eq!(reader.disk_bytes_read(), 272);
+        let bounded_verified = q8_0_matvec_verified_with_budget(
+            &index,
+            &mut reader,
+            "weights",
+            &[1f32; 32],
+            &cancel,
+            &digest,
+            256 * 1024,
+        )
+        .unwrap();
+        assert_eq!(bounded_verified, verified);
+        assert_eq!(reader.disk_bytes_read(), 408);
         cancel.store(true, Ordering::Release);
         assert!(q8_0_matvec(&index, &mut reader, "weights", &[1f32; 32], &cancel).is_err());
-        assert_eq!(reader.disk_bytes_read(), 272);
+        assert_eq!(reader.disk_bytes_read(), 408);
         cancel.store(false, Ordering::Release);
         assert!(q8_0_matvec(&index, &mut reader, "weights", &[f32::NAN; 32], &cancel).is_err());
         assert!(q8_0_matvec(&index, &mut reader, "weights", &[1f32; 31], &cancel).is_err());
