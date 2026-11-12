@@ -164,3 +164,48 @@ extern "C" int32_t llmbridge_generate_cpu(
         return -1;
     }
 }
+
+
+extern "C" int32_t llmbridge_probe_gguf_source(
+    uint64_t file_bytes, size_t max_chunk_bytes,
+    llmbridge_range_callback reader, void *userdata,
+    uint64_t *tensor_count, uint64_t *tensor_data_offset,
+    char *error, size_t error_capacity) {
+    write_error(error, error_capacity, "");
+    if (tensor_count != nullptr) {
+        *tensor_count = 0;
+    }
+    if (tensor_data_offset != nullptr) {
+        *tensor_data_offset = 0;
+    }
+    try {
+        if (file_bytes < 24 || max_chunk_bytes == 0 || max_chunk_bytes > 1024 * 1024 ||
+            !reader || !userdata || !tensor_count || !tensor_data_offset) {
+            throw std::invalid_argument("invalid bounded GGUF source probe arguments");
+        }
+        gguf_init_params params{};
+        params.no_alloc = true;
+        params.ctx = nullptr;
+        // The underlying GGUF loader performs bounded calls to the supplied
+        // reader, and no model weight tensors are allocated by this probe.
+        std::unique_ptr<gguf_context, decltype(&gguf_free)> metadata(
+            gguf_init_from_callback(reader, userdata, max_chunk_bytes, file_bytes, params),
+            gguf_free);
+        if (!metadata) {
+            throw std::runtime_error("native GGUF metadata parse failed");
+        }
+        const int64_t count = gguf_get_n_tensors(metadata.get());
+        if (count < 0) {
+            throw std::runtime_error("native GGUF tensor count invalid");
+        }
+        *tensor_count = static_cast<uint64_t>(count);
+        *tensor_data_offset = static_cast<uint64_t>(gguf_get_data_offset(metadata.get()));
+        return 0;
+    } catch (const std::exception &e) {
+        write_error(error, error_capacity, e.what());
+        return -1;
+    } catch (...) {
+        write_error(error, error_capacity, "unknown native GGUF probe exception");
+        return -1;
+    }
+}

@@ -1,4 +1,4 @@
-use llmbridge_core::{hardware, models};
+use llmbridge_core::{gguf_index::GgufTensorIndex, hardware, models};
 #[cfg(feature = "native")]
 use std::io::{self, Write};
 #[cfg(feature = "native")]
@@ -16,7 +16,7 @@ fn main() {
     }
 }
 fn usage() -> &'static str {
-    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream]"
+    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics]"
 }
 fn json_number(value: Option<u64>) -> String {
     value.map_or_else(|| "null".to_string(), |x| x.to_string())
@@ -39,6 +39,78 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 json_number(h.total_ram_bytes),
                 json_number(h.available_ram_bytes)
             );
+            Ok(())
+        }
+
+        #[cfg(feature = "native")]
+        Some("models") if args.len() == 3 && args[1] == "native-index-probe" => {
+            let index = GgufTensorIndex::inspect(&args[2]).map_err(|e| e.to_string())?;
+            let mut reader =
+                llmbridge_core::storage::BoundedLocalReader::open(&args[2], 64 * 1024, 128 * 1024)
+                    .map_err(|e| e.to_string())?;
+            let probe = llmbridge_core::inference::probe_indexed_gguf(&index, &mut reader)?;
+            println!("native tensor count: {}", probe.tensor_count);
+            println!("native tensor data offset: {}", probe.data_offset);
+            println!("bounded source bytes read: {}", reader.disk_bytes_read());
+            println!(
+                "bounded callback buffer bytes: {}",
+                reader.allocated_chunk_bytes()
+            );
+            println!(
+                "status: native GGUF metadata agrees with Rust index; NOT out-of-core inference"
+            );
+            Ok(())
+        }
+        Some("models") if args.len() == 3 && args[1] == "tensor-index" => {
+            let index = GgufTensorIndex::inspect(&args[2]).map_err(|e| e.to_string())?;
+            println!("GGUF version: {}", index.version);
+            println!("tensor count: {}", index.tensors.len());
+            println!("tensor data offset: {}", index.data_offset);
+            println!("file bytes: {}", index.file_bytes);
+            for tensor in &index.tensors {
+                println!(
+                    "{} type={} dims={:?} offset={} size={}",
+                    tensor.name,
+                    tensor.ggml_type,
+                    tensor.dimensions,
+                    tensor.file_offset,
+                    tensor.byte_len
+                );
+            }
+            println!("status: validated indexed byte ranges; execution not memory-bounded");
+            Ok(())
+        }
+        Some("models") if (args.len() == 4 || args.len() == 5) && args[1] == "tensor-sha256" => {
+            let index = GgufTensorIndex::inspect(&args[2]).map_err(|e| e.to_string())?;
+            let mut reader =
+                llmbridge_core::storage::BoundedLocalReader::open(&args[2], 64 * 1024, 128 * 1024)
+                    .map_err(|e| e.to_string())?;
+            let digest = if args.len() == 5 {
+                index.verify_tensor_sha256(&mut reader, &args[3], &args[4])
+            } else {
+                index.sha256_tensor(&mut reader, &args[3])
+            }
+            .map_err(|e| e.to_string())?;
+            println!("tensor: {}", args[3]);
+            println!("sha256: {digest}");
+            println!("allocated chunk bytes: {}", reader.allocated_chunk_bytes());
+            println!("disk bytes read: {}", reader.disk_bytes_read());
+            println!("status: tensor byte stream verified locally; not model-execution parity");
+            Ok(())
+        }
+        Some("models") if args.len() == 4 && args[1] == "verify" => {
+            let mut reader = llmbridge_core::storage::BoundedLocalReader::open(
+                &args[2],
+                256 * 1024,
+                2 * 1024 * 1024,
+            )
+            .map_err(|e| e.to_string())?;
+            let digest = reader.verify_sha256(&args[3]).map_err(|e| e.to_string())?;
+            println!("sha256: {digest}");
+            println!("file bytes: {}", reader.file_bytes());
+            println!("allocated chunk bytes: {}", reader.allocated_chunk_bytes());
+            println!("disk bytes read: {}", reader.disk_bytes_read());
+            println!("status: entire local file SHA-256 verified with bounded reusable buffer; not an executable model proof");
             Ok(())
         }
         Some("models") if args.len() == 3 && args[1] == "inspect" => {
@@ -68,8 +140,14 @@ fn chat(args: &[String]) -> Result<(), String> {
     let mut max_tokens = 16u32;
     let mut ctx = 128u32;
     let mut threads = 2i32;
+    let mut show_metrics = false;
     let mut pos = 1usize;
     while pos < args.len() {
+        if args[pos] == "--metrics" {
+            show_metrics = true;
+            pos += 1;
+            continue;
+        }
         if args[pos] == "--stream" {
             pos += 1;
             continue;
@@ -134,6 +212,19 @@ fn chat(args: &[String]) -> Result<(), String> {
             handle.write_all(bytes).and_then(|_| handle.flush()).is_ok()
         },
     );
+
+    if show_metrics {
+        let usage = hardware::process_memory();
+        // VmHWM is a process-lifetime peak; the other values are post-run samples.
+        eprintln!(
+            "LLMBRIDGE_MEMORY {{\"peak_rss_bytes\":{},\"rss_after_run_bytes\":{},\"pss_after_run_bytes\":{},\"cgroup_current_after_run_bytes\":{},\"cgroup_limit_bytes\":{}}}",
+            json_number(usage.peak_rss_bytes),
+            json_number(usage.rss_bytes),
+            json_number(usage.pss_bytes),
+            json_number(usage.cgroup_current_bytes),
+            json_number(usage.cgroup_limit_bytes)
+        );
+    }
     writeln!(handle).map_err(|e| format!("stdout error: {e}"))?;
     generated
 }

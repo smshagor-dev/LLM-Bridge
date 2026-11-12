@@ -6,6 +6,9 @@ license.workspace = true
 [features]
 default = []
 native = []
+[dependencies]
+sha2 = "=0.10.9"
+
 [build-dependencies]
 cmake = "0.1.54"
 
