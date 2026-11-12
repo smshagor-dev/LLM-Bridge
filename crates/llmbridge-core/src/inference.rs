@@ -460,6 +460,29 @@ pub fn q8_0_matvec_with_budget(
     )
 }
 
+/// Run the bounded Q8_0 operator behind a cooperative process/cgroup
+/// memory admission boundary. The growth estimate is deliberately the full
+/// workspace budget, not a claim about actual resident memory usage.
+/// This is not a hard RSS limit and does not cover other inference operators.
+pub fn q8_0_matvec_with_memory_limits(
+    index: &GgufTensorIndex,
+    reader: &mut BoundedLocalReader,
+    tensor_name: &str,
+    activation: &[f32],
+    cancelled: &AtomicBool,
+    workspace_budget_bytes: usize,
+    limits: crate::runtime_memory::RuntimeMemoryLimits,
+    reserve_bytes: u64,
+) -> Result<Vec<f32>, String> {
+    let growth_bytes = u64::try_from(workspace_budget_bytes)
+        .map_err(|_| "workspace budget exceeds u64".to_string())?;
+    limits.around_growth(growth_bytes, reserve_bytes, || {
+        q8_0_matvec_with_budget(
+            index, reader, tensor_name, activation, cancelled, workspace_budget_bytes,
+        ).map_err(|message| std::io::Error::new(std::io::ErrorKind::Other, message))
+    }).map_err(|error| error.to_string())
+}
+
 fn q8_0_matvec_internal(
     index: &GgufTensorIndex,
     reader: &mut BoundedLocalReader,
