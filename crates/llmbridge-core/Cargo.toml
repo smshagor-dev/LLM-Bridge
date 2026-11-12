@@ -11,3 +11,7 @@ sha2 = "=0.10.9"
 
 [build-dependencies]
 cmake = "0.1.54"
+
+[[example]]
+name = "model_contract"
+required-features = ["native"]

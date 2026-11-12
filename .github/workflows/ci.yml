@@ -55,6 +55,11 @@ jobs:
             models/stories15M-q8_0.gguf > benchmarks/results/native_range_probe.txt
           grep 'native tensor count: 57' benchmarks/results/native_range_probe.txt
           grep 'native GGUF metadata agrees with Rust index' benchmarks/results/native_range_probe.txt
+
+      - name: Verify real-model cancellation and oversized-prompt refusal
+        run: cargo run --release -p llmbridge-core --features native --example model_contract -- models/stories15M-q8_0.gguf
+      - name: Record three real end-to-end CPU baseline trials with RSS metrics
+        run: python3 benchmarks/run_cpu_baseline.py --binary ./target/release/llmbridge --model models/stories15M-q8_0.gguf --output benchmarks/results/cpu_baseline.json --repetitions 3
       - name: Save raw parity evidence
         if: always()
         uses: actions/upload-artifact@v4
