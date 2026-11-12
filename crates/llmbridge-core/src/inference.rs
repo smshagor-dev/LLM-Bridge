@@ -401,6 +401,62 @@ fn q8_0_matvec_internal(
 mod tests {
     use super::*;
 
+
+    #[test]
+    fn q8_tensor_larger_than_operator_workspace_executes_with_bounded_reads() {
+        use std::io::Write;
+        use std::sync::atomic::AtomicU64;
+        static SERIAL: AtomicU64 = AtomicU64::new(0);
+        const ROWS: u64 = 32_768;
+        const ROW_BYTES: u64 = 34;
+        const BUDGET: usize = 256 * 1024;
+        let path = std::env::temp_dir().join(format!(
+            "llmbridge-large-tensor-{}-{}",
+            std::process::id(),
+            SERIAL.fetch_add(1, Ordering::Relaxed),
+        ));
+        let mut file = std::fs::File::create(&path).unwrap();
+        let mut header = b"GGUF".to_vec();
+        header.extend_from_slice(&3u32.to_le_bytes());
+        header.extend_from_slice(&1u64.to_le_bytes());
+        header.extend_from_slice(&0u64.to_le_bytes());
+        let name = "large.weight";
+        header.extend_from_slice(&(name.len() as u64).to_le_bytes());
+        header.extend_from_slice(name.as_bytes());
+        header.extend_from_slice(&2u32.to_le_bytes());
+        header.extend_from_slice(&32u64.to_le_bytes());
+        header.extend_from_slice(&ROWS.to_le_bytes());
+        header.extend_from_slice(&8u32.to_le_bytes());
+        header.extend_from_slice(&0u64.to_le_bytes());
+        while header.len() % 32 != 0 {
+            header.push(0);
+        }
+        file.write_all(&header).unwrap();
+        let mut row = [0u8; ROW_BYTES as usize];
+        row[0] = 0x00;
+        row[1] = 0x38; // F16 0.5
+        for (i, quant) in row[2..].iter_mut().enumerate() {
+            *quant = (i + 1) as u8;
+        }
+        // Do not allocate all checkpoint weights in the test generator.
+        for _ in 0..ROWS {
+            file.write_all(&row).unwrap();
+        }
+        drop(file);
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        assert!(index.file_bytes > BUDGET as u64);
+        let mut reader = BoundedLocalReader::open(&path, 64, 128).unwrap();
+        let cancel = AtomicBool::new(false);
+        let output = q8_0_matvec_with_budget(
+            &index, &mut reader, name, &[1.0f32; 32], &cancel, BUDGET,
+        ).unwrap();
+        assert_eq!(output.len(), ROWS as usize);
+        assert!(output.iter().all(|&x| x == 264.0));
+        assert_eq!(reader.disk_bytes_read(), ROWS * ROW_BYTES);
+        assert_eq!(reader.allocated_chunk_bytes(), 64);
+        std::fs::remove_file(path).unwrap();
+    }
+
     #[test]
     fn q8_0_operator_computes_from_real_file_bytes_and_refuses_cancel() {
         use std::io::Write;

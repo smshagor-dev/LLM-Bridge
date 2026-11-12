@@ -43,3 +43,10 @@ I/O. A bare hash without a trusted reference provides no authenticity.
 
 Example:
     llmbridge models tensor-matvec model.gguf blk.0.attn_q.weight 0123...64-hex
+
+A memory-budget regression constructs a real GGUF with 32,768 Q8_0 rows,
+writing each 34-byte row directly to disk. The on-disk tensor is over 1 MiB;
+the **operator-managed** working-set budget is only 256 KiB. The native
+operator computes and checks every row with a 64-byte Rust read buffer.
+This demonstrates weight streaming for a single operator but does NOT cap
+full process RSS or demonstrate end-to-end model token generation.
