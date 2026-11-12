@@ -6,3 +6,4 @@ pub mod models;
 
 pub mod storage;
 pub mod memory_plan;
+pub mod tensor_cache;
