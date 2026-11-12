@@ -139,6 +139,25 @@ impl BoundedLocalReader {
         Ok(&self.buffer[..bytes])
     }
 
+    /// Hash with cooperative cancellation checked before each bounded read.
+    /// A cancelled pass returns Interrupted and never yields a partial digest.
+    pub fn sha256_cancellable(&mut self, mut cancelled: impl FnMut() -> bool) -> io::Result<String> {
+        let mut hash = Sha256::new();
+        let mut offset = 0u64;
+        loop {
+            if cancelled() {
+                return Err(io::Error::new(io::ErrorKind::Interrupted, "model hash cancelled"));
+            }
+            if offset == self.file_len {
+                break;
+            }
+            let bytes = (self.file_len - offset).min(self.buffer.len() as u64) as usize;
+            hash.update(self.read_range(offset, bytes)?);
+            offset += bytes as u64;
+        }
+        Ok(format!("{:x}", hash.finalize()))
+    }
+
     /// Whole-file hash verified with bounded chunks. Does not imply signed manifest validation.
     pub fn sha256(&mut self) -> io::Result<String> {
         let mut hash = Sha256::new();
@@ -184,6 +203,23 @@ mod tests {
         ));
         File::create(&path).unwrap().write_all(bytes).unwrap();
         path
+    }
+
+    #[test]
+    fn cancelled_hash_stops_before_next_chunk() {
+        let path = fixture(b"abcdef");
+        let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
+        let mut checks = 0;
+        let err = reader.sha256_cancellable(|| {
+            checks += 1;
+            checks == 2
+        }).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(reader.disk_bytes_read(), 2);
+        assert_eq!(checks, 2);
+        let digest = reader.sha256_cancellable(|| false).unwrap();
+        assert_eq!(digest.len(), 64);
+        fs::remove_file(path).unwrap();
     }
 
     #[test]
