@@ -6,11 +6,13 @@ Run from the repository root:
 """
 import importlib.util
 import struct
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 _SCRIPT = Path(__file__).with_name("check_tensor_matvec.py")
+sys.path.insert(0, str(_SCRIPT.parent))
 _SPEC = importlib.util.spec_from_file_location("check_tensor_matvec", _SCRIPT)
 _MODULE = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_MODULE)
