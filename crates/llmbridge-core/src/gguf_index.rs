@@ -316,8 +316,12 @@ impl GgufTensorIndex {
             }
         }
 
-        if SourceIdentity::from_metadata(&reader.file.get_ref().metadata()?) != reader.source_identity {
-            return Err(invalid("GGUF file changed during tensor index construction"));
+        if SourceIdentity::from_metadata(&reader.file.get_ref().metadata()?)
+            != reader.source_identity
+        {
+            return Err(invalid(
+                "GGUF file changed during tensor index construction",
+            ));
         }
         Ok(Self {
             path: path.to_path_buf(),
@@ -375,9 +379,10 @@ impl GgufTensorIndex {
     where
         F: FnMut(&[u8]) -> io::Result<()>,
     {
-
         if reader.identity() != &self.source_identity {
-            return Err(invalid("indexed tensor source identity changed before streaming"));
+            return Err(invalid(
+                "indexed tensor source identity changed before streaming",
+            ));
         }
         let tensor = self.tensor(name).ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, "tensor not found in indexed GGUF")
@@ -522,7 +527,6 @@ mod tests {
         std::fs::remove_file(path).unwrap();
     }
 
-
     #[cfg(unix)]
     #[test]
     fn reject_same_size_source_replacement_with_new_inode() {
@@ -531,7 +535,9 @@ mod tests {
         let replacement = write(&fixture(8, 0, 96));
         std::fs::rename(&replacement, &path).unwrap();
         let mut reader = BoundedLocalReader::open(&path, 16, 32).unwrap();
-        assert!(index.stream_tensor(&mut reader, "final.weight", |_| Ok(())).is_err());
+        assert!(index
+            .stream_tensor(&mut reader, "final.weight", |_| Ok(()))
+            .is_err());
         std::fs::remove_file(path).unwrap();
     }
 

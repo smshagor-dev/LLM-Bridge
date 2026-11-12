@@ -29,7 +29,6 @@ impl SourceIdentity {
     }
 }
 
-
 /// Local range reader with one reusable, preallocated read buffer.
 /// Bound applies to its explicit buffer only; OS page cache and process RSS are NOT capped.
 pub struct BoundedLocalReader {
@@ -79,7 +78,6 @@ impl BoundedLocalReader {
             disk_bytes_read: 0,
         })
     }
-
 
     pub fn file_bytes(&self) -> u64 {
         self.file_len

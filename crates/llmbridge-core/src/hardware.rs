@@ -34,11 +34,11 @@ pub fn profile() -> Hardware {
             (total, None) => total,
         };
         let effective_available = limit_by_cgroup(available, cg_limit, cg_current);
-        return Hardware {
+        Hardware {
             logical_cpus,
             total_ram_bytes: effective_total,
             available_ram_bytes: effective_available,
-        };
+        }
     }
     #[cfg(not(target_os = "linux"))]
     Hardware {
@@ -66,13 +66,13 @@ pub fn process_memory() -> ProcessMemory {
         let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
         let rollup = std::fs::read_to_string("/proc/self/smaps_rollup").unwrap_or_default();
         let (cg_limit, cg_current) = read_cgroup_v2();
-        return ProcessMemory {
+        ProcessMemory {
             rss_bytes: parse_meminfo(&status, "VmRSS:"),
             peak_rss_bytes: parse_meminfo(&status, "VmHWM:"),
             pss_bytes: parse_meminfo(&rollup, "Pss:"),
             cgroup_current_bytes: cg_current,
             cgroup_limit_bytes: cg_limit,
-        };
+        }
     }
     #[cfg(not(target_os = "linux"))]
     ProcessMemory::default()
@@ -123,7 +123,7 @@ fn cgroup_directory() -> Option<std::path::PathBuf> {
     let membership = std::fs::read_to_string("/proc/self/cgroup").ok()?;
     let hierarchy = membership.lines().find_map(|line| {
         let mut parts = line.splitn(3, ':');
-        if parts.next()? == "0" && parts.next()? == "" {
+        if parts.next()? == "0" && parts.next()?.is_empty() {
             parts.next()
         } else {
             None
