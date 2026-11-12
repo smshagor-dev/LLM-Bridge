@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::io::{self, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_METADATA_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_TENSORS: u64 = 65_536;
@@ -374,6 +375,22 @@ impl GgufTensorIndex {
         &self,
         reader: &mut BoundedLocalReader,
         name: &str,
+        consume: F,
+    ) -> io::Result<u64>
+    where
+        F: FnMut(&[u8]) -> io::Result<()>,
+    {
+        self.stream_tensor_cancellable(reader, name, &AtomicBool::new(false), consume)
+    }
+
+    /// Cooperative cancellation is checked before the first I/O and between chunks.
+    /// Cancellation is not transactional: consumers may already have received prior chunks.
+    /// The caller must discard incomplete tensors and must not execute them.
+    pub fn stream_tensor_cancellable<F>(
+        &self,
+        reader: &mut BoundedLocalReader,
+        name: &str,
+        cancelled: &AtomicBool,
         mut consume: F,
     ) -> io::Result<u64>
     where
@@ -391,13 +408,18 @@ impl GgufTensorIndex {
         let end = offset
             .checked_add(tensor.byte_len)
             .ok_or_else(|| invalid("tensor offset overflow"))?;
-        while offset < end {
+        loop {
+            if cancelled.load(Ordering::Acquire) {
+                return Err(io::Error::new(io::ErrorKind::Interrupted, "tensor stream cancelled"));
+            }
+            if offset == end {
+                return Ok(tensor.byte_len);
+            }
             let count = (end - offset).min(reader.allocated_chunk_bytes() as u64) as usize;
             let chunk = reader.read_range(offset, count)?;
             consume(chunk)?;
             offset += count as u64;
         }
-        Ok(tensor.byte_len)
     }
 }
 
@@ -538,6 +560,28 @@ mod tests {
         assert!(index
             .stream_tensor(&mut reader, "final.weight", |_| Ok(()))
             .is_err());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn cancellation_prevents_io_and_stops_between_chunks() {
+        let path = write(&fixture(8, 0, 96));
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 8, 16).unwrap();
+        let stop = AtomicBool::new(true);
+        let err = index.stream_tensor_cancellable(&mut reader, "layers.0.weight", &stop, |_| Ok(())).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(reader.disk_bytes_read(), 0);
+        stop.store(false, Ordering::Release);
+        let mut delivered = 0;
+        let err = index.stream_tensor_cancellable(&mut reader, "layers.0.weight", &stop, |chunk| {
+            delivered += chunk.len();
+            stop.store(true, Ordering::Release);
+            Ok(())
+        }).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(delivered, 8);
+        assert_eq!(reader.disk_bytes_read(), 8);
         std::fs::remove_file(path).unwrap();
     }
 
