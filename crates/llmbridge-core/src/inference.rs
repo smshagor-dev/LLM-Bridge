@@ -35,6 +35,18 @@ extern "C" {
         error: *mut c_char,
         error_capacity: usize,
     ) -> i32;
+    fn llmbridge_generate_cpu_polled(
+        path: *const c_char,
+        prompt: *const c_char,
+        context_tokens: u32,
+        max_tokens: u32,
+        threads: c_int,
+        callback: NativeCallback,
+        poll: extern "C" fn(*mut c_void) -> i32,
+        user_data: *mut c_void,
+        error: *mut c_char,
+        error_capacity: usize,
+    ) -> i32;
     fn llmbridge_generate_cpu(
         path: *const c_char,
         prompt: *const c_char,
@@ -113,6 +125,81 @@ pub fn generate<F: FnMut(&[u8]) -> bool>(
             Err(format!("native CPU inference failed: {msg}"))
         }
     }
+}
+
+
+struct PolledGeneration<'a, F> {
+    cancelled: &'a AtomicBool,
+    on_piece: F,
+}
+
+extern "C" fn poll_generation<F>(userdata: *mut c_void) -> i32 {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if userdata.is_null() {
+            return false;
+        }
+        let state = unsafe { &*(userdata.cast::<PolledGeneration<'_, F>>()) };
+        !state.cancelled.load(Ordering::Acquire)
+    }));
+    if matches!(result, Ok(true)) { 1 } else { 0 }
+}
+
+extern "C" fn dispatch_polled<F: FnMut(&[u8]) -> bool>(
+    data: *const c_char,
+    length: usize,
+    userdata: *mut c_void,
+) -> i32 {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if userdata.is_null() || data.is_null() || length > 1_048_576 {
+            return false;
+        }
+        let state = unsafe { &mut *(userdata.cast::<PolledGeneration<'_, F>>()) };
+        if state.cancelled.load(Ordering::Acquire) {
+            return false;
+        }
+        let piece = unsafe { slice::from_raw_parts(data.cast::<u8>(), length) };
+        (state.on_piece)(piece) && !state.cancelled.load(Ordering::Acquire)
+    }));
+    if matches!(result, Ok(true)) { 1 } else { 0 }
+}
+
+/// Cooperative native generation cancellation before loading and at decode
+/// boundaries. Does not interrupt an in-progress blocking load or prefill.
+pub fn generate_polled<F: FnMut(&[u8]) -> bool>(
+    model: &Path,
+    prompt: &str,
+    context_tokens: u32,
+    max_tokens: u32,
+    threads: i32,
+    cancelled: &AtomicBool,
+    on_piece: F,
+) -> Result<(), String> {
+    if cancelled.load(Ordering::Acquire) {
+        return Err("generation cancelled before native admission".into());
+    }
+    let model = CString::new(model.to_str().ok_or("non-UTF8 model path")?)
+        .map_err(|_| "invalid model path")?;
+    let prompt = CString::new(prompt).map_err(|_| "prompt contains NUL")?;
+    let abi = unsafe { llmbridge_abi_version() };
+    if abi != 1 {
+        return Err(format!("native ABI mismatch: expected 1, found {abi}"));
+    }
+    let mut state = PolledGeneration { cancelled, on_piece };
+    let mut error = [0 as c_char; 1024];
+    let status = unsafe {
+        llmbridge_generate_cpu_polled(
+            model.as_ptr(), prompt.as_ptr(), context_tokens, max_tokens, threads,
+            dispatch_polled::<F>, poll_generation::<F>,
+            (&mut state as *mut PolledGeneration<'_, F>).cast(),
+            error.as_mut_ptr(), error.len(),
+        )
+    };
+    if cancelled.load(Ordering::Acquire) || status == 2 {
+        return Err("generation cancelled".into());
+    }
+    if status == 0 { return Ok(()); }
+    let diagnostic = unsafe { CStr::from_ptr(error.as_ptr()) }.to_string_lossy();
+    Err(format!("native CPU inference failed: {diagnostic}"))
 }
 
 struct ReaderState<'a> {
@@ -535,6 +622,27 @@ mod tests {
         assert!(q8_0_matvec(&index, &mut reader, "weights", &[f32::NAN; 32], &cancel).is_err());
         assert!(q8_0_matvec(&index, &mut reader, "weights", &[1f32; 31], &cancel).is_err());
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn polled_generation_rejects_pre_cancel_without_token_delivery() {
+        let cancelled = AtomicBool::new(true);
+        let mut calls = 0;
+        let result = generate_polled(
+            Path::new("/llmbridge/nonexistent.gguf"), "hello", 128, 8, 1,
+            &cancelled, |_| { calls += 1; true },
+        );
+        assert!(result.unwrap_err().contains("cancelled"));
+        assert_eq!(calls, 0);
+    }
+
+    #[test]
+    fn polled_generation_preserves_invalid_model_error() {
+        let cancelled = AtomicBool::new(false);
+        assert!(generate_polled(
+            Path::new("/llmbridge/nonexistent.gguf"), "hello", 128, 8, 1,
+            &cancelled, |_| true,
+        ).is_err());
     }
 
     #[test]
