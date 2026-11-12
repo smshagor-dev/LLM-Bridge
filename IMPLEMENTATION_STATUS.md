@@ -16,6 +16,12 @@
 - Independent Python reference parser in CI now compares **actual** 15M GGUF tensor offsets and bounded stream hash; this new test has not yet passed.
 - CRITICAL: Rust index reader is **not connected to native llama.cpp model execution**. No full M2 out-of-core inference, enforced process RSS bound, 2GB host survival test or large-model proof.
 
+
+## Native storage API (new integration, CI pending)
+- Rust's bounded range reader now feeds the upstream ggml GGUF parser through a versioned C ABI callback; parser uses no_alloc=true and matches tensor count/data offset against the Rust index.
+- Added native-index-probe CLI and a real-model GitHub Actions regression job.
+- This **does not load tensor weights into the execution graph**. It does not establish an out-of-core model execution result or a process memory limit.
+
 ## Next
 - Complete real-checkpoint tensor parity CI, address bugs and add robust source pinning.
 - Integrate verified storage callbacks with native graph tensor acquisition and execute a checkpoint larger than its configured RAM budget under enforceable host controls. Measure RSS/PSS and compare logits/outputs.

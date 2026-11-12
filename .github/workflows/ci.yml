@@ -48,6 +48,13 @@ jobs:
             --model models/stories15M-q8_0.gguf \
             --binary ./target/release/llmbridge \
             --output benchmarks/results/tensor_index_parity.json
+
+      - name: Probe pinned GGUF through Rust bounded reads into native ggml parser
+        run: |
+          ./target/release/llmbridge models native-index-probe \
+            models/stories15M-q8_0.gguf > benchmarks/results/native_range_probe.txt
+          grep 'native tensor count: 57' benchmarks/results/native_range_probe.txt
+          grep 'native GGUF metadata agrees with Rust index' benchmarks/results/native_range_probe.txt
       - name: Save raw parity evidence
         if: always()
         uses: actions/upload-artifact@v4
