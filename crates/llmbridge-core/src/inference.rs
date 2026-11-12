@@ -233,6 +233,20 @@ pub fn q8_0_matvec(
     activation: &[f32],
     cancelled: &AtomicBool,
 ) -> Result<Vec<f32>, String> {
+    q8_0_matvec_with_budget(index, reader, tensor_name, activation, cancelled, 1024 * 1024)
+}
+
+/// Caps explicitly managed tensor-operator data (source buffer, input,
+/// output, native packed/dequantized row and reserved allocator overhead).
+/// This is not an OS-level RSS/cgroup limit or a graph-wide budget.
+pub fn q8_0_matvec_with_budget(
+    index: &GgufTensorIndex,
+    reader: &mut BoundedLocalReader,
+    tensor_name: &str,
+    activation: &[f32],
+    cancelled: &AtomicBool,
+    workspace_budget_bytes: usize,
+) -> Result<Vec<f32>, String> {
     if reader.identity() != &index.source_identity {
         return Err("indexed model source identity changed".to_string());
     }
@@ -256,8 +270,28 @@ pub fn q8_0_matvec(
     }
     let row_bytes = usize::try_from(region.byte_len / u64::from(rows))
         .map_err(|_| "tensor row does not fit address space")?;
-    if row_bytes > reader.allocated_chunk_bytes() || cancelled.load(Ordering::Acquire) {
-        return Err("operator scratch budget exceeded or request cancelled".to_string());
+    // Account for our explicitly managed buffers before making any I/O.
+    // Actual process RSS includes metadata, C++ runtime, allocator, OS
+    // page cache and other allocations and is NOT constrained by this check.
+    let operand_bytes = (columns as usize)
+        .checked_mul(std::mem::size_of::<f32>())
+        .ok_or("activation allocation size overflow")?;
+    let result_bytes = (rows as usize)
+        .checked_mul(std::mem::size_of::<f32>())
+        .ok_or("result allocation size overflow")?;
+    let scratch_bytes = reader
+        .allocated_chunk_bytes()
+        .checked_add(row_bytes)
+        .and_then(|sum| sum.checked_add(operand_bytes))
+        .and_then(|sum| sum.checked_add(operand_bytes))
+        .and_then(|sum| sum.checked_add(result_bytes))
+        .and_then(|sum| sum.checked_add(64 * 1024))
+        .ok_or("operator workspace arithmetic overflow")?;
+    if scratch_bytes > workspace_budget_bytes
+        || row_bytes > reader.allocated_chunk_bytes()
+        || cancelled.load(Ordering::Acquire)
+    {
+        return Err("operator workspace exceeds budget or request cancelled".to_string());
     }
     let mut output = vec![0f32; rows as usize];
     let mut state = ReaderState {
@@ -338,6 +372,10 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let actual = q8_0_matvec(&index, &mut reader, "weights", &[1f32; 32], &cancel).unwrap();
         assert_eq!(actual, vec![264.0, -264.0]);
+        assert_eq!(reader.disk_bytes_read(), 68);
+        assert!(q8_0_matvec_with_budget(
+            &index, &mut reader, "weights", &[1f32; 32], &cancel, 64
+        ).is_err());
         assert_eq!(reader.disk_bytes_read(), 68);
         cancel.store(true, Ordering::Release);
         assert!(q8_0_matvec(&index, &mut reader, "weights", &[1f32; 32], &cancel).is_err());
