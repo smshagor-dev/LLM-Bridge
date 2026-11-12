@@ -115,6 +115,48 @@ pub fn generate<F: FnMut(&[u8]) -> bool>(
     }
 }
 
+
+/**
+ * Cooperatively cancel native CPU token generation without crossing the FFI
+ * boundary. The native callback is synchronous; cancellation is observed
+ * before admission, at each emitted piece, and after native returns.
+ *
+ * This does not interrupt a long-running native prefill or bound RSS. A
+ * cancelled invocation never reports success, even if the native backend
+ * returns normally after observing a stopped callback.
+ */
+pub fn generate_cancellable<F: FnMut(&[u8]) -> bool>(
+    model: &Path,
+    prompt: &str,
+    context_tokens: u32,
+    max_tokens: u32,
+    threads: i32,
+    cancelled: &AtomicBool,
+    mut on_piece: F,
+) -> Result<(), String> {
+    if cancelled.load(Ordering::Acquire) {
+        return Err("generation cancelled before native admission".into());
+    }
+    let result = generate(
+        model,
+        prompt,
+        context_tokens,
+        max_tokens,
+        threads,
+        |piece| {
+            if cancelled.load(Ordering::Acquire) {
+                return false;
+            }
+            let keep_going = on_piece(piece);
+            keep_going && !cancelled.load(Ordering::Acquire)
+        },
+    );
+    if cancelled.load(Ordering::Acquire) {
+        return Err("generation cancelled".into());
+    }
+    result
+}
+
 struct ReaderState<'a> {
     reader: &'a mut BoundedLocalReader,
     failure: Option<String>,
@@ -585,6 +627,42 @@ mod tests {
         assert!(q8_0_matvec(&index, &mut reader, "weights", &[f32::NAN; 32], &cancel).is_err());
         assert!(q8_0_matvec(&index, &mut reader, "weights", &[1f32; 31], &cancel).is_err());
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn cancelled_generation_never_enters_native_runtime_or_calls_user_callback() {
+        let cancelled = AtomicBool::new(true);
+        let mut pieces = 0usize;
+        let result = generate_cancellable(
+            Path::new("/llmbridge/nonexistent.gguf"),
+            "hello",
+            128,
+            8,
+            1,
+            &cancelled,
+            |_| {
+                pieces += 1;
+                true
+            },
+        );
+        assert!(result.unwrap_err().contains("cancelled before native admission"));
+        assert_eq!(pieces, 0);
+    }
+
+    #[test]
+    fn cancellation_wrapper_preserves_native_failure() {
+        let cancelled = AtomicBool::new(false);
+        let result = generate_cancellable(
+            Path::new("/llmbridge/nonexistent.gguf"),
+            "hello",
+            128,
+            8,
+            1,
+            &cancelled,
+            |_| true,
+        );
+        assert!(result.is_err());
+        assert!(!cancelled.load(Ordering::Acquire));
     }
 
     #[test]
