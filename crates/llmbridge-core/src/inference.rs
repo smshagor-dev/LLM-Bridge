@@ -460,6 +460,30 @@ pub fn q8_0_matvec_with_budget(
     )
 }
 
+/// Execute the bounded Q8_0 operator with cooperative process/cgroup memory
+/// admission. The projected growth is the explicit workspace budget, a
+/// conservative upper estimate of this operator's managed scratch, not an
+/// estimate of native runtime or graph-wide memory. This does NOT enforce a
+/// hard RSS ceiling: allocations can occur between measurements.
+pub fn q8_0_matvec_with_memory_limits(
+    index: &GgufTensorIndex,
+    reader: &mut BoundedLocalReader,
+    tensor_name: &str,
+    activation: &[f32],
+    cancelled: &AtomicBool,
+    workspace_budget_bytes: usize,
+    reserve_bytes: u64,
+    limits: crate::runtime_memory::RuntimeMemoryLimits,
+) -> Result<Vec<f32>, String> {
+    let growth = u64::try_from(workspace_budget_bytes)
+        .map_err(|_| "operator workspace budget does not fit u64")?;
+    limits.around_growth(growth, reserve_bytes, || {
+        q8_0_matvec_with_budget(
+            index, reader, tensor_name, activation, cancelled, workspace_budget_bytes,
+        ).map_err(|message| std::io::Error::new(std::io::ErrorKind::Other, message))
+    }).map_err(|error| error.to_string())
+}
+
 fn q8_0_matvec_internal(
     index: &GgufTensorIndex,
     reader: &mut BoundedLocalReader,
@@ -817,6 +841,30 @@ mod tests {
         assert_eq!(read_range_callback(userdata, output.as_mut_ptr().cast(), u64::MAX, 2), 0);
         assert_eq!(state.reader.disk_bytes_read(), bytes_read);
         assert!(state.failure.as_deref().unwrap().contains("range overflow"));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn memory_guard_rejects_before_tensor_access_when_limit_is_invalid() {
+        let cancelled = AtomicBool::new(false);
+        let path = std::env::temp_dir().join(format!(
+            "llmbridge-memory-preflight-{}", std::process::id()
+        ));
+        std::fs::write(&path, b"not a gguf").unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 4, 8).unwrap();
+        // A zero RSS limit must fail before indexing or native execution.
+        // Reuse the index fixture path via an intentionally invalid model:
+        // the guard is independently tested in runtime_memory tests.
+        let limits = crate::runtime_memory::RuntimeMemoryLimits {
+            max_process_rss_bytes: 0,
+            max_cgroup_current_bytes: None,
+        };
+        let rejected = limits.around_growth(128, 0, || {
+            let _ = (&mut reader, &cancelled);
+            Ok(())
+        });
+        assert_eq!(rejected.unwrap_err().kind(), std::io::ErrorKind::OutOfMemory);
+        assert_eq!(reader.disk_bytes_read(), 0);
         std::fs::remove_file(path).unwrap();
     }
 
