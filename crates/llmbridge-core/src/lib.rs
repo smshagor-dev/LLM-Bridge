@@ -5,3 +5,5 @@ pub mod inference;
 pub mod models;
 
 pub mod storage;
+#[cfg(feature = "native")]
+pub mod tensor_batch;
