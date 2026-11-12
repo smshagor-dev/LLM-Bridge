@@ -122,11 +122,4 @@ mod tests {
         std::fs::remove_file(path).unwrap();
     }
 
-    #[test]
-    fn empty_batch_does_not_read_tensor_bytes() {
-        let cancelled = AtomicBool::new(true);
-        // The empty-batch contract is intentionally exercised in the fixture
-        // test above for actual model sources; cancellation is cooperative.
-        assert!(cancelled.load(Ordering::Acquire));
-    }
 }
