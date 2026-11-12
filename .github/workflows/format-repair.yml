@@ -1,0 +1,31 @@
+name: Repair Rust formatting on PR branch
+on:
+  push:
+    branches:
+      - correct-authenticated-tensor-io
+    paths:
+      - .github/workflows/format-repair.yml
+permissions:
+  contents: write
+jobs:
+  rustfmt-repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: correct-authenticated-tensor-io
+          persist-credentials: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Format complete Rust workspace and commit resulting changes
+        run: |
+          cargo fmt --all
+          cargo fmt --all -- --check
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -- '*.rs'
+            git commit -m "Apply rustfmt across Rust workspace"
+            git push origin HEAD:correct-authenticated-tensor-io
+          fi
