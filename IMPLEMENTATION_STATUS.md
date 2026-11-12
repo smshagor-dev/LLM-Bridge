@@ -1,22 +1,22 @@
+# LLM Bridge implementation status — 2026-11-12
 
-# LLM Bridge implementation status (2026-11-12)
+## M0 — validated
+- Repository inspected from empty state. Rust workspace, constrained GGUF header inspector, conservative Linux RAM admission, CI, documentation and third-party notices.
+- GitHub Actions 43114276598 and 43115094993: foundation fmt/no-default-features tests/clippy and native compilation passed.
 
-## M0 — verified in CI
-- Empty repo inspected, main initialized, feature branch and draft PR #1.
-- Workspace, GGUF header inspector, CPU hardware profile and admission, tests, benchmark process harness, CI.
-- GitHub Actions native compile and 10 initial tests passed on run 43113641423.
-- Foundation checks (fmt, no-default-features tests and clippy) passed on run 43114276598.
-- Local sandbox has no rustc/cargo or outbound github.com DNS; CI executes these checks.
+## M1 — tested CPU baseline, additional validation pending
+- Pinned llama.cpp v0.9.0 on CPU, Rust C ABI, raw prompt greedy decoding and streaming; no mandatory GPU/cloud.
+- Real 15M Q8 GGUF checksum and byte-for-byte independent upstream greedy reference parity passed on run 43114276598.
+- Follow-up live cancel/long prompt/3-run baseline validation added to PR #1; latest CI has an outstanding rustfmt issue in the new example (not a native inference failure).
 
-## M1 — native built, end-to-end GGUF parity pending
-- C++20 pinned llama.cpp v0.9.0 CPU kernels and Rust FFI; streaming greedy decode, cancellation, scoped cleanup, strict argument checking and model admission.
-- CLI doctor, hardware, models inspect, chat.
-- Native ABI and invalid-model unit tests passed. Real model parity job added and running independently.
-- No validated chat-template mode, numerical reference parity, time-to-first-token, RSS/PSS, or two-gigabyte hardware proof yet.
+## M2 — native-independent tensor I/O advancement; not complete
+- Bounded local read and actual streamed whole-file SHA-256 verified with unit tests on PR #2. Existing CI on f2ef7a38 passed.
+- New GGUF v2/v3 tensor index with limited verified ggml type layouts, strict metadata count/length caps, alignment checks, tensor names, shapes and exact byte offsets.
+- New tensor range streaming, per-tensor SHA-256, and CLI commands \`models tensor-index\` and \`models tensor-sha256\` (optional expected digest). Synthetic fixture tests cover exact offsets, corrupt/misaligned/overlapping/truncated inputs.
+- Independent Python reference parser in CI now compares **actual** 15M GGUF tensor offsets and bounded stream hash; this new test has not yet passed.
+- CRITICAL: Rust index reader is **not connected to native llama.cpp model execution**. No full M2 out-of-core inference, enforced process RSS bound, 2GB host survival test or large-model proof.
 
-## Early M2 slice (separate stacked PR branch)
-- Bounded local file range reader, real SHA-256 verification and CLI integration. Tests pending.
-- **Not** wired to inference graph; no out-of-core model inference or strict process memory limit proven.
-
-## M2–M11
-Full out-of-core, hard RSS budget, remote connectors, GPU, MoE, API, desktop and huge-model research remain unimplemented. No fabricated performance claims.
+## Next
+- Complete real-checkpoint tensor parity CI, address bugs and add robust source pinning.
+- Integrate verified storage callbacks with native graph tensor acquisition and execute a checkpoint larger than its configured RAM budget under enforceable host controls. Measure RSS/PSS and compare logits/outputs.
+- Continue M3 and beyond only after sound M2 evidence. No fabricated throughput, universality or 550B claims.

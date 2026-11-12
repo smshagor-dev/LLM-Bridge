@@ -41,6 +41,13 @@ jobs:
           ./target/release/llmbridge chat models/stories15M-q8_0.gguf --prompt "The sky is" --max-tokens 16 --ctx 128 --threads 2 --stream > benchmarks/results/bridge.txt
           ./reference-build/bin/llama-simple -m models/stories15M-q8_0.gguf -n 16 -ngl 0 "The sky is" > benchmarks/results/reference.txt
           python3 scripts/check_m1_parity.py --ours benchmarks/results/bridge.txt --reference benchmarks/results/reference.txt --output benchmarks/results/parity.json
+
+      - name: Validate real GGUF tensor ranges and streaming SHA-256 against independent Python parser
+        run: |
+          python3 scripts/check_tensor_regions.py \
+            --model models/stories15M-q8_0.gguf \
+            --binary ./target/release/llmbridge \
+            --output benchmarks/results/tensor_index_parity.json
       - name: Save raw parity evidence
         if: always()
         uses: actions/upload-artifact@v4
