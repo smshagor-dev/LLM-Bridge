@@ -61,7 +61,25 @@ impl MetadataReader {
             ));
         }
         let file = File::open(path)?;
-        let source_identity = SourceIdentity::from_metadata(&file.metadata()?);
+        let opened = file.metadata()?;
+        let source_identity = SourceIdentity::from_metadata(&opened);
+        // The path can be replaced between symlink_metadata and File::open.
+        // Check both the opened descriptor and the current path before parsing.
+        if !opened.is_file()
+            || source_identity != SourceIdentity::from_metadata(&metadata)
+            || std::fs::symlink_metadata(path)
+                .map(|current| {
+                    current.file_type().is_symlink()
+                        || !current.is_file()
+                        || SourceIdentity::from_metadata(&current) != source_identity
+                })
+                .unwrap_or(true)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "GGUF metadata source changed during open",
+            ));
+        }
         let file_bytes = source_identity.file_bytes;
         Ok(Self {
             file: BufReader::with_capacity(64 * 1024, file),
