@@ -247,6 +247,8 @@ struct ReaderState<'a> {
     reader: &'a mut BoundedLocalReader,
     failure: Option<String>,
     cancelled: Option<&'a AtomicBool>,
+    /// Restrict native operator callbacks to the selected tensor payload.
+    allowed_range: Option<(u64, u64)>,
 }
 
 /// A panic must never cross the C ABI; a failed range fetch is reported as a
@@ -270,6 +272,22 @@ extern "C" fn read_range_callback(
         {
             state.failure = Some("tensor operator cancelled".to_string());
             return 0;
+        }
+        if let Some((start, end)) = state.allowed_range {
+            let request_end = match u64::try_from(requested)
+                .ok()
+                .and_then(|length| file_offset.checked_add(length))
+            {
+                Some(end) => end,
+                None => {
+                    state.failure = Some("native tensor callback range overflow".into());
+                    return 0;
+                }
+            };
+            if file_offset < start || request_end > end {
+                state.failure = Some("native tensor callback escaped selected tensor".into());
+                return 0;
+            }
         }
         match state.reader.read_range(file_offset, requested) {
             Ok(chunk) => {
@@ -308,6 +326,7 @@ pub fn probe_indexed_gguf(
         reader,
         failure: None,
         cancelled: None,
+        allowed_range: None,
     };
     let mut count = 0u64;
     let mut offset = 0u64;
@@ -519,6 +538,7 @@ fn q8_0_matvec_internal(
         reader,
         failure: None,
         cancelled: Some(cancelled),
+        allowed_range: Some((region.file_offset, region.file_offset + region.byte_len)),
     };
     let mut diagnostic = [0 as c_char; 1024];
     // SAFETY: all borrowed buffers and callback state outlive this synchronous
@@ -770,6 +790,34 @@ mod tests {
             Path::new("/llmbridge/nonexistent.gguf"), "hello", 128, 8, 1,
             &cancelled, |_| true,
         ).is_err());
+    }
+
+    #[test]
+    fn native_range_callback_cannot_read_adjacent_tensor_or_overflow() {
+        use std::io::Write;
+        let path = std::env::temp_dir().join(format!(
+            "llmbridge-native-range-{}", std::process::id()
+        ));
+        std::fs::File::create(&path).unwrap()
+            .write_all(b"prefixTENSORsuffix").unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 8, 16).unwrap();
+        let mut state = ReaderState {
+            reader: &mut reader,
+            failure: None,
+            cancelled: None,
+            allowed_range: Some((6, 12)),
+        };
+        let mut output = [0u8; 8];
+        let userdata = (&mut state as *mut ReaderState<'_>).cast();
+        assert_eq!(read_range_callback(userdata, output.as_mut_ptr().cast(), 6, 6), 6);
+        assert_eq!(&output[..6], b"TENSOR");
+        let bytes_read = state.reader.disk_bytes_read();
+        assert_eq!(read_range_callback(userdata, output.as_mut_ptr().cast(), 5, 2), 0);
+        assert_eq!(read_range_callback(userdata, output.as_mut_ptr().cast(), 11, 2), 0);
+        assert_eq!(read_range_callback(userdata, output.as_mut_ptr().cast(), u64::MAX, 2), 0);
+        assert_eq!(state.reader.disk_bytes_read(), bytes_read);
+        assert!(state.failure.as_deref().unwrap().contains("range overflow"));
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
