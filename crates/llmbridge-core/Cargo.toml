@@ -8,3 +8,7 @@ default = []
 native = []
 [build-dependencies]
 cmake = "0.1.54"
+
+[[example]]
+name = "model_contract"
+required-features = ["native"]
