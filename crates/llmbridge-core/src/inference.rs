@@ -233,7 +233,14 @@ pub fn q8_0_matvec(
     activation: &[f32],
     cancelled: &AtomicBool,
 ) -> Result<Vec<f32>, String> {
-    q8_0_matvec_with_budget(index, reader, tensor_name, activation, cancelled, 1024 * 1024)
+    q8_0_matvec_with_budget(
+        index,
+        reader,
+        tensor_name,
+        activation,
+        cancelled,
+        1024 * 1024,
+    )
 }
 
 /// Caps explicitly managed tensor-operator data (source buffer, input,
@@ -373,9 +380,10 @@ mod tests {
         let actual = q8_0_matvec(&index, &mut reader, "weights", &[1f32; 32], &cancel).unwrap();
         assert_eq!(actual, vec![264.0, -264.0]);
         assert_eq!(reader.disk_bytes_read(), 68);
-        assert!(q8_0_matvec_with_budget(
-            &index, &mut reader, "weights", &[1f32; 32], &cancel, 64
-        ).is_err());
+        assert!(
+            q8_0_matvec_with_budget(&index, &mut reader, "weights", &[1f32; 32], &cancel, 64)
+                .is_err()
+        );
         assert_eq!(reader.disk_bytes_read(), 68);
         cancel.store(true, Ordering::Release);
         assert!(q8_0_matvec(&index, &mut reader, "weights", &[1f32; 32], &cancel).is_err());
