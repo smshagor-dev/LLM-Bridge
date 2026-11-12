@@ -10,7 +10,15 @@ extern "C" {
 
 /* Must return 1 to continue or 0 to cancel. token bytes need not be valid UTF-8 individually. */
 typedef int32_t (*llmbridge_token_callback)(const char *bytes, size_t size, void *userdata);
+typedef int32_t (*llmbridge_cancel_poll)(void *userdata);
 uint32_t llmbridge_abi_version(void);
+/* Additive ABI v1 entry point: poll returns 1 to continue, 0 to cancel.
+ * Poll is synchronous and invoked before loading, before prefill and before
+ * each decode step. It cannot interrupt a single blocking native operation. */
+int32_t llmbridge_generate_cpu_polled(const char *model_path, const char *prompt,
+    uint32_t context_tokens, uint32_t max_tokens, int32_t threads,
+    llmbridge_token_callback callback, llmbridge_cancel_poll poll,
+    void *userdata, char *error, size_t error_capacity);
 /* Returns 0 on successful completion, 2 on cancellation and -1 on error.
  * No exceptions cross this ABI. All inputs are borrowed for call duration.
  * Error buffer is NUL-terminated if error_capacity > 0. */

@@ -61,7 +61,25 @@ impl MetadataReader {
             ));
         }
         let file = File::open(path)?;
-        let source_identity = SourceIdentity::from_metadata(&file.metadata()?);
+        let opened = file.metadata()?;
+        let source_identity = SourceIdentity::from_metadata(&opened);
+        // The path can be replaced between symlink_metadata and File::open.
+        // Check both the opened descriptor and the current path before parsing.
+        if !opened.is_file()
+            || source_identity != SourceIdentity::from_metadata(&metadata)
+            || std::fs::symlink_metadata(path)
+                .map(|current| {
+                    current.file_type().is_symlink()
+                        || !current.is_file()
+                        || SourceIdentity::from_metadata(&current) != source_identity
+                })
+                .unwrap_or(true)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "GGUF metadata source changed during open",
+            ));
+        }
         let file_bytes = source_identity.file_bytes;
         Ok(Self {
             file: BufReader::with_capacity(64 * 1024, file),
@@ -345,6 +363,46 @@ impl GgufTensorIndex {
         Ok(format!("{:x}", hash.finalize()))
     }
 
+    /// Hash only the indexed tensor region with cooperative cancellation.
+    /// The digest is returned only after every byte has been consumed; on
+    /// cancellation, the partial hash is discarded. The expected digest must
+    /// still be authenticated independently by the caller.
+    pub fn sha256_tensor_cancellable(
+        &self,
+        reader: &mut BoundedLocalReader,
+        name: &str,
+        cancelled: &AtomicBool,
+    ) -> io::Result<String> {
+        let mut hash = Sha256::new();
+        self.stream_tensor_cancellable(reader, name, cancelled, |chunk| {
+            hash.update(chunk);
+            Ok(())
+        })?;
+        Ok(format!("{:x}", hash.finalize()))
+    }
+
+    /// Compare an indexed tensor against a trusted digest, aborting promptly
+    /// between bounded reads. No digest is returned for partial input.
+    pub fn verify_tensor_sha256_cancellable(
+        &self,
+        reader: &mut BoundedLocalReader,
+        name: &str,
+        expected: &str,
+        cancelled: &AtomicBool,
+    ) -> io::Result<String> {
+        if expected.len() != 64 || !expected.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "tensor digest must be 64 hex digits",
+            ));
+        }
+        let actual = self.sha256_tensor_cancellable(reader, name, cancelled)?;
+        if !actual.eq_ignore_ascii_case(expected) {
+            return Err(invalid("GGUF tensor SHA-256 mismatch"));
+        }
+        Ok(actual)
+    }
+
     /// Rejects streamed tensor data that fails its caller-supplied integrity digest.
     pub fn verify_tensor_sha256(
         &self,
@@ -589,6 +647,47 @@ mod tests {
         assert_eq!(err.kind(), io::ErrorKind::Interrupted);
         assert_eq!(delivered, 8);
         assert_eq!(reader.disk_bytes_read(), 8);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn tensor_digest_cancellation_is_bounded_and_never_returns_partial_hash() {
+        let path = write(&fixture(8, 0, 96));
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 8, 16).unwrap();
+        let stop = AtomicBool::new(true);
+        let expected = format!("{:x}", Sha256::digest([0xA5; 68]));
+        let error = index
+            .verify_tensor_sha256_cancellable(
+                &mut reader,
+                "layers.0.weight",
+                &expected,
+                &stop,
+            )
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(reader.disk_bytes_read(), 0);
+        stop.store(false, Ordering::Release);
+        assert_eq!(
+            index
+                .verify_tensor_sha256_cancellable(
+                    &mut reader,
+                    "layers.0.weight",
+                    &expected,
+                    &stop,
+                )
+                .unwrap(),
+            expected
+        );
+        assert_eq!(reader.disk_bytes_read(), 68);
+        assert!(index
+            .verify_tensor_sha256_cancellable(
+                &mut reader,
+                "layers.0.weight",
+                &"0".repeat(64),
+                &stop,
+            )
+            .is_err());
         std::fs::remove_file(path).unwrap();
     }
 
