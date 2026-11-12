@@ -128,6 +128,47 @@ pub fn generate<F: FnMut(&[u8]) -> bool>(
 }
 
 
+/**
+ * Cooperatively cancel native CPU token generation without crossing the FFI
+ * boundary. The native callback is synchronous; cancellation is observed
+ * before admission, at each emitted piece, and after native returns.
+ *
+ * This does not interrupt a long-running native prefill or bound RSS. A
+ * cancelled invocation never reports success, even if the native backend
+ * returns normally after observing a stopped callback.
+ */
+pub fn generate_cancellable<F: FnMut(&[u8]) -> bool>(
+    model: &Path,
+    prompt: &str,
+    context_tokens: u32,
+    max_tokens: u32,
+    threads: i32,
+    cancelled: &AtomicBool,
+    mut on_piece: F,
+) -> Result<(), String> {
+    if cancelled.load(Ordering::Acquire) {
+        return Err("generation cancelled before native admission".into());
+    }
+    let result = generate(
+        model,
+        prompt,
+        context_tokens,
+        max_tokens,
+        threads,
+        |piece| {
+            if cancelled.load(Ordering::Acquire) {
+                return false;
+            }
+            let keep_going = on_piece(piece);
+            keep_going && !cancelled.load(Ordering::Acquire)
+        },
+    );
+    if cancelled.load(Ordering::Acquire) {
+        return Err("generation cancelled".into());
+    }
+    result
+}
+
 struct PolledGeneration<'a, F> {
     cancelled: &'a AtomicBool,
     on_piece: F,
@@ -349,6 +390,31 @@ pub fn q8_0_matvec_verified(
         activation,
         cancelled,
         1024 * 1024,
+        Some(expected_sha256),
+    )
+}
+
+/// Execute an authenticated Q8_0 tensor while enforcing a caller-provided
+/// workspace budget. Authentication and workspace admission both happen
+/// before native execution; a failed budget check performs no tensor I/O.
+/// This does not enforce a process-wide RSS limit or prevent in-place file
+/// mutation between verification and computation.
+pub fn q8_0_matvec_verified_with_budget(
+    index: &GgufTensorIndex,
+    reader: &mut BoundedLocalReader,
+    tensor_name: &str,
+    activation: &[f32],
+    cancelled: &AtomicBool,
+    expected_sha256: &str,
+    workspace_budget_bytes: usize,
+) -> Result<Vec<f32>, String> {
+    q8_0_matvec_internal(
+        index,
+        reader,
+        tensor_name,
+        activation,
+        cancelled,
+        workspace_budget_bytes,
         Some(expected_sha256),
     )
 }
@@ -588,6 +654,19 @@ mod tests {
                 .is_err()
         );
         assert_eq!(reader.disk_bytes_read(), 68);
+        // Authenticated execution must not bypass the explicit workspace
+        // admission check or read any bytes when admission is denied.
+        assert!(q8_0_matvec_verified_with_budget(
+            &index,
+            &mut reader,
+            "weights",
+            &[1f32; 32],
+            &cancel,
+            &"0".repeat(64),
+            64,
+        )
+        .is_err());
+        assert_eq!(reader.disk_bytes_read(), 68);
         assert!(q8_0_matvec_verified(
             &index,
             &mut reader,
@@ -615,13 +694,61 @@ mod tests {
         .unwrap();
         assert_eq!(verified, vec![264.0, -264.0]);
         assert_eq!(reader.disk_bytes_read(), 272);
+        let bounded_verified = q8_0_matvec_verified_with_budget(
+            &index,
+            &mut reader,
+            "weights",
+            &[1f32; 32],
+            &cancel,
+            &digest,
+            256 * 1024,
+        )
+        .unwrap();
+        assert_eq!(bounded_verified, verified);
+        assert_eq!(reader.disk_bytes_read(), 408);
         cancel.store(true, Ordering::Release);
         assert!(q8_0_matvec(&index, &mut reader, "weights", &[1f32; 32], &cancel).is_err());
-        assert_eq!(reader.disk_bytes_read(), 272);
+        assert_eq!(reader.disk_bytes_read(), 408);
         cancel.store(false, Ordering::Release);
         assert!(q8_0_matvec(&index, &mut reader, "weights", &[f32::NAN; 32], &cancel).is_err());
         assert!(q8_0_matvec(&index, &mut reader, "weights", &[1f32; 31], &cancel).is_err());
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn cancelled_generation_never_enters_native_runtime_or_calls_user_callback() {
+        let cancelled = AtomicBool::new(true);
+        let mut pieces = 0usize;
+        let result = generate_cancellable(
+            Path::new("/llmbridge/nonexistent.gguf"),
+            "hello",
+            128,
+            8,
+            1,
+            &cancelled,
+            |_| {
+                pieces += 1;
+                true
+            },
+        );
+        assert!(result.unwrap_err().contains("cancelled before native admission"));
+        assert_eq!(pieces, 0);
+    }
+
+    #[test]
+    fn cancellation_wrapper_preserves_native_failure() {
+        let cancelled = AtomicBool::new(false);
+        let result = generate_cancellable(
+            Path::new("/llmbridge/nonexistent.gguf"),
+            "hello",
+            128,
+            8,
+            1,
+            &cancelled,
+            |_| true,
+        );
+        assert!(result.is_err());
+        assert!(!cancelled.load(Ordering::Acquire));
     }
 
     #[test]
