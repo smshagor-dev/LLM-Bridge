@@ -1,4 +1,3 @@
-
 use llmbridge_core::inference;
 use std::path::Path;
 
@@ -21,7 +20,10 @@ fn main() {
         generated += 1;
         true
     });
-    assert_eq!(generated, 0, "oversized prompt must not generate partial output");
+    assert_eq!(
+        generated, 0,
+        "oversized prompt must not generate partial output"
+    );
     assert!(rejected.unwrap_err().contains("context"));
     println!("real-model cancellation and oversized prompt refusal: PASS");
 }
