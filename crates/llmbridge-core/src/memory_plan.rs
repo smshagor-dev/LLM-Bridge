@@ -36,10 +36,11 @@ pub fn plan_cpu(hardware: &Hardware, request: PlanRequest) -> Result<MemoryPlan,
         .and_then(|n| n.checked_add(request.scratch_bytes))
         .ok_or("memory estimate overflow")?;
     let multiplier = 100u64 + u64::from(request.safety_margin_percent);
-    let estimated_peak_bytes = base.checked_mul(multiplier)
-        .and_then(|n| n.checked_add(99))
-        .map(|n| n / 100)
-        .ok_or("memory safety margin overflow")?;
+    // Use a wider intermediate so a valid u64 estimate is not rejected
+    // merely because multiplying by the percentage overflows u64.
+    let rounded = (u128::from(base) * u128::from(multiplier) + 99) / 100;
+    let estimated_peak_bytes = u64::try_from(rounded)
+        .map_err(|_| "memory safety margin overflow")?;
     let headroom = available.saturating_sub(request.os_reserve_bytes);
     if estimated_peak_bytes > headroom {
         return Err(format!(
@@ -86,6 +87,34 @@ mod tests {
         request.safety_margin_percent = 91;
         assert!(plan_cpu(&hw(Some(4096)), request).is_err());
     }
+    #[test]
+    fn large_exact_estimates_do_not_overflow_intermediate_math() {
+        let mut request = req();
+        request.model_file_bytes = u64::MAX - 1500;
+        request.context_tokens = 1;
+        request.kv_bytes_per_token = 0;
+        request.scratch_bytes = 0;
+        request.os_reserve_bytes = 0;
+        request.safety_margin_percent = 0;
+        let plan = plan_cpu(&hw(Some(u64::MAX)), request).unwrap();
+        assert_eq!(plan.estimated_peak_bytes, u64::MAX - 1500);
+        request.safety_margin_percent = 1;
+        assert!(plan_cpu(&hw(Some(u64::MAX)), request).is_err());
+    }
+
+    #[test]
+    fn percentage_rounds_up_without_spurious_overflow() {
+        let mut request = req();
+        request.model_file_bytes = u64::MAX / 2;
+        request.context_tokens = 1;
+        request.kv_bytes_per_token = 0;
+        request.scratch_bytes = 0;
+        request.os_reserve_bytes = 0;
+        request.safety_margin_percent = 20;
+        let expected = ((u128::from(request.model_file_bytes) * 120 + 99) / 100) as u64;
+        assert_eq!(plan_cpu(&hw(Some(u64::MAX)), request).unwrap().estimated_peak_bytes, expected);
+    }
+
     #[test]
     fn overflow_and_zero_headroom_never_admit() {
         let mut request = req();
