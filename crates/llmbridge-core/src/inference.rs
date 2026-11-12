@@ -1,8 +1,8 @@
+use crate::gguf_index::GgufTensorIndex;
+use crate::storage::BoundedLocalReader;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::path::Path;
 use std::slice;
-use crate::gguf_index::GgufTensorIndex;
-use crate::storage::BoundedLocalReader;
 
 type NativeCallback = extern "C" fn(*const c_char, usize, *mut c_void) -> i32;
 type RangeCallback = extern "C" fn(*mut c_void, *mut c_void, u64, usize) -> usize;
@@ -99,8 +99,6 @@ pub fn generate<F: FnMut(&[u8]) -> bool>(
     }
 }
 
-
-
 struct ReaderState<'a> {
     reader: &'a mut BoundedLocalReader,
     failure: Option<String>,
@@ -126,11 +124,7 @@ extern "C" fn read_range_callback(
                 // SAFETY: native callback contract guarantees an output region
                 // of at least requested bytes, not overlapping the Rust buffer.
                 unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        chunk.as_ptr(),
-                        output.cast::<u8>(),
-                        chunk.len(),
-                    );
+                    std::ptr::copy_nonoverlapping(chunk.as_ptr(), output.cast::<u8>(), chunk.len());
                 }
                 chunk.len()
             }
@@ -158,7 +152,10 @@ pub fn probe_indexed_gguf(
     if index.file_bytes != reader.file_bytes() {
         return Err("source size changed between GGUF indexing and native probe".to_string());
     }
-    let mut state = ReaderState { reader, failure: None };
+    let mut state = ReaderState {
+        reader,
+        failure: None,
+    };
     let mut count = 0u64;
     let mut offset = 0u64;
     let mut error = [0 as c_char; 1024];
@@ -192,7 +189,10 @@ pub fn probe_indexed_gguf(
             index.data_offset
         ));
     }
-    Ok(NativeGgufProbe { tensor_count: count, data_offset: offset })
+    Ok(NativeGgufProbe {
+        tensor_count: count,
+        data_offset: offset,
+    })
 }
 
 #[cfg(test)]

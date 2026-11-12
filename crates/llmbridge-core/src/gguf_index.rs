@@ -1,3 +1,7 @@
+// Rust 1.82 MSRV predates the stable is_multiple_of integer method.
+// These checked nonzero block/alignment divisibility tests intentionally use %.
+#![allow(clippy::manual_is_multiple_of)]
+
 use crate::storage::BoundedLocalReader;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;

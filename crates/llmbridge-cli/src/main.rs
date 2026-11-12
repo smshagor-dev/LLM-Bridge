@@ -42,19 +42,23 @@ fn run(args: Vec<String>) -> Result<(), String> {
             Ok(())
         }
 
-
         #[cfg(feature = "native")]
         Some("models") if args.len() == 3 && args[1] == "native-index-probe" => {
             let index = GgufTensorIndex::inspect(&args[2]).map_err(|e| e.to_string())?;
-            let mut reader = llmbridge_core::storage::BoundedLocalReader::open(
-                &args[2], 64 * 1024, 128 * 1024
-            ).map_err(|e| e.to_string())?;
+            let mut reader =
+                llmbridge_core::storage::BoundedLocalReader::open(&args[2], 64 * 1024, 128 * 1024)
+                    .map_err(|e| e.to_string())?;
             let probe = llmbridge_core::inference::probe_indexed_gguf(&index, &mut reader)?;
             println!("native tensor count: {}", probe.tensor_count);
             println!("native tensor data offset: {}", probe.data_offset);
             println!("bounded source bytes read: {}", reader.disk_bytes_read());
-            println!("bounded callback buffer bytes: {}", reader.allocated_chunk_bytes());
-            println!("status: native GGUF metadata agrees with Rust index; NOT out-of-core inference");
+            println!(
+                "bounded callback buffer bytes: {}",
+                reader.allocated_chunk_bytes()
+            );
+            println!(
+                "status: native GGUF metadata agrees with Rust index; NOT out-of-core inference"
+            );
             Ok(())
         }
         Some("models") if args.len() == 3 && args[1] == "tensor-index" => {
