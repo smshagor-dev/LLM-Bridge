@@ -48,6 +48,49 @@ impl RuntimeMemoryLimits {
         Ok(())
     }
 
+    /// Admit a prospective native allocation using checked arithmetic and explicit
+    /// headroom. This is a cooperative preflight, not a reservation or hard cap.
+    /// Both process RSS and cgroup usage must fit after the requested growth.
+    pub fn check_growth(
+        self,
+        sample: &ProcessMemory,
+        growth_bytes: u64,
+        reserve_bytes: u64,
+    ) -> Result<(), MemoryViolation> {
+        if self.max_process_rss_bytes == 0 || self.max_cgroup_current_bytes == Some(0) {
+            return Err(MemoryViolation::InvalidLimit);
+        }
+        let rss = sample.rss_bytes.ok_or(MemoryViolation::UnknownProcessRss)?;
+        let projected = rss.checked_add(growth_bytes)
+            .and_then(|value| value.checked_add(reserve_bytes))
+            .ok_or(MemoryViolation::ProcessRssExceeded {
+                observed: u64::MAX,
+                limit: self.max_process_rss_bytes,
+            })?;
+        if projected > self.max_process_rss_bytes {
+            return Err(MemoryViolation::ProcessRssExceeded {
+                observed: projected,
+                limit: self.max_process_rss_bytes,
+            });
+        }
+        if let Some(limit) = self.max_cgroup_current_bytes {
+            let used = sample.cgroup_current_bytes.ok_or(MemoryViolation::UnknownCgroupUsage)?;
+            let projected = used.checked_add(growth_bytes)
+                .and_then(|value| value.checked_add(reserve_bytes))
+                .ok_or(MemoryViolation::CgroupUsageExceeded {
+                    observed: u64::MAX,
+                    limit,
+                })?;
+            if projected > limit {
+                return Err(MemoryViolation::CgroupUsageExceeded {
+                    observed: projected,
+                    limit,
+                });
+            }
+        }
+        Ok(())
+    }
+
     /// Read current process/cgroup counters and reject on any limit violation.
     /// On platforms without RSS measurement this deliberately rejects admission.
     pub fn check_current(self) -> Result<ProcessMemory, MemoryViolation> {
@@ -119,4 +162,21 @@ mod tests {
         };
         assert!(limits.check(&sample(Some(u64::MAX), None)).is_ok());
     }
+    #[test]
+    fn prospective_growth_requires_headroom_in_both_domains() {
+        let limits = RuntimeMemoryLimits {
+            max_process_rss_bytes: 100,
+            max_cgroup_current_bytes: Some(120),
+        };
+        assert!(limits.check_growth(&sample(Some(50), Some(70)), 30, 20).is_ok());
+        assert_eq!(limits.check_growth(&sample(Some(50), Some(70)), 31, 20),
+            Err(MemoryViolation::ProcessRssExceeded { observed: 101, limit: 100 }));
+        assert_eq!(limits.check_growth(&sample(Some(10), Some(90)), 20, 11),
+            Err(MemoryViolation::CgroupUsageExceeded { observed: 121, limit: 120 }));
+        assert_eq!(limits.check_growth(&sample(Some(u64::MAX), Some(0)), 1, 0),
+            Err(MemoryViolation::ProcessRssExceeded { observed: u64::MAX, limit: 100 }));
+        assert_eq!(limits.check_growth(&sample(Some(1), None), 1, 0),
+            Err(MemoryViolation::UnknownCgroupUsage));
+    }
+
 }
