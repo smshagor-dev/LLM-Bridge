@@ -143,7 +143,6 @@ fn chat(args: &[String]) -> Result<(), String> {
     let mut show_metrics = false;
     let mut pos = 1usize;
     while pos < args.len() {
-
         if args[pos] == "--metrics" {
             show_metrics = true;
             pos += 1;

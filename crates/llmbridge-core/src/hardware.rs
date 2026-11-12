@@ -96,7 +96,9 @@ fn limit_by_cgroup(
     cgroup_limit: Option<u64>,
     cgroup_current: Option<u64>,
 ) -> Option<u64> {
-    let headroom = cgroup_limit.zip(cgroup_current).map(|(limit, used)| limit.saturating_sub(used));
+    let headroom = cgroup_limit
+        .zip(cgroup_current)
+        .map(|(limit, used)| limit.saturating_sub(used));
     match (physical_available, headroom) {
         (Some(physical), Some(cgroup)) => Some(physical.min(cgroup)),
         (Some(physical), None) => Some(physical),
@@ -168,20 +170,35 @@ mod tests {
             parse_meminfo("MemAvailable:  1024 kB\n", "MemAvailable:"),
             Some(1_048_576)
         );
-        assert_eq!(parse_meminfo("MemAvailable:  999 MB\n", "MemAvailable:"), None);
+        assert_eq!(
+            parse_meminfo("MemAvailable:  999 MB\n", "MemAvailable:"),
+            None
+        );
         assert_eq!(
             parse_meminfo("MemAvailable:  18446744073709551615 kB\n", "MemAvailable:"),
             None
         );
-        assert_eq!(parse_meminfo("VmHWM: 1337 kB\nVmRSS: 1200 kB\n", "VmHWM:"), Some(1_369_088));
+        assert_eq!(
+            parse_meminfo("VmHWM: 1337 kB\nVmRSS: 1200 kB\n", "VmHWM:"),
+            Some(1_369_088)
+        );
     }
 
     #[cfg(target_os = "linux")]
     #[test]
     fn cgroup_headroom_never_exceeds_hardware_or_underflows() {
-        assert_eq!(limit_by_cgroup(Some(2_000), Some(1_000), Some(700)), Some(300));
-        assert_eq!(limit_by_cgroup(Some(2_000), Some(1_000), Some(1_100)), Some(0));
-        assert_eq!(limit_by_cgroup(Some(300), Some(1_000), Some(500)), Some(300));
+        assert_eq!(
+            limit_by_cgroup(Some(2_000), Some(1_000), Some(700)),
+            Some(300)
+        );
+        assert_eq!(
+            limit_by_cgroup(Some(2_000), Some(1_000), Some(1_100)),
+            Some(0)
+        );
+        assert_eq!(
+            limit_by_cgroup(Some(300), Some(1_000), Some(500)),
+            Some(300)
+        );
         assert_eq!(limit_by_cgroup(None, None, None), None);
         assert_eq!(parse_cgroup_number("max\n"), None);
         assert_eq!(parse_cgroup_number("1048576\n"), Some(1_048_576));
