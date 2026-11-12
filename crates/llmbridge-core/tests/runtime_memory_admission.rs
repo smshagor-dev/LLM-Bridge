@@ -87,3 +87,43 @@ fn unknown_cgroup_counter_fails_closed_before_callback() {
     assert_eq!(result.unwrap_err().kind(), io::ErrorKind::OutOfMemory);
     assert!(!called.get());
 }
+
+#[test]
+fn process_growth_overflow_fails_before_native_callback() {
+    let limits = RuntimeMemoryLimits {
+        max_process_rss_bytes: u64::MAX,
+        max_cgroup_current_bytes: None,
+    };
+    let called = Cell::new(false);
+    let result = limits.around_growth_with_sampler(
+        2,
+        0,
+        || sample(Some(u64::MAX - 1), None),
+        || {
+            called.set(true);
+            Ok(())
+        },
+    );
+    assert_eq!(result.unwrap_err().kind(), io::ErrorKind::OutOfMemory);
+    assert!(!called.get());
+}
+
+#[test]
+fn cgroup_growth_overflow_fails_before_native_callback() {
+    let limits = RuntimeMemoryLimits {
+        max_process_rss_bytes: u64::MAX,
+        max_cgroup_current_bytes: Some(u64::MAX),
+    };
+    let called = Cell::new(false);
+    let result = limits.around_growth_with_sampler(
+        3,
+        1,
+        || sample(Some(10), Some(u64::MAX - 2)),
+        || {
+            called.set(true);
+            Ok(())
+        },
+    );
+    assert_eq!(result.unwrap_err().kind(), io::ErrorKind::OutOfMemory);
+    assert!(!called.get());
+}
