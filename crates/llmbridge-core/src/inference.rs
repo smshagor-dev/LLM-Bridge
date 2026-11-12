@@ -256,8 +256,13 @@ pub fn q8_0_matvec_verified(
     expected_sha256: &str,
 ) -> Result<Vec<f32>, String> {
     q8_0_matvec_internal(
-        index, reader, tensor_name, activation, cancelled,
-        1024 * 1024, Some(expected_sha256),
+        index,
+        reader,
+        tensor_name,
+        activation,
+        cancelled,
+        1024 * 1024,
+        Some(expected_sha256),
     )
 }
 
@@ -273,8 +278,13 @@ pub fn q8_0_matvec_with_budget(
     workspace_budget_bytes: usize,
 ) -> Result<Vec<f32>, String> {
     q8_0_matvec_internal(
-        index, reader, tensor_name, activation, cancelled,
-        workspace_budget_bytes, None,
+        index,
+        reader,
+        tensor_name,
+        activation,
+        cancelled,
+        workspace_budget_bytes,
+        None,
     )
 }
 
@@ -437,16 +447,30 @@ mod tests {
         );
         assert_eq!(reader.disk_bytes_read(), 68);
         assert!(q8_0_matvec_verified(
-            &index, &mut reader, "weights", &[1f32; 32], &cancel, &"0".repeat(64)
-        ).is_err());
+            &index,
+            &mut reader,
+            "weights",
+            &[1f32; 32],
+            &cancel,
+            &"0".repeat(64)
+        )
+        .is_err());
         assert_eq!(reader.disk_bytes_read(), 136);
         let digest = {
             let mut independent_reader = BoundedLocalReader::open(&path, 64, 128).unwrap();
-            index.sha256_tensor(&mut independent_reader, "weights").unwrap()
+            index
+                .sha256_tensor(&mut independent_reader, "weights")
+                .unwrap()
         };
         let verified = q8_0_matvec_verified(
-            &index, &mut reader, "weights", &[1f32; 32], &cancel, &digest
-        ).unwrap();
+            &index,
+            &mut reader,
+            "weights",
+            &[1f32; 32],
+            &cancel,
+            &digest,
+        )
+        .unwrap();
         assert_eq!(verified, vec![264.0, -264.0]);
         assert_eq!(reader.disk_bytes_read(), 272);
         cancel.store(true, Ordering::Release);

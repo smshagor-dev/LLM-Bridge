@@ -78,11 +78,20 @@ fn run(args: Vec<String>) -> Result<(), String> {
             let ones = vec![1.0f32; cols];
             let output = if args.len() == 5 {
                 llmbridge_core::inference::q8_0_matvec_verified(
-                    &index, &mut reader, &args[3], &ones, &cancelled, &args[4],
+                    &index,
+                    &mut reader,
+                    &args[3],
+                    &ones,
+                    &cancelled,
+                    &args[4],
                 )?
             } else {
                 llmbridge_core::inference::q8_0_matvec(
-                    &index, &mut reader, &args[3], &ones, &cancelled,
+                    &index,
+                    &mut reader,
+                    &args[3],
+                    &ones,
+                    &cancelled,
                 )?
             };
             println!("tensor: {}", args[3]);
@@ -93,7 +102,14 @@ fn run(args: Vec<String>) -> Result<(), String> {
             }
             println!("weight bytes read: {}", reader.disk_bytes_read());
             println!("native scratch: one quantized row + one dequantized row");
-            println!("integrity: {}", if args.len() == 5 { "SHA-256 verified against caller-supplied digest" } else { "NOT independently verified" });
+            println!(
+                "integrity: {}",
+                if args.len() == 5 {
+                    "SHA-256 verified against caller-supplied digest"
+                } else {
+                    "NOT independently verified"
+                }
+            );
             println!("status: real bounded tensor math; not full transformer inference");
             Ok(())
         }
