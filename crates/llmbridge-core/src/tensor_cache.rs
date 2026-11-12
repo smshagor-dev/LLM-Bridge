@@ -47,12 +47,12 @@ impl TensorChunkCache {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "cache key length mismatch"));
         }
         if bytes.len() > self.capacity {
-            return Err(io::Error::new(io::ErrorKind::OutOfMemory, "chunk exceeds cache budget"));
+            return Err(io::Error::new(io::ErrorKind::Other, "chunk exceeds cache budget"));
         }
         // Allocate before evicting so a failed allocation leaves existing entries intact.
         let mut owned = Vec::new();
         owned.try_reserve_exact(bytes.len())
-            .map_err(|_| io::Error::new(io::ErrorKind::OutOfMemory, "cache allocation failed"))?;
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "cache allocation failed"))?;
         owned.extend_from_slice(bytes);
         if let Some(previous) = self.entries.remove(&key) {
             self.used -= previous.len();
