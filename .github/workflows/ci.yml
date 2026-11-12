@@ -41,9 +41,31 @@ jobs:
           ./target/release/llmbridge chat models/stories15M-q8_0.gguf --prompt "The sky is" --max-tokens 16 --ctx 128 --threads 2 --stream > benchmarks/results/bridge.txt
           ./reference-build/bin/llama-simple -m models/stories15M-q8_0.gguf -n 16 -ngl 0 "The sky is" > benchmarks/results/reference.txt
           python3 scripts/check_m1_parity.py --ours benchmarks/results/bridge.txt --reference benchmarks/results/reference.txt --output benchmarks/results/parity.json
-      - name: Check live cancellation and prompt capacity refusal
+
+      - name: Validate real GGUF tensor ranges and streaming SHA-256 against independent Python parser
+        run: |
+          python3 scripts/check_tensor_regions.py \
+            --model models/stories15M-q8_0.gguf \
+            --binary ./target/release/llmbridge \
+            --output benchmarks/results/tensor_index_parity.json
+
+      - name: Probe pinned GGUF through Rust bounded reads into native ggml parser
+        run: |
+          ./target/release/llmbridge models native-index-probe \
+            models/stories15M-q8_0.gguf > benchmarks/results/native_range_probe.txt
+          grep 'native tensor count: 57' benchmarks/results/native_range_probe.txt
+          grep 'native GGUF metadata agrees with Rust index' benchmarks/results/native_range_probe.txt
+
+      - name: Compare native row-streaming matrix-vector output to independent Q8_0 reference
+        run: |
+          python3 scripts/check_tensor_matvec.py \
+            --model models/stories15M-q8_0.gguf \
+            --binary ./target/release/llmbridge \
+            --output benchmarks/results/q8_0_matvec_parity.json
+
+      - name: Verify real-model cancellation and oversized-prompt refusal
         run: cargo run --release -p llmbridge-core --features native --example model_contract -- models/stories15M-q8_0.gguf
-      - name: Record three real end-to-end CPU baseline trials
+      - name: Record three real end-to-end CPU baseline trials with RSS metrics
         run: python3 benchmarks/run_cpu_baseline.py --binary ./target/release/llmbridge --model models/stories15M-q8_0.gguf --output benchmarks/results/cpu_baseline.json --repetitions 3
       - name: Save raw parity evidence
         if: always()

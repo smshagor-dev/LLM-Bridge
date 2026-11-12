@@ -2,6 +2,9 @@
 #include "llama.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <limits>
 #include <cstdio>
 #include <cstring>
 #include <exception>
@@ -161,6 +164,111 @@ extern "C" int32_t llmbridge_generate_cpu(
         return -1;
     } catch (...) {
         write_error(error, error_capacity, "unknown native exception");
+        return -1;
+    }
+}
+
+
+extern "C" int32_t llmbridge_probe_gguf_source(
+    uint64_t file_bytes, size_t max_chunk_bytes,
+    llmbridge_range_callback reader, void *userdata,
+    uint64_t *tensor_count, uint64_t *tensor_data_offset,
+    char *error, size_t error_capacity) {
+    write_error(error, error_capacity, "");
+    if (tensor_count != nullptr) {
+        *tensor_count = 0;
+    }
+    if (tensor_data_offset != nullptr) {
+        *tensor_data_offset = 0;
+    }
+    try {
+        if (file_bytes < 24 || max_chunk_bytes == 0 || max_chunk_bytes > 1024 * 1024 ||
+            !reader || !userdata || !tensor_count || !tensor_data_offset) {
+            throw std::invalid_argument("invalid bounded GGUF source probe arguments");
+        }
+        gguf_init_params params{};
+        params.no_alloc = true;
+        params.ctx = nullptr;
+        // The underlying GGUF loader performs bounded calls to the supplied
+        // reader, and no model weight tensors are allocated by this probe.
+        std::unique_ptr<gguf_context, decltype(&gguf_free)> metadata(
+            gguf_init_from_callback(reader, userdata, max_chunk_bytes, file_bytes, params),
+            gguf_free);
+        if (!metadata) {
+            throw std::runtime_error("native GGUF metadata parse failed");
+        }
+        const int64_t count = gguf_get_n_tensors(metadata.get());
+        if (count < 0) {
+            throw std::runtime_error("native GGUF tensor count invalid");
+        }
+        *tensor_count = static_cast<uint64_t>(count);
+        *tensor_data_offset = static_cast<uint64_t>(gguf_get_data_offset(metadata.get()));
+        return 0;
+    } catch (const std::exception &e) {
+        write_error(error, error_capacity, e.what());
+        return -1;
+    } catch (...) {
+        write_error(error, error_capacity, "unknown native GGUF probe exception");
+        return -1;
+    }
+}
+
+/* The input and output buffers are borrowed for the lifetime of this call.
+ * Weights are read one Q8_0 row at a time, dequantized with the pinned ggml
+ * type trait, and multiplied against the provided activation vector.
+ * Failure has no committed output: the Rust wrapper discards it. */
+extern "C" int32_t llmbridge_q8_0_matvec(
+    uint64_t tensor_offset, uint64_t tensor_bytes,
+    uint32_t columns, uint32_t rows, size_t max_chunk_bytes,
+    llmbridge_range_callback reader, void *userdata,
+    const float *input, float *output,
+    char *error, size_t error_capacity) {
+    write_error(error, error_capacity, "");
+    try {
+        if (!reader || !userdata || !input || !output ||
+            columns == 0 || columns > 16384 || (columns % 32) != 0 ||
+            rows == 0 || rows > 65536 ||
+            max_chunk_bytes == 0 || max_chunk_bytes > 1024 * 1024) {
+            throw std::invalid_argument("invalid Q8_0 streamed matvec arguments");
+        }
+        const size_t row_bytes = static_cast<size_t>(columns / 32) * 34;
+        if (row_bytes > max_chunk_bytes ||
+            tensor_bytes != static_cast<uint64_t>(row_bytes) * rows ||
+            tensor_offset > UINT64_MAX - tensor_bytes) {
+            throw std::invalid_argument("GGUF Q8_0 shape, byte range or chunk budget mismatch");
+        }
+        for (uint32_t col = 0; col < columns; ++col) {
+            if (!std::isfinite(input[col])) {
+                throw std::invalid_argument("non-finite activation rejected");
+            }
+        }
+        const auto *traits = ggml_get_type_traits(GGML_TYPE_Q8_0);
+        if (!traits || !traits->to_float) {
+            throw std::runtime_error("pinned ggml Q8_0 dequantizer unavailable");
+        }
+        std::vector<uint8_t> packed(row_bytes);
+        std::vector<float> decoded(columns);
+        for (uint32_t row = 0; row < rows; ++row) {
+            const uint64_t offset = tensor_offset + static_cast<uint64_t>(row) * row_bytes;
+            if (reader(userdata, packed.data(), offset, row_bytes) != row_bytes) {
+                throw std::runtime_error("bounded GGUF range read failed or was cancelled");
+            }
+            traits->to_float(packed.data(), decoded.data(), columns);
+            double sum = 0.0;
+            for (uint32_t col = 0; col < columns; ++col) {
+                sum += static_cast<double>(decoded[col]) * input[col];
+            }
+            if (!std::isfinite(sum) || std::abs(sum) > std::numeric_limits<float>::max()) {
+                throw std::runtime_error("non-finite Q8_0 output rejected");
+            }
+            output[row] = static_cast<float>(sum);
+        }
+        return 0;
+    } catch (const std::exception &e) {
+        write_error(error, error_capacity, e.what());
+        return -1;
+    } catch (...) {
+        write_error(error, error_capacity, "unknown native tensor operator exception");
         return -1;
     }
 }
