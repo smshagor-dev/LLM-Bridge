@@ -70,6 +70,19 @@ impl BoundedLocalReader {
                 "not a regular file",
             ));
         }
+        // Recheck the path after open: a rename/symlink substitution between
+        // symlink_metadata and File::open must not bypass the source policy.
+        // Compare the opened descriptor with the final path identity on Unix.
+        let path_metadata = fs::symlink_metadata(path)?;
+        if path_metadata.file_type().is_symlink() || !path_metadata.is_file()
+            || SourceIdentity::from_metadata(&path_metadata)
+                != SourceIdentity::from_metadata(&metadata)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "local source changed during open or became a symlink",
+            ));
+        }
         Ok(Self {
             file,
             file_len: metadata.len(),
@@ -183,6 +196,19 @@ mod tests {
         assert!(reader.read_range(4, 4).is_err());
         assert!(reader.read_range(u64::MAX, 1).is_err());
         assert!(reader.read_range(9, 2).is_err());
+        fs::remove_file(path).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symbolic_link_sources_are_rejected() {
+        use std::os::unix::fs::symlink;
+        let path = fixture(b"abc");
+        let link = path.with_extension("link");
+        symlink(&path, &link).unwrap();
+        let result = BoundedLocalReader::open(&link, 2, 4);
+        assert!(result.is_err());
+        fs::remove_file(link).unwrap();
         fs::remove_file(path).unwrap();
     }
 
