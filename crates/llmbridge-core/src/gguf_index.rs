@@ -2,7 +2,7 @@
 // These checked nonzero block/alignment divisibility tests intentionally use %.
 #![allow(clippy::manual_is_multiple_of)]
 
-use crate::storage::BoundedLocalReader;
+use crate::storage::{BoundedLocalReader, SourceIdentity};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs::File;
@@ -40,12 +40,14 @@ pub struct GgufTensorIndex {
     pub alignment: u64,
     pub data_offset: u64,
     pub tensors: Vec<TensorRegion>,
+    pub source_identity: SourceIdentity,
 }
 
 struct MetadataReader {
     file: BufReader<File>,
     offset: u64,
     file_bytes: u64,
+    source_identity: SourceIdentity,
 }
 
 impl MetadataReader {
@@ -58,11 +60,13 @@ impl MetadataReader {
             ));
         }
         let file = File::open(path)?;
-        let file_bytes = file.metadata()?.len();
+        let source_identity = SourceIdentity::from_metadata(&file.metadata()?);
+        let file_bytes = source_identity.file_bytes;
         Ok(Self {
             file: BufReader::with_capacity(64 * 1024, file),
             offset: 0,
             file_bytes,
+            source_identity,
         })
     }
 
@@ -311,9 +315,14 @@ impl GgufTensorIndex {
                 return Err(invalid("GGUF tensor byte regions overlap"));
             }
         }
+
+        if SourceIdentity::from_metadata(&reader.file.get_ref().metadata()?) != reader.source_identity {
+            return Err(invalid("GGUF file changed during tensor index construction"));
+        }
         Ok(Self {
             path: path.to_path_buf(),
             file_bytes: reader.file_bytes,
+            source_identity: reader.source_identity,
             version,
             alignment,
             data_offset,
@@ -366,8 +375,9 @@ impl GgufTensorIndex {
     where
         F: FnMut(&[u8]) -> io::Result<()>,
     {
-        if reader.file_bytes() != self.file_bytes {
-            return Err(invalid("tensor index and storage file sizes differ"));
+
+        if reader.identity() != &self.source_identity {
+            return Err(invalid("indexed tensor source identity changed before streaming"));
         }
         let tensor = self.tensor(name).ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, "tensor not found in indexed GGUF")
@@ -509,6 +519,19 @@ mod tests {
         bytes.truncate(bytes.len() - 2);
         let path = write(&bytes);
         assert!(GgufTensorIndex::inspect(&path).is_err());
+        std::fs::remove_file(path).unwrap();
+    }
+
+
+    #[cfg(unix)]
+    #[test]
+    fn reject_same_size_source_replacement_with_new_inode() {
+        let path = write(&fixture(8, 0, 96));
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let replacement = write(&fixture(8, 0, 96));
+        std::fs::rename(&replacement, &path).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 16, 32).unwrap();
+        assert!(index.stream_tensor(&mut reader, "final.weight", |_| Ok(())).is_err());
         std::fs::remove_file(path).unwrap();
     }
 

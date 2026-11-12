@@ -4,12 +4,38 @@ use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 use std::time::SystemTime;
 
+/// Source identity snapshot: detects inode/device replacement on Unix.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceIdentity {
+    pub file_bytes: u64,
+    pub modified: Option<SystemTime>,
+    #[cfg(unix)]
+    pub device: u64,
+    #[cfg(unix)]
+    pub inode: u64,
+}
+impl SourceIdentity {
+    pub fn from_metadata(metadata: &std::fs::Metadata) -> Self {
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+        Self {
+            file_bytes: metadata.len(),
+            modified: metadata.modified().ok(),
+            #[cfg(unix)]
+            device: metadata.dev(),
+            #[cfg(unix)]
+            inode: metadata.ino(),
+        }
+    }
+}
+
+
 /// Local range reader with one reusable, preallocated read buffer.
 /// Bound applies to its explicit buffer only; OS page cache and process RSS are NOT capped.
 pub struct BoundedLocalReader {
     file: File,
     file_len: u64,
-    modified: Option<SystemTime>,
+    source_identity: SourceIdentity,
     buffer: Box<[u8]>,
     disk_bytes_read: u64,
 }
@@ -48,14 +74,19 @@ impl BoundedLocalReader {
         Ok(Self {
             file,
             file_len: metadata.len(),
-            modified: metadata.modified().ok(),
+            source_identity: SourceIdentity::from_metadata(&metadata),
             buffer: vec![0u8; max_chunk_bytes].into_boxed_slice(),
             disk_bytes_read: 0,
         })
     }
 
+
     pub fn file_bytes(&self) -> u64 {
         self.file_len
+    }
+
+    pub fn identity(&self) -> &SourceIdentity {
+        &self.source_identity
     }
 
     pub fn allocated_chunk_bytes(&self) -> usize {
@@ -68,11 +99,7 @@ impl BoundedLocalReader {
 
     fn assert_unchanged(&self) -> io::Result<()> {
         let current = self.file.metadata()?;
-        let version_changed = match (self.modified, current.modified().ok()) {
-            (Some(before), Some(now)) => before != now,
-            _ => false,
-        };
-        if current.len() != self.file_len || version_changed {
+        if SourceIdentity::from_metadata(&current) != self.source_identity {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "source changed while reading; reject stale or mixed tensor bytes",

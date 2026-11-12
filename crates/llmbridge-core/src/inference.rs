@@ -149,8 +149,8 @@ pub fn probe_indexed_gguf(
     index: &GgufTensorIndex,
     reader: &mut BoundedLocalReader,
 ) -> Result<NativeGgufProbe, String> {
-    if index.file_bytes != reader.file_bytes() {
-        return Err("source size changed between GGUF indexing and native probe".to_string());
+    if reader.identity() != &index.source_identity {
+        return Err("source identity changed between GGUF indexing and native probe".to_string());
     }
     let mut state = ReaderState {
         reader,
