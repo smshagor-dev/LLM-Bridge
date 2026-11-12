@@ -3,6 +3,7 @@ use crate::storage::BoundedLocalReader;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::path::Path;
 use std::slice;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 type NativeCallback = extern "C" fn(*const c_char, usize, *mut c_void) -> i32;
 type RangeCallback = extern "C" fn(*mut c_void, *mut c_void, u64, usize) -> usize;
@@ -16,6 +17,20 @@ extern "C" {
         userdata: *mut c_void,
         tensor_count: *mut u64,
         tensor_data_offset: *mut u64,
+        error: *mut c_char,
+        error_capacity: usize,
+    ) -> i32;
+
+    fn llmbridge_q8_0_matvec(
+        tensor_offset: u64,
+        tensor_bytes: u64,
+        columns: u32,
+        rows: u32,
+        max_chunk_bytes: usize,
+        callback: RangeCallback,
+        userdata: *mut c_void,
+        input: *const f32,
+        output: *mut f32,
         error: *mut c_char,
         error_capacity: usize,
     ) -> i32;
@@ -102,6 +117,7 @@ pub fn generate<F: FnMut(&[u8]) -> bool>(
 struct ReaderState<'a> {
     reader: &'a mut BoundedLocalReader,
     failure: Option<String>,
+    cancelled: Option<&'a AtomicBool>,
 }
 
 /// A panic must never cross the C ABI; a failed range fetch is reported as a
@@ -119,6 +135,10 @@ extern "C" fn read_range_callback(
         // SAFETY: caller passes a live borrowed ReaderState for the synchronous
         // probe call only. The callback is not retained by C++.
         let state = unsafe { &mut *(userdata.cast::<ReaderState<'_>>()) };
+        if state.cancelled.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+            state.failure = Some("tensor operator cancelled".to_string());
+            return 0;
+        }
         match state.reader.read_range(file_offset, requested) {
             Ok(chunk) => {
                 // SAFETY: native callback contract guarantees an output region
@@ -155,6 +175,7 @@ pub fn probe_indexed_gguf(
     let mut state = ReaderState {
         reader,
         failure: None,
+        cancelled: None,
     };
     let mut count = 0u64;
     let mut offset = 0u64;
@@ -195,9 +216,136 @@ pub fn probe_indexed_gguf(
     })
 }
 
+
+/// Bounded Q8_0 matrix-vector operator using real GGUF tensor weights and
+/// pinned native ggml dequantization. The native operator reads one row at a
+/// time through the Rust range callback; it never materializes the matrix.
+///
+/// This is **one CPU operator**, not a transformer graph or full out-of-core
+/// text generation. The reader buffer and native row scratch are bounded, but
+/// OS page cache and process resident memory are not capped here.
+pub fn q8_0_matvec(
+    index: &GgufTensorIndex,
+    reader: &mut BoundedLocalReader,
+    tensor_name: &str,
+    activation: &[f32],
+    cancelled: &AtomicBool,
+) -> Result<Vec<f32>, String> {
+    if reader.identity() != &index.source_identity {
+        return Err("indexed model source identity changed".to_string());
+    }
+    let region = index.tensor(tensor_name).ok_or("named tensor not indexed")?;
+    if region.ggml_type != 8 || region.dimensions.len() != 2 {
+        return Err("operator requires a rank-2 Q8_0 GGUF tensor".to_string());
+    }
+    let columns = u32::try_from(region.dimensions[0])
+        .map_err(|_| "too many tensor columns")?;
+    let rows = u32::try_from(region.dimensions[1])
+        .map_err(|_| "too many tensor rows")?;
+    if columns == 0
+        || columns > 16384
+        || columns % 32 != 0
+        || rows == 0
+        || rows > 65536
+        || activation.len() != columns as usize
+        || !activation.iter().all(|f| f.is_finite())
+    {
+        return Err("invalid Q8_0 operator dimensions or activation".to_string());
+    }
+    let row_bytes = usize::try_from(region.byte_len / u64::from(rows))
+        .map_err(|_| "tensor row does not fit address space")?;
+    if row_bytes > reader.allocated_chunk_bytes() || cancelled.load(Ordering::Acquire) {
+        return Err("operator scratch budget exceeded or request cancelled".to_string());
+    }
+    let mut output = vec![0f32; rows as usize];
+    let mut state = ReaderState {
+        reader,
+        failure: None,
+        cancelled: Some(cancelled),
+    };
+    let mut diagnostic = [0 as c_char; 1024];
+    // SAFETY: all borrowed buffers and callback state outlive this synchronous
+    // C call. Native checks bounds before writes and contains all exceptions.
+    // An error discards output instead of exposing partially written rows.
+    let status = unsafe {
+        llmbridge_q8_0_matvec(
+            region.file_offset,
+            region.byte_len,
+            columns,
+            rows,
+            state.reader.allocated_chunk_bytes(),
+            read_range_callback,
+            (&mut state as *mut ReaderState<'_>).cast(),
+            activation.as_ptr(),
+            output.as_mut_ptr(),
+            diagnostic.as_mut_ptr(),
+            diagnostic.len(),
+        )
+    };
+    if status != 0 || cancelled.load(Ordering::Acquire) {
+        // SAFETY: native writes a terminated buffer when it reports an error.
+        let native = unsafe { CStr::from_ptr(diagnostic.as_ptr()) }.to_string_lossy();
+        return Err(format!(
+            "bounded Q8_0 operator failed: {native}; source: {}",
+            state.failure.as_deref().unwrap_or("no reader failure")
+        ));
+    }
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn q8_0_operator_computes_from_real_file_bytes_and_refuses_cancel() {
+        use std::io::Write;
+        use std::sync::atomic::AtomicU64;
+        static SERIAL: AtomicU64 = AtomicU64::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "llmbridge-q8-{}-{}",
+            std::process::id(),
+            SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mut file = std::fs::File::create(&path).unwrap();
+        let mut gguf = b"GGUF".to_vec();
+        gguf.extend_from_slice(&3u32.to_le_bytes()); // version
+        gguf.extend_from_slice(&1u64.to_le_bytes()); // one tensor
+        gguf.extend_from_slice(&0u64.to_le_bytes()); // no metadata
+        let name = "weights";
+        gguf.extend_from_slice(&(name.len() as u64).to_le_bytes());
+        gguf.extend_from_slice(name.as_bytes());
+        gguf.extend_from_slice(&2u32.to_le_bytes()); // rank two
+        gguf.extend_from_slice(&32u64.to_le_bytes());
+        gguf.extend_from_slice(&2u64.to_le_bytes());
+        gguf.extend_from_slice(&8u32.to_le_bytes()); // ggml Q8_0
+        gguf.extend_from_slice(&0u64.to_le_bytes());
+        while gguf.len() % 32 != 0 {
+            gguf.push(0);
+        }
+        // GGML Q8_0 block: little-endian F16 scale, then 32 signed bytes.
+        gguf.extend_from_slice(&[0x00, 0x38]); // scale 0.5
+        gguf.extend(1u8..=32u8);
+        gguf.extend_from_slice(&[0x00, 0x38]);
+        gguf.extend((1i8..=32).map(|v| (-v) as u8));
+        file.write_all(&gguf).unwrap();
+        drop(file);
+
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 64, 128).unwrap();
+        let cancel = AtomicBool::new(false);
+        let actual = q8_0_matvec(&index, &mut reader, "weights", &[1f32; 32], &cancel).unwrap();
+        assert_eq!(actual, vec![264.0, -264.0]);
+        assert_eq!(reader.disk_bytes_read(), 68);
+        cancel.store(true, Ordering::Release);
+        assert!(q8_0_matvec(&index, &mut reader, "weights", &[1f32; 32], &cancel).is_err());
+        assert_eq!(reader.disk_bytes_read(), 68);
+        cancel.store(false, Ordering::Release);
+        assert!(q8_0_matvec(&index, &mut reader, "weights", &[f32::NAN; 32], &cancel).is_err());
+        assert!(q8_0_matvec(&index, &mut reader, "weights", &[1f32; 31], &cancel).is_err());
+        std::fs::remove_file(path).unwrap();
+    }
+
     #[test]
     fn native_abi_matches() {
         assert_eq!(unsafe { llmbridge_abi_version() }, 1);

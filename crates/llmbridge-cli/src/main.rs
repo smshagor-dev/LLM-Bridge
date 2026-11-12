@@ -16,7 +16,7 @@ fn main() {
     }
 }
 fn usage() -> &'static str {
-    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics]"
+    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name>\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics]"
 }
 fn json_number(value: Option<u64>) -> String {
     value.map_or_else(|| "null".to_string(), |x| x.to_string())
@@ -59,6 +59,38 @@ fn run(args: Vec<String>) -> Result<(), String> {
             println!(
                 "status: native GGUF metadata agrees with Rust index; NOT out-of-core inference"
             );
+            Ok(())
+        }
+
+        #[cfg(feature = "native")]
+        Some("models") if args.len() == 4 && args[1] == "tensor-matvec" => {
+            let index = GgufTensorIndex::inspect(&args[2]).map_err(|e| e.to_string())?;
+            let tensor = index.tensor(&args[3]).ok_or("tensor does not exist")?;
+            let cols = usize::try_from(*tensor.dimensions.first().ok_or("empty shape")?)
+                .map_err(|_| "invalid tensor shape")?;
+            if cols > 16384 || tensor.ggml_type != 8 || tensor.dimensions.len() != 2 {
+                return Err("requires rank-2 GGML Q8_0 with <=16384 columns".to_string());
+            }
+            let mut reader =
+                llmbridge_core::storage::BoundedLocalReader::open(&args[2], 64 * 1024, 128 * 1024)
+                    .map_err(|e| e.to_string())?;
+            let cancelled = AtomicBool::new(false);
+            let output = llmbridge_core::inference::q8_0_matvec(
+                &index,
+                &mut reader,
+                &args[3],
+                &vec![1.0f32; cols],
+                &cancelled,
+            )?;
+            println!("tensor: {}", args[3]);
+            println!("rows: {}", output.len());
+            println!("columns: {cols}");
+            for (row, value) in output.iter().enumerate() {
+                println!("row {row} {value:.8}");
+            }
+            println!("weight bytes read: {}", reader.disk_bytes_read());
+            println!("native scratch: one quantized row + one dequantized row");
+            println!("status: real bounded tensor math; not full transformer inference");
             Ok(())
         }
         Some("models") if args.len() == 3 && args[1] == "tensor-index" => {

@@ -19,3 +19,13 @@
 
 ## M3–M11
 Not implemented. Next priority remains genuine tensor-to-native-graph storage integration with independent parity under enforced memory limits. All large-model claims are blocked on real evidence.
+
+## Active: streamed native quantized operator
+- Implemented Q8_0 GGUF matrix-vector product reading real tensor rows
+  via the bounded Rust callback and pinned ggml dequantizer.
+- Added synthetic two-row Q8_0 exact-value test, cancellation/error admission
+  checks, and independent Python real-GGUF numerical comparison in CI.
+- CI PENDING; do not describe real checkpoint parity as passed until
+  a workflow on this commit completes successfully.
+- Still NOT integrated into full llama.cpp inference graph, not a complete
+  out-of-core model runtime and not process-RSS bounded.

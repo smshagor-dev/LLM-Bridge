@@ -40,6 +40,26 @@ int32_t llmbridge_probe_gguf_source(uint64_t file_bytes,
                                     uint64_t *tensor_data_offset,
                                     char *error,
                                     size_t error_capacity);
+
+/* Run actual native GGML Q8_0 dequantization + a matrix-vector product, one
+ * row of a named GGUF tensor at a time. Reader is called synchronously and
+ * only for bytes inside [tensor_offset, tensor_offset + tensor_bytes).
+ * Shape must be [columns, rows], with columns a multiple of 32.
+ * Native scratch memory is limited to O(columns); it never loads the matrix.
+ * Returns 0 on success, -1 on read/validation error. A failed call's output
+ * must be discarded. This is an operator, not full model execution. */
+int32_t llmbridge_q8_0_matvec(uint64_t tensor_offset,
+                               uint64_t tensor_bytes,
+                               uint32_t columns,
+                               uint32_t rows,
+                               size_t max_chunk_bytes,
+                               llmbridge_range_callback reader,
+                               void *userdata,
+                               const float *input,
+                               float *output,
+                               char *error,
+                               size_t error_capacity);
+
 #ifdef __cplusplus
 }
 #endif
