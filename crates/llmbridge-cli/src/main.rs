@@ -41,7 +41,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             );
             Ok(())
         }
-        
+
         Some("models") if args.len() == 3 && args[1] == "tensor-index" => {
             let index = GgufTensorIndex::inspect(&args[2]).map_err(|e| e.to_string())?;
             println!("GGUF version: {}", index.version);
@@ -63,14 +63,15 @@ fn run(args: Vec<String>) -> Result<(), String> {
         }
         Some("models") if (args.len() == 4 || args.len() == 5) && args[1] == "tensor-sha256" => {
             let index = GgufTensorIndex::inspect(&args[2]).map_err(|e| e.to_string())?;
-            let mut reader = llmbridge_core::storage::BoundedLocalReader::open(
-                &args[2], 64 * 1024, 128 * 1024
-            ).map_err(|e| e.to_string())?;
+            let mut reader =
+                llmbridge_core::storage::BoundedLocalReader::open(&args[2], 64 * 1024, 128 * 1024)
+                    .map_err(|e| e.to_string())?;
             let digest = if args.len() == 5 {
                 index.verify_tensor_sha256(&mut reader, &args[3], &args[4])
             } else {
                 index.sha256_tensor(&mut reader, &args[3])
-            }.map_err(|e| e.to_string())?;
+            }
+            .map_err(|e| e.to_string())?;
             println!("tensor: {}", args[3]);
             println!("sha256: {digest}");
             println!("allocated chunk bytes: {}", reader.allocated_chunk_bytes());

@@ -63,7 +63,10 @@ impl MetadataReader {
     }
 
     fn advance(&mut self, amount: u64) -> io::Result<u64> {
-        let end = self.offset.checked_add(amount).ok_or_else(|| invalid("metadata overflow"))?;
+        let end = self
+            .offset
+            .checked_add(amount)
+            .ok_or_else(|| invalid("metadata overflow"))?;
         if end > self.file_bytes || end > MAX_METADATA_BYTES {
             return Err(invalid("GGUF metadata exceeds file or bounded parse limit"));
         }
@@ -131,12 +134,17 @@ impl MetadataReader {
             }
             let width = primitive_width(element_type)
                 .ok_or_else(|| invalid("invalid GGUF array element type"))?;
-            return self.skip(count.checked_mul(width).ok_or_else(|| invalid("array size overflow"))?);
+            return self.skip(
+                count
+                    .checked_mul(width)
+                    .ok_or_else(|| invalid("array size overflow"))?,
+            );
         }
         if value_type == 8 {
             return self.skip_string();
         }
-        let width = primitive_width(value_type).ok_or_else(|| invalid("unknown GGUF metadata type"))?;
+        let width =
+            primitive_width(value_type).ok_or_else(|| invalid("unknown GGUF metadata type"))?;
         self.skip(width)
     }
 }
@@ -155,21 +163,21 @@ fn primitive_width(value_type: u32) -> Option<u64> {
 /// Unknown layouts are rejected, not guessed or reinterpreted.
 fn tensor_layout(ggml_type: u32) -> Option<(u64, u64)> {
     match ggml_type {
-        0 => Some((1, 4)),    // F32
-        1 => Some((1, 2)),    // F16
-        2 => Some((32, 18)),  // Q4_0
-        3 => Some((32, 20)),  // Q4_1
-        6 => Some((32, 22)),  // Q5_0
-        7 => Some((32, 24)),  // Q5_1
-        8 => Some((32, 34)),  // Q8_0
-        9 => Some((32, 40)),  // Q8_1
-        10 => Some((256, 84)), // Q2_K
+        0 => Some((1, 4)),      // F32
+        1 => Some((1, 2)),      // F16
+        2 => Some((32, 18)),    // Q4_0
+        3 => Some((32, 20)),    // Q4_1
+        6 => Some((32, 22)),    // Q5_0
+        7 => Some((32, 24)),    // Q5_1
+        8 => Some((32, 34)),    // Q8_0
+        9 => Some((32, 40)),    // Q8_1
+        10 => Some((256, 84)),  // Q2_K
         11 => Some((256, 110)), // Q3_K
         12 => Some((256, 144)), // Q4_K
         13 => Some((256, 176)), // Q5_K
         14 => Some((256, 210)), // Q6_K
         15 => Some((256, 292)), // Q8_K
-        30 => Some((1, 2)), // BF16
+        30 => Some((1, 2)),     // BF16
         _ => None,
     }
 }
@@ -198,7 +206,9 @@ impl GgufTensorIndex {
         let tensor_count = reader.u64()?;
         let kv_count = reader.u64()?;
         if tensor_count == 0 || tensor_count > MAX_TENSORS || kv_count > MAX_KV {
-            return Err(invalid("GGUF tensor or metadata count exceeds index admission"));
+            return Err(invalid(
+                "GGUF tensor or metadata count exceeds index admission",
+            ));
         }
 
         let mut alignment = DEFAULT_ALIGNMENT;
@@ -240,7 +250,9 @@ impl GgufTensorIndex {
             for _ in 0..dimension_count {
                 let dimension = reader.u64()?;
                 if dimension == 0 {
-                    return Err(invalid("zero-sized tensors are not supported by this reader"));
+                    return Err(invalid(
+                        "zero-sized tensors are not supported by this reader",
+                    ));
                 }
                 elements = elements
                     .checked_mul(dimension)
@@ -251,7 +263,9 @@ impl GgufTensorIndex {
             let (block, bytes_per_block) = tensor_layout(ggml_type)
                 .ok_or_else(|| invalid("GGUF tensor type not supported for indexed range reads"))?;
             if dimensions[0] % block != 0 || elements % block != 0 {
-                return Err(invalid("GGUF tensor dimension violates quantization block layout"));
+                return Err(invalid(
+                    "GGUF tensor dimension violates quantization block layout",
+                ));
             }
             let byte_len = (elements / block)
                 .checked_mul(bytes_per_block)
@@ -303,7 +317,6 @@ impl GgufTensorIndex {
         })
     }
 
-
     /// Hashes exactly the indexed tensor payload, excluding padding and other weights.
     pub fn sha256_tensor(&self, reader: &mut BoundedLocalReader, name: &str) -> io::Result<String> {
         let mut hash = Sha256::new();
@@ -340,18 +353,25 @@ impl GgufTensorIndex {
 
     /// Streams exact declared tensor bytes through the bounded local reader.
     /// Does not interpret numeric values, execute a model, or certify their provenance.
-    pub fn stream_tensor<F>(&self, reader: &mut BoundedLocalReader, name: &str, mut consume: F) -> io::Result<u64>
+    pub fn stream_tensor<F>(
+        &self,
+        reader: &mut BoundedLocalReader,
+        name: &str,
+        mut consume: F,
+    ) -> io::Result<u64>
     where
         F: FnMut(&[u8]) -> io::Result<()>,
     {
         if reader.file_bytes() != self.file_bytes {
             return Err(invalid("tensor index and storage file sizes differ"));
         }
-        let tensor = self.tensor(name).ok_or_else(|| io::Error::new(
-            io::ErrorKind::NotFound, "tensor not found in indexed GGUF"
-        ))?;
+        let tensor = self.tensor(name).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "tensor not found in indexed GGUF")
+        })?;
         let mut offset = tensor.file_offset;
-        let end = offset.checked_add(tensor.byte_len).ok_or_else(|| invalid("tensor offset overflow"))?;
+        let end = offset
+            .checked_add(tensor.byte_len)
+            .ok_or_else(|| invalid("tensor offset overflow"))?;
         while offset < end {
             let count = (end - offset).min(reader.allocated_chunk_bytes() as u64) as usize;
             let chunk = reader.read_range(offset, count)?;
@@ -407,7 +427,9 @@ mod tests {
 
     fn write(bytes: &[u8]) -> PathBuf {
         let path = std::env::temp_dir().join(format!(
-            "llmbridge-index-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)
+            "llmbridge-index-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
         ));
         File::create(&path).unwrap().write_all(bytes).unwrap();
         path
@@ -419,19 +441,29 @@ mod tests {
         let index = GgufTensorIndex::inspect(&path).unwrap();
         assert_eq!(index.tensors.len(), 2);
         let weight = index.tensor("layers.0.weight").unwrap();
-        assert_eq!((weight.dimensions.as_slice(), weight.ggml_type, weight.byte_len),
-                   (&[32, 2][..], 8, 68));
+        assert_eq!(
+            (
+                weight.dimensions.as_slice(),
+                weight.ggml_type,
+                weight.byte_len
+            ),
+            (&[32, 2][..], 8, 68)
+        );
         assert_eq!(weight.file_offset % 32, 0);
         let mut reader = BoundedLocalReader::open(&path, 13, 26).unwrap();
         let mut output = Vec::new();
-        index.stream_tensor(&mut reader, &weight.name, |chunk| {
-            assert!(chunk.len() <= 13);
-            output.extend_from_slice(chunk);
-            Ok(())
-        }).unwrap();
+        index
+            .stream_tensor(&mut reader, &weight.name, |chunk| {
+                assert!(chunk.len() <= 13);
+                output.extend_from_slice(chunk);
+                Ok(())
+            })
+            .unwrap();
         assert_eq!(output, vec![0xA5; 68]);
         assert_eq!(reader.disk_bytes_read(), 68);
-        assert!(index.verify_tensor_sha256(&mut reader, &weight.name, &"0".repeat(64)).is_err());
+        assert!(index
+            .verify_tensor_sha256(&mut reader, &weight.name, &"0".repeat(64))
+            .is_err());
         assert_eq!(reader.allocated_chunk_bytes(), 13);
         std::fs::remove_file(path).unwrap();
     }
@@ -442,13 +474,19 @@ mod tests {
         let index = GgufTensorIndex::inspect(&path).unwrap();
         let mut reader = BoundedLocalReader::open(&path, 16, 32).unwrap();
         let mut hasher = Sha256::new();
-        index.stream_tensor(&mut reader, "final.weight", |b| {
-            hasher.update(b);
-            Ok(())
-        }).unwrap();
-        assert_eq!(format!("{:x}", hasher.finalize()),
-                   format!("{:x}", Sha256::digest([0x12, 0x34, 0x56, 0x78])));
-        assert!(index.stream_tensor(&mut reader, "missing", |_| Ok(())).is_err());
+        index
+            .stream_tensor(&mut reader, "final.weight", |b| {
+                hasher.update(b);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            format!("{:x}", hasher.finalize()),
+            format!("{:x}", Sha256::digest([0x12, 0x34, 0x56, 0x78]))
+        );
+        assert!(index
+            .stream_tensor(&mut reader, "missing", |_| Ok(()))
+            .is_err());
         std::fs::remove_file(path).unwrap();
     }
 
