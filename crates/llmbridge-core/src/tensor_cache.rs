@@ -33,6 +33,14 @@ impl TensorChunkCache {
         self.used = 0;
     }
 
+    /// Reclaim chunks belonging to previous authenticated model revisions.
+    /// The caller must supply a trusted revision digest, not a filename.
+    pub fn retain_revision(&mut self, revision: [u8; 32]) {
+        self.entries.retain(|key, _| key.source_revision == revision);
+        self.lru.retain(|key| key.source_revision == revision);
+        self.used = self.entries.values().map(Vec::len).sum();
+    }
+
     pub fn get(&mut self, key: &ChunkKey) -> Option<&[u8]> {
         if !self.entries.contains_key(key) { return None; }
         self.lru.retain(|item| item != key);
@@ -116,6 +124,23 @@ mod tests {
     fn zero_budget_never_caches() {
         let mut cache = TensorChunkCache::new(0);
         assert!(cache.insert(key(1, 0, 1), b"x").is_err());
+        assert_eq!(cache.len(), 0);
+    }
+    #[test]
+    fn model_switch_reclaims_old_revision_and_preserves_new_entries() {
+        let mut cache = TensorChunkCache::new(8);
+        cache.insert(key(1, 0, 3), b"old").unwrap();
+        cache.insert(key(2, 3, 2), b"ab").unwrap();
+        cache.insert(key(2, 5, 2), b"cd").unwrap();
+        cache.retain_revision([2; 32]);
+        assert_eq!(cache.used_bytes(), 4);
+        assert_eq!(cache.len(), 2);
+        assert!(cache.get(&key(1, 0, 3)).is_none());
+        cache.insert(key(2, 7, 4), b"efgh").unwrap();
+        assert_eq!(cache.used_bytes(), 8);
+        assert_eq!(cache.get(&key(2, 3, 2)), Some(&b"ab"[..]));
+        cache.retain_revision([9; 32]);
+        assert_eq!(cache.used_bytes(), 0);
         assert_eq!(cache.len(), 0);
     }
 }
