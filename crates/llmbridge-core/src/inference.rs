@@ -401,7 +401,6 @@ fn q8_0_matvec_internal(
 mod tests {
     use super::*;
 
-
     #[test]
     fn q8_tensor_larger_than_operator_workspace_executes_with_bounded_reads() {
         use std::io::Write;
@@ -447,9 +446,9 @@ mod tests {
         assert!(index.file_bytes > BUDGET as u64);
         let mut reader = BoundedLocalReader::open(&path, 64, 128).unwrap();
         let cancel = AtomicBool::new(false);
-        let output = q8_0_matvec_with_budget(
-            &index, &mut reader, name, &[1.0f32; 32], &cancel, BUDGET,
-        ).unwrap();
+        let output =
+            q8_0_matvec_with_budget(&index, &mut reader, name, &[1.0f32; 32], &cancel, BUDGET)
+                .unwrap();
         assert_eq!(output.len(), ROWS as usize);
         assert!(output.iter().all(|&x| x == 264.0));
         assert_eq!(reader.disk_bytes_read(), ROWS * ROW_BYTES);
