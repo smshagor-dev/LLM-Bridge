@@ -1,125 +1,116 @@
-//! Sequential multi-vector execution using the existing bounded native Q8_0 operator.
-//!
-//! Results are delivered one at a time rather than accumulated in a matrix.
-//! This is not a complete transformer graph, an RSS cap, or an out-of-core model.
-
+//! Preflight admission and sequential bounded streaming of indexed GGUF tensors.
+//! The budget caps logical bytes read, NOT process RSS or OS page cache.
 use crate::gguf_index::GgufTensorIndex;
-use crate::inference::q8_0_matvec_with_budget;
 use crate::storage::BoundedLocalReader;
+use std::collections::HashSet;
+use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Execute a sequence of input vectors with a fixed operator workspace budget.
-///
-/// The callback must consume each output before the next operator invocation.
-/// The function does not retain outputs or input vectors; the caller owns the
-/// activation storage. The budget is enforced per invocation by the native
-/// operator, not across the caller's allocations or the entire process.
-///
-/// A callback returning false requests cancellation. Completed callbacks
-/// cannot be rolled back; no subsequent vector is evaluated.
-pub fn q8_0_matvec_each<I, F>(
+/// Validates the complete batch before any tensor bytes are read.
+/// Repeated tensor names are rejected to prevent accidental double execution.
+pub fn stream_tensor_batch<F>(
     index: &GgufTensorIndex,
     reader: &mut BoundedLocalReader,
-    tensor_name: &str,
-    activations: I,
+    names: &[&str],
+    max_total_bytes: u64,
     cancelled: &AtomicBool,
-    workspace_budget_bytes: usize,
-    mut on_result: F,
-) -> Result<usize, String>
+    mut consume: F,
+) -> io::Result<u64>
 where
-    I: IntoIterator,
-    I::Item: AsRef<[f32]>,
-    F: FnMut(usize, &[f32]) -> bool,
+    F: FnMut(&str, &[u8]) -> io::Result<()>,
 {
-    let mut completed = 0usize;
-    for activation in activations {
-        if cancelled.load(Ordering::Acquire) {
-            return Err("batched Q8_0 operator cancelled".into());
-        }
-        let result = q8_0_matvec_with_budget(
-            index,
-            reader,
-            tensor_name,
-            activation.as_ref(),
-            cancelled,
-            workspace_budget_bytes,
-        )?;
-        // Do not expose a result after cancellation, even if the native
-        // operator completed between its final check and this callback.
-        if cancelled.load(Ordering::Acquire) {
-            return Err("batched Q8_0 operator cancelled".into());
-        }
-        let next = completed
-            .checked_add(1)
-            .ok_or("batch result counter overflow")?;
-        if !on_result(completed, &result) {
-            return Err("batched Q8_0 operator stopped by result callback".into());
-        }
-        completed = next;
+    if cancelled.load(Ordering::Acquire) {
+        return Err(io::Error::new(io::ErrorKind::Interrupted, "batch cancelled"));
     }
-    Ok(completed)
+    if reader.identity() != &index.source_identity {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "GGUF source identity mismatch"));
+    }
+    let mut seen = HashSet::new();
+    let mut total = 0u64;
+    for name in names {
+        if !seen.insert(*name) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "duplicate tensor in batch"));
+        }
+        let tensor = index.tensor(name).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "tensor missing from GGUF index")
+        })?;
+        total = total.checked_add(tensor.byte_len).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "tensor batch size overflow")
+        })?;
+        if total > max_total_bytes {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "tensor batch exceeds byte budget"));
+        }
+    }
+    for name in names {
+        if cancelled.load(Ordering::Acquire) {
+            return Err(io::Error::new(io::ErrorKind::Interrupted, "batch cancelled"));
+        }
+        index.stream_tensor_cancellable(reader, name, cancelled, |chunk| consume(name, chunk))?;
+    }
+    Ok(total)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gguf_index::GgufTensorIndex;
     use std::io::Write;
-    use std::sync::atomic::AtomicU64;
-    static SERIAL: AtomicU64 = AtomicU64::new(0);
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
 
-    #[test]
-    fn sequential_outputs_and_early_stop_have_exact_read_accounting() {
-        let path = std::env::temp_dir().join(format!(
-            "llmbridge-q8-batch-{}-{}",
-            std::process::id(),
-            SERIAL.fetch_add(1, Ordering::Relaxed)
-        ));
+    fn fixture() -> std::path::PathBuf {
         let mut bytes = b"GGUF".to_vec();
         bytes.extend_from_slice(&3u32.to_le_bytes());
-        bytes.extend_from_slice(&1u64.to_le_bytes());
-        bytes.extend_from_slice(&0u64.to_le_bytes());
-        bytes.extend_from_slice(&1u64.to_le_bytes());
-        bytes.push(b'w');
-        bytes.extend_from_slice(&2u32.to_le_bytes());
-        bytes.extend_from_slice(&32u64.to_le_bytes());
-        bytes.extend_from_slice(&1u64.to_le_bytes());
-        bytes.extend_from_slice(&8u32.to_le_bytes());
-        bytes.extend_from_slice(&0u64.to_le_bytes());
-        while bytes.len() % 32 != 0 {
-            bytes.push(0);
-        }
-        bytes.extend_from_slice(&[0, 0x38]); // f16 scale 0.5
-        bytes.extend(1u8..=32u8);
+        bytes.extend_from_slice(&1u64.to_le_bytes()); // tensors
+        bytes.extend_from_slice(&0u64.to_le_bytes()); // metadata
+        let name = b"weights";
+        bytes.extend_from_slice(&(name.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(name);
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // rank
+        bytes.extend_from_slice(&4u64.to_le_bytes()); // four elements
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // F32
+        bytes.extend_from_slice(&0u64.to_le_bytes()); // relative offset
+        while bytes.len() % 32 != 0 { bytes.push(0); }
+        bytes.extend_from_slice(&[7u8; 16]);
+        let path = std::env::temp_dir().join(format!(
+            "llmbridge-batch-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
         std::fs::File::create(&path).unwrap().write_all(&bytes).unwrap();
-        let index = GgufTensorIndex::inspect(&path).unwrap();
-        let mut reader = BoundedLocalReader::open(&path, 64, 128).unwrap();
-        let cancelled = AtomicBool::new(false);
-        let vectors = vec![vec![1.0f32; 32], vec![2.0; 32], vec![3.0; 32]];
-        let mut observed = Vec::new();
-        let error = q8_0_matvec_each(
-            &index, &mut reader, "w", &vectors, &cancelled, 256 * 1024,
-            |i, result| {
-                observed.push((i, result.to_vec()));
-                i == 0
-            },
-        ).unwrap_err();
-        assert!(error.contains("callback"));
-        assert_eq!(observed, vec![(0, vec![264.0]), (1, vec![528.0])]);
-        assert_eq!(reader.disk_bytes_read(), 68);
+        path
+    }
 
-        cancelled.store(true, Ordering::Release);
-        assert!(q8_0_matvec_each(
-            &index, &mut reader, "w", &vectors, &cancelled, 256 * 1024,
-            |_, _| true,
-        ).is_err());
-        assert_eq!(reader.disk_bytes_read(), 68);
-        cancelled.store(false, Ordering::Release);
-        assert!(q8_0_matvec_each(
-            &index, &mut reader, "w", &vectors, &cancelled, 1,
-            |_, _| true,
-        ).is_err());
-        assert_eq!(reader.disk_bytes_read(), 68);
+    #[test]
+    fn preflight_rejects_invalid_batches_without_io() {
+        let path = fixture();
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 5, 10).unwrap();
+        let cancel = AtomicBool::new(false);
+        for names in [&["weights", "weights"][..], &["weights", "missing"][..]] {
+            assert!(stream_tensor_batch(&index, &mut reader, names, 32, &cancel, |_, _| Ok(())).is_err());
+        }
+        assert!(stream_tensor_batch(&index, &mut reader, &["weights"], 15, &cancel, |_, _| Ok(())).is_err());
+        assert_eq!(reader.disk_bytes_read(), 0);
         std::fs::remove_file(path).unwrap();
     }
 
+    #[test]
+    fn streams_exact_bytes_and_honors_cancellation() {
+        let path = fixture();
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 5, 10).unwrap();
+        let cancel = AtomicBool::new(false);
+        let mut chunks = Vec::new();
+        let total = stream_tensor_batch(&index, &mut reader, &["weights"], 16, &cancel, |name, chunk| {
+            assert_eq!(name, "weights");
+            chunks.extend_from_slice(chunk);
+            Ok(())
+        }).unwrap();
+        assert_eq!(total, 16);
+        assert_eq!(chunks, vec![7u8; 16]);
+        assert_eq!(reader.disk_bytes_read(), 16);
+        cancel.store(true, Ordering::Release);
+        assert_eq!(stream_tensor_batch(&index, &mut reader, &["weights"], 16, &cancel, |_, _| Ok(())).unwrap_err().kind(), io::ErrorKind::Interrupted);
+        assert_eq!(reader.disk_bytes_read(), 16);
+        std::fs::remove_file(path).unwrap();
+    }
 }
