@@ -1,4 +1,4 @@
-use llmbridge_core::{hardware, models};
+use llmbridge_core::{gguf_index::GgufTensorIndex, hardware, models};
 #[cfg(feature = "native")]
 use std::io::{self, Write};
 #[cfg(feature = "native")]
@@ -16,7 +16,7 @@ fn main() {
     }
 }
 fn usage() -> &'static str {
-    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream]"
+    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream]"
 }
 fn json_number(value: Option<u64>) -> String {
     value.map_or_else(|| "null".to_string(), |x| x.to_string())
@@ -39,6 +39,43 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 json_number(h.total_ram_bytes),
                 json_number(h.available_ram_bytes)
             );
+            Ok(())
+        }
+        
+        Some("models") if args.len() == 3 && args[1] == "tensor-index" => {
+            let index = GgufTensorIndex::inspect(&args[2]).map_err(|e| e.to_string())?;
+            println!("GGUF version: {}", index.version);
+            println!("tensor count: {}", index.tensors.len());
+            println!("tensor data offset: {}", index.data_offset);
+            println!("file bytes: {}", index.file_bytes);
+            for tensor in &index.tensors {
+                println!(
+                    "{} type={} dims={:?} offset={} size={}",
+                    tensor.name,
+                    tensor.ggml_type,
+                    tensor.dimensions,
+                    tensor.file_offset,
+                    tensor.byte_len
+                );
+            }
+            println!("status: validated indexed byte ranges; execution not memory-bounded");
+            Ok(())
+        }
+        Some("models") if (args.len() == 4 || args.len() == 5) && args[1] == "tensor-sha256" => {
+            let index = GgufTensorIndex::inspect(&args[2]).map_err(|e| e.to_string())?;
+            let mut reader = llmbridge_core::storage::BoundedLocalReader::open(
+                &args[2], 64 * 1024, 128 * 1024
+            ).map_err(|e| e.to_string())?;
+            let digest = if args.len() == 5 {
+                index.verify_tensor_sha256(&mut reader, &args[3], &args[4])
+            } else {
+                index.sha256_tensor(&mut reader, &args[3])
+            }.map_err(|e| e.to_string())?;
+            println!("tensor: {}", args[3]);
+            println!("sha256: {digest}");
+            println!("allocated chunk bytes: {}", reader.allocated_chunk_bytes());
+            println!("disk bytes read: {}", reader.disk_bytes_read());
+            println!("status: tensor byte stream verified locally; not model-execution parity");
             Ok(())
         }
         Some("models") if args.len() == 4 && args[1] == "verify" => {

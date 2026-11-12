@@ -1,4 +1,5 @@
 use crate::storage::BoundedLocalReader;
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{self, BufReader, Read, Seek, SeekFrom};
@@ -302,6 +303,37 @@ impl GgufTensorIndex {
         })
     }
 
+
+    /// Hashes exactly the indexed tensor payload, excluding padding and other weights.
+    pub fn sha256_tensor(&self, reader: &mut BoundedLocalReader, name: &str) -> io::Result<String> {
+        let mut hash = Sha256::new();
+        self.stream_tensor(reader, name, |chunk| {
+            hash.update(chunk);
+            Ok(())
+        })?;
+        Ok(format!("{:x}", hash.finalize()))
+    }
+
+    /// Rejects streamed tensor data that fails its caller-supplied integrity digest.
+    pub fn verify_tensor_sha256(
+        &self,
+        reader: &mut BoundedLocalReader,
+        name: &str,
+        expected: &str,
+    ) -> io::Result<String> {
+        if expected.len() != 64 || !expected.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "tensor digest must be 64 hex digits",
+            ));
+        }
+        let actual = self.sha256_tensor(reader, name)?;
+        if !actual.eq_ignore_ascii_case(expected) {
+            return Err(invalid("GGUF tensor SHA-256 mismatch"));
+        }
+        Ok(actual)
+    }
+
     pub fn tensor(&self, name: &str) -> Option<&TensorRegion> {
         self.tensors.iter().find(|tensor| tensor.name == name)
     }
@@ -333,7 +365,6 @@ impl GgufTensorIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sha2::{Digest, Sha256};
     use std::io::Write;
     use std::sync::atomic::{AtomicU64, Ordering};
     static N: AtomicU64 = AtomicU64::new(0);
@@ -400,6 +431,7 @@ mod tests {
         }).unwrap();
         assert_eq!(output, vec![0xA5; 68]);
         assert_eq!(reader.disk_bytes_read(), 68);
+        assert!(index.verify_tensor_sha256(&mut reader, &weight.name, &"0".repeat(64)).is_err());
         assert_eq!(reader.allocated_chunk_bytes(), 13);
         std::fs::remove_file(path).unwrap();
     }
