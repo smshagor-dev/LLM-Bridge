@@ -135,7 +135,10 @@ extern "C" fn read_range_callback(
         // SAFETY: caller passes a live borrowed ReaderState for the synchronous
         // probe call only. The callback is not retained by C++.
         let state = unsafe { &mut *(userdata.cast::<ReaderState<'_>>()) };
-        if state.cancelled.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+        if state
+            .cancelled
+            .is_some_and(|flag| flag.load(Ordering::Acquire))
+        {
             state.failure = Some("tensor operator cancelled".to_string());
             return 0;
         }
@@ -216,7 +219,6 @@ pub fn probe_indexed_gguf(
     })
 }
 
-
 /// Bounded Q8_0 matrix-vector operator using real GGUF tensor weights and
 /// pinned native ggml dequantization. The native operator reads one row at a
 /// time through the Rust range callback; it never materializes the matrix.
@@ -234,14 +236,14 @@ pub fn q8_0_matvec(
     if reader.identity() != &index.source_identity {
         return Err("indexed model source identity changed".to_string());
     }
-    let region = index.tensor(tensor_name).ok_or("named tensor not indexed")?;
+    let region = index
+        .tensor(tensor_name)
+        .ok_or("named tensor not indexed")?;
     if region.ggml_type != 8 || region.dimensions.len() != 2 {
         return Err("operator requires a rank-2 Q8_0 GGUF tensor".to_string());
     }
-    let columns = u32::try_from(region.dimensions[0])
-        .map_err(|_| "too many tensor columns")?;
-    let rows = u32::try_from(region.dimensions[1])
-        .map_err(|_| "too many tensor rows")?;
+    let columns = u32::try_from(region.dimensions[0]).map_err(|_| "too many tensor columns")?;
+    let rows = u32::try_from(region.dimensions[1]).map_err(|_| "too many tensor rows")?;
     if columns == 0
         || columns > 16384
         || columns % 32 != 0

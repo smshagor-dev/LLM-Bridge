@@ -410,7 +410,10 @@ impl GgufTensorIndex {
             .ok_or_else(|| invalid("tensor offset overflow"))?;
         loop {
             if cancelled.load(Ordering::Acquire) {
-                return Err(io::Error::new(io::ErrorKind::Interrupted, "tensor stream cancelled"));
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "tensor stream cancelled",
+                ));
             }
             if offset == end {
                 return Ok(tensor.byte_len);
@@ -569,16 +572,20 @@ mod tests {
         let index = GgufTensorIndex::inspect(&path).unwrap();
         let mut reader = BoundedLocalReader::open(&path, 8, 16).unwrap();
         let stop = AtomicBool::new(true);
-        let err = index.stream_tensor_cancellable(&mut reader, "layers.0.weight", &stop, |_| Ok(())).unwrap_err();
+        let err = index
+            .stream_tensor_cancellable(&mut reader, "layers.0.weight", &stop, |_| Ok(()))
+            .unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::Interrupted);
         assert_eq!(reader.disk_bytes_read(), 0);
         stop.store(false, Ordering::Release);
         let mut delivered = 0;
-        let err = index.stream_tensor_cancellable(&mut reader, "layers.0.weight", &stop, |chunk| {
-            delivered += chunk.len();
-            stop.store(true, Ordering::Release);
-            Ok(())
-        }).unwrap_err();
+        let err = index
+            .stream_tensor_cancellable(&mut reader, "layers.0.weight", &stop, |chunk| {
+                delivered += chunk.len();
+                stop.store(true, Ordering::Release);
+                Ok(())
+            })
+            .unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::Interrupted);
         assert_eq!(delivered, 8);
         assert_eq!(reader.disk_bytes_read(), 8);
