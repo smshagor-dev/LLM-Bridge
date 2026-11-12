@@ -1,5 +1,6 @@
 use crate::gguf_index::GgufTensorIndex;
 use crate::storage::BoundedLocalReader;
+use sha2::{Digest, Sha256};
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::path::Path;
 use std::slice;
@@ -243,6 +244,23 @@ pub fn q8_0_matvec(
     )
 }
 
+/// Require caller-supplied authenticated tensor SHA-256 before executing.
+/// Two bounded passes (hash then compute) avoid materializing the matrix.
+/// Expected hashes must be obtained from a trusted source.
+pub fn q8_0_matvec_verified(
+    index: &GgufTensorIndex,
+    reader: &mut BoundedLocalReader,
+    tensor_name: &str,
+    activation: &[f32],
+    cancelled: &AtomicBool,
+    expected_sha256: &str,
+) -> Result<Vec<f32>, String> {
+    q8_0_matvec_internal(
+        index, reader, tensor_name, activation, cancelled,
+        1024 * 1024, Some(expected_sha256),
+    )
+}
+
 /// Caps explicitly managed tensor-operator data (source buffer, input,
 /// output, native packed/dequantized row and reserved allocator overhead).
 /// This is not an OS-level RSS/cgroup limit or a graph-wide budget.
@@ -253,6 +271,21 @@ pub fn q8_0_matvec_with_budget(
     activation: &[f32],
     cancelled: &AtomicBool,
     workspace_budget_bytes: usize,
+) -> Result<Vec<f32>, String> {
+    q8_0_matvec_internal(
+        index, reader, tensor_name, activation, cancelled,
+        workspace_budget_bytes, None,
+    )
+}
+
+fn q8_0_matvec_internal(
+    index: &GgufTensorIndex,
+    reader: &mut BoundedLocalReader,
+    tensor_name: &str,
+    activation: &[f32],
+    cancelled: &AtomicBool,
+    workspace_budget_bytes: usize,
+    expected_sha256: Option<&str>,
 ) -> Result<Vec<f32>, String> {
     if reader.identity() != &index.source_identity {
         return Err("indexed model source identity changed".to_string());
@@ -299,6 +332,24 @@ pub fn q8_0_matvec_with_budget(
         || cancelled.load(Ordering::Acquire)
     {
         return Err("operator workspace exceeds budget or request cancelled".to_string());
+    }
+    if let Some(expected) = expected_sha256 {
+        if expected.len() != 64 || !expected.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err("expected tensor SHA-256 must be 64 hexadecimal characters".to_string());
+        }
+        let mut digest = Sha256::new();
+        index
+            .stream_tensor_cancellable(reader, tensor_name, cancelled, |chunk| {
+                digest.update(chunk);
+                Ok(())
+            })
+            .map_err(|e| format!("tensor hash verification failed: {e}"))?;
+        if !format!("{:x}", digest.finalize()).eq_ignore_ascii_case(expected) {
+            return Err("tensor SHA-256 mismatch; native execution refused".to_string());
+        }
+        if cancelled.load(Ordering::Acquire) {
+            return Err("tensor verification cancelled".to_string());
+        }
     }
     let mut output = vec![0f32; rows as usize];
     let mut state = ReaderState {
@@ -385,9 +436,22 @@ mod tests {
                 .is_err()
         );
         assert_eq!(reader.disk_bytes_read(), 68);
+        assert!(q8_0_matvec_verified(
+            &index, &mut reader, "weights", &[1f32; 32], &cancel, &"0".repeat(64)
+        ).is_err());
+        assert_eq!(reader.disk_bytes_read(), 136);
+        let digest = {
+            let mut independent_reader = BoundedLocalReader::open(&path, 64, 128).unwrap();
+            index.sha256_tensor(&mut independent_reader, "weights").unwrap()
+        };
+        let verified = q8_0_matvec_verified(
+            &index, &mut reader, "weights", &[1f32; 32], &cancel, &digest
+        ).unwrap();
+        assert_eq!(verified, vec![264.0, -264.0]);
+        assert_eq!(reader.disk_bytes_read(), 272);
         cancel.store(true, Ordering::Release);
         assert!(q8_0_matvec(&index, &mut reader, "weights", &[1f32; 32], &cancel).is_err());
-        assert_eq!(reader.disk_bytes_read(), 68);
+        assert_eq!(reader.disk_bytes_read(), 272);
         cancel.store(false, Ordering::Release);
         assert!(q8_0_matvec(&index, &mut reader, "weights", &[f32::NAN; 32], &cancel).is_err());
         assert!(q8_0_matvec(&index, &mut reader, "weights", &[1f32; 31], &cancel).is_err());

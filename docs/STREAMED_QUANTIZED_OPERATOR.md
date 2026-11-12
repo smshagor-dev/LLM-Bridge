@@ -33,3 +33,13 @@ attention, MLP, embedding, KV cache, or full token decode. The per-tensor
 working-set bound is not a process-wide resident memory bound. Completion
 of the out-of-core milestone requires integrating these mechanisms into actual
 layer execution, full-model correctness validation and measured RSS.
+
+An optional fifth CLI argument supplies a trusted SHA-256 digest. The
+verified operator first streams and hashes the entire tensor using the same
+bounded reader and cooperative cancellation; only an exact digest match
+allows the native CPU operator to execute. Verification deliberately incurs a
+second read of the tensor, so benchmark results must count that additional
+I/O. A bare hash without a trusted reference provides no authenticity.
+
+Example:
+    llmbridge models tensor-matvec model.gguf blk.0.attn_q.weight 0123...64-hex

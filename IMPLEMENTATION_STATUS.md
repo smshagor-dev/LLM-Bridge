@@ -29,3 +29,8 @@ Not implemented. Next priority remains genuine tensor-to-native-graph storage in
   a workflow on this commit completes successfully.
 - Still NOT integrated into full llama.cpp inference graph, not a complete
   out-of-core model runtime and not process-RSS bounded.
+
+- Added optional caller-supplied SHA-256 admission: cancellable bounded
+  pre-execution hash pass, fails closed on mismatch, never hands native code
+  unverified tensor bytes under this opt-in path. The independent real-GGUF
+  parity check now invokes this verified variant.

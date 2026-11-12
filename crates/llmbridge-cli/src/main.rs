@@ -16,7 +16,7 @@ fn main() {
     }
 }
 fn usage() -> &'static str {
-    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name>\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics]"
+    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics]"
 }
 fn json_number(value: Option<u64>) -> String {
     value.map_or_else(|| "null".to_string(), |x| x.to_string())
@@ -63,7 +63,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         }
 
         #[cfg(feature = "native")]
-        Some("models") if args.len() == 4 && args[1] == "tensor-matvec" => {
+        Some("models") if (args.len() == 4 || args.len() == 5) && args[1] == "tensor-matvec" => {
             let index = GgufTensorIndex::inspect(&args[2]).map_err(|e| e.to_string())?;
             let tensor = index.tensor(&args[3]).ok_or("tensor does not exist")?;
             let cols = usize::try_from(*tensor.dimensions.first().ok_or("empty shape")?)
@@ -75,13 +75,16 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 llmbridge_core::storage::BoundedLocalReader::open(&args[2], 64 * 1024, 128 * 1024)
                     .map_err(|e| e.to_string())?;
             let cancelled = AtomicBool::new(false);
-            let output = llmbridge_core::inference::q8_0_matvec(
-                &index,
-                &mut reader,
-                &args[3],
-                &vec![1.0f32; cols],
-                &cancelled,
-            )?;
+            let ones = vec![1.0f32; cols];
+            let output = if args.len() == 5 {
+                llmbridge_core::inference::q8_0_matvec_verified(
+                    &index, &mut reader, &args[3], &ones, &cancelled, &args[4],
+                )?
+            } else {
+                llmbridge_core::inference::q8_0_matvec(
+                    &index, &mut reader, &args[3], &ones, &cancelled,
+                )?
+            };
             println!("tensor: {}", args[3]);
             println!("rows: {}", output.len());
             println!("columns: {cols}");
@@ -90,6 +93,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             }
             println!("weight bytes read: {}", reader.disk_bytes_read());
             println!("native scratch: one quantized row + one dequantized row");
+            println!("integrity: {}", if args.len() == 5 { "SHA-256 verified against caller-supplied digest" } else { "NOT independently verified" });
             println!("status: real bounded tensor math; not full transformer inference");
             Ok(())
         }

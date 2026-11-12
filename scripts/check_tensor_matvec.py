@@ -6,6 +6,7 @@ no synthetic result, and no assumption that this proves full transformer
 inference or process RSS bounds.
 """
 import argparse
+import hashlib
 import json
 import math
 import struct
@@ -32,9 +33,22 @@ def reference(path, tensor):
             outputs.append(total)
     return outputs
 
-def actual(binary, path, tensor):
+def tensor_digest(path, tensor):
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        f.seek(tensor["offset"])
+        remaining = tensor["size"]
+        while remaining:
+            chunk = f.read(min(65536, remaining))
+            if not chunk:
+                raise AssertionError("unexpected EOF when verifying tensor SHA-256")
+            digest.update(chunk)
+            remaining -= len(chunk)
+    return digest.hexdigest()
+
+def actual(binary, path, tensor, expected_digest):
     result = subprocess.run(
-        [str(binary), "models", "tensor-matvec", str(path), tensor["name"]],
+        [str(binary), "models", "tensor-matvec", str(path), tensor["name"], expected_digest],
         capture_output=True, text=True, timeout=120, check=True,
     )
     rows = []
@@ -71,13 +85,15 @@ def main():
         raise AssertionError("checkpoint has no supported Q8_0 matrix")
     tensor = min(candidates, key=lambda t: t["size"])
     expected = reference(path, tensor)
-    observed, bytes_read = actual(binary, path, tensor)
+    digest = tensor_digest(path, tensor)
+    observed, bytes_read = actual(binary, path, tensor, digest)
     differences = [abs(a - b) for a, b in zip(expected, observed)]
     for idx, (want, got) in enumerate(zip(expected, observed)):
         if not math.isfinite(got) or not math.isclose(want, got, rel_tol=1e-5, abs_tol=1e-4):
             raise AssertionError(f"row {idx}: expected {want}, native returned {got}")
     result = {
-        "model": path.name, "tensor": tensor, "rows": tensor["dims"][1],
+        "model": path.name, "tensor": tensor, "verified_tensor_sha256": digest,
+        "rows": tensor["dims"][1],
         "columns": tensor["dims"][0], "bytes_read": bytes_read,
         "max_abs_difference": max(differences, default=0.0),
         "relative_tolerance": 1e-5, "absolute_tolerance": 1e-4,
