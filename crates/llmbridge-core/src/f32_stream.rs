@@ -101,14 +101,20 @@ pub fn f32_matvec_cancellable(
             for (j, encoded) in bytes.chunks_exact(4).enumerate() {
                 let value = f32::from_le_bytes(encoded.try_into().expect("four bytes"));
                 if !value.is_finite() {
-                    return Err(reject(ErrorKind::InvalidData, "non-finite F32 tensor weight"));
+                    return Err(reject(
+                        ErrorKind::InvalidData,
+                        "non-finite F32 tensor weight",
+                    ));
                 }
                 let column = consumed / 4 + j;
                 sum += value * input[column];
                 // Reject overflow as soon as it occurs rather than reading the
                 // remainder of a corrupt or numerically unsafe tensor row.
                 if !sum.is_finite() {
-                    return Err(reject(ErrorKind::InvalidData, "non-finite F32 matrix result"));
+                    return Err(reject(
+                        ErrorKind::InvalidData,
+                        "non-finite F32 matrix result",
+                    ));
                 }
             }
             consumed += count;
@@ -117,7 +123,10 @@ pub fn f32_matvec_cancellable(
             return Err(reject(ErrorKind::Interrupted, "matrix operation cancelled"));
         }
         if !sum.is_finite() {
-            return Err(reject(ErrorKind::InvalidData, "non-finite F32 matrix result"));
+            return Err(reject(
+                ErrorKind::InvalidData,
+                "non-finite F32 matrix result",
+            ));
         }
         *destination = sum;
     }
@@ -139,9 +148,20 @@ pub fn f32_matvec_atomic_cancellable(
     workspace_budget_bytes: usize,
 ) -> io::Result<()> {
     if scratch.len() != output.len() {
-        return Err(reject(ErrorKind::InvalidInput, "scratch/output shape mismatch"));
+        return Err(reject(
+            ErrorKind::InvalidInput,
+            "scratch/output shape mismatch",
+        ));
     }
-    f32_matvec_cancellable(index, reader, tensor_name, input, scratch, cancelled, workspace_budget_bytes)?;
+    f32_matvec_cancellable(
+        index,
+        reader,
+        tensor_name,
+        input,
+        scratch,
+        cancelled,
+        workspace_budget_bytes,
+    )?;
     if cancelled.load(Ordering::Acquire) {
         return Err(reject(ErrorKind::Interrupted, "matrix operation cancelled"));
     }
@@ -163,24 +183,45 @@ pub fn f32_matvec_bias_cancellable(
     cancelled: &AtomicBool,
     workspace_budget_bytes: usize,
 ) -> io::Result<()> {
-    if bias.len() != output.len() || scratch.len() != output.len()
+    if bias.len() != output.len()
+        || scratch.len() != output.len()
         || bias.iter().any(|value| !value.is_finite())
     {
-        return Err(reject(ErrorKind::InvalidInput, "invalid bias or scratch/output shape"));
+        return Err(reject(
+            ErrorKind::InvalidInput,
+            "invalid bias or scratch/output shape",
+        ));
     }
-    f32_matvec_cancellable(index, reader, tensor_name, input, scratch, cancelled, workspace_budget_bytes)?;
+    f32_matvec_cancellable(
+        index,
+        reader,
+        tensor_name,
+        input,
+        scratch,
+        cancelled,
+        workspace_budget_bytes,
+    )?;
     for (value, addition) in scratch.iter_mut().zip(bias) {
         if cancelled.load(Ordering::Acquire) {
-            return Err(reject(ErrorKind::Interrupted, "biased matrix operation cancelled"));
+            return Err(reject(
+                ErrorKind::Interrupted,
+                "biased matrix operation cancelled",
+            ));
         }
         let sum = *value + *addition;
         if !sum.is_finite() {
-            return Err(reject(ErrorKind::InvalidData, "non-finite biased matrix result"));
+            return Err(reject(
+                ErrorKind::InvalidData,
+                "non-finite biased matrix result",
+            ));
         }
         *value = sum;
     }
     if cancelled.load(Ordering::Acquire) {
-        return Err(reject(ErrorKind::Interrupted, "biased matrix operation cancelled"));
+        return Err(reject(
+            ErrorKind::Interrupted,
+            "biased matrix operation cancelled",
+        ));
     }
     output.copy_from_slice(scratch);
     Ok(())
@@ -233,10 +274,15 @@ mod tests {
         bytes.extend_from_slice(&2u64.to_le_bytes());
         bytes.extend_from_slice(&0u32.to_le_bytes());
         bytes.extend_from_slice(&0u64.to_le_bytes());
-        while bytes.len() % 32 != 0 { bytes.push(0); }
-        for value in [2f32, f32::NAN] { bytes.extend_from_slice(&value.to_le_bytes()); }
+        while bytes.len() % 32 != 0 {
+            bytes.push(0);
+        }
+        for value in [2f32, f32::NAN] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
         let path = std::env::temp_dir().join(format!(
-            "llmbridge-f32-atomic-{}-{}", std::process::id(),
+            "llmbridge-f32-atomic-{}-{}",
+            std::process::id(),
             NEXT.fetch_add(1, AtomicOrdering::Relaxed)
         ));
         File::create(&path).unwrap().write_all(&bytes).unwrap();
@@ -245,9 +291,16 @@ mod tests {
         let mut scratch = [99f32; 2];
         let mut output = [77f32; 2];
         let err = f32_matvec_atomic_cancellable(
-            &index, &mut reader, "w", &[3.], &mut scratch, &mut output,
-            &AtomicBool::new(false), 4
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "w",
+            &[3.],
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+        )
+        .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidData);
         assert_eq!(scratch[0], 6.);
         assert_eq!(output, [77.; 2]);
@@ -263,9 +316,16 @@ mod tests {
         let mut scratch = [11f32; 1];
         let mut output = [22f32; 2];
         let err = f32_matvec_atomic_cancellable(
-            &index, &mut reader, "missing", &[1.], &mut scratch, &mut output,
-            &AtomicBool::new(false), 4
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "missing",
+            &[1.],
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+        )
+        .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidInput);
         assert_eq!(reader.disk_bytes_read(), 0);
         assert_eq!(output, [22.; 2]);
@@ -285,10 +345,15 @@ mod tests {
         bytes.extend_from_slice(&2u64.to_le_bytes());
         bytes.extend_from_slice(&0u32.to_le_bytes());
         bytes.extend_from_slice(&0u64.to_le_bytes());
-        while bytes.len() % 32 != 0 { bytes.push(0); }
-        for value in [2f32, f32::MAX] { bytes.extend_from_slice(&value.to_le_bytes()); }
+        while bytes.len() % 32 != 0 {
+            bytes.push(0);
+        }
+        for value in [2f32, f32::MAX] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
         let path = std::env::temp_dir().join(format!(
-            "llmbridge-f32-bias-{}-{}", std::process::id(),
+            "llmbridge-f32-bias-{}-{}",
+            std::process::id(),
             NEXT.fetch_add(1, AtomicOrdering::Relaxed)
         ));
         File::create(&path).unwrap().write_all(&bytes).unwrap();
@@ -297,16 +362,32 @@ mod tests {
         let mut scratch = [0f32; 2];
         let mut output = [77f32; 2];
         let err = f32_matvec_bias_cancellable(
-            &index, &mut reader, "w", &[1.], &[1., f32::MAX],
-            &mut scratch, &mut output, &AtomicBool::new(false), 4
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "w",
+            &[1.],
+            &[1., f32::MAX],
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+        )
+        .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidData);
         assert_eq!(output, [77.; 2]);
         assert_eq!(reader.disk_bytes_read(), 8);
         f32_matvec_bias_cancellable(
-            &index, &mut reader, "w", &[1.], &[1., -f32::MAX],
-            &mut scratch, &mut output, &AtomicBool::new(false), 4
-        ).unwrap();
+            &index,
+            &mut reader,
+            "w",
+            &[1.],
+            &[1., -f32::MAX],
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+        )
+        .unwrap();
         assert_eq!(output, [3., 0.]);
         std::fs::remove_file(path).unwrap();
     }
@@ -319,9 +400,17 @@ mod tests {
         let mut scratch = [99f32; 1];
         let mut output = [77f32; 1];
         let err = f32_matvec_bias_cancellable(
-            &index, &mut reader, "missing", &[1.], &[f32::NAN],
-            &mut scratch, &mut output, &AtomicBool::new(false), 4
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "missing",
+            &[1.],
+            &[f32::NAN],
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+        )
+        .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidInput);
         assert_eq!(reader.disk_bytes_read(), 0);
         assert_eq!(scratch, [99.]);
@@ -343,10 +432,15 @@ mod tests {
             bytes.extend_from_slice(&1u64.to_le_bytes());
             bytes.extend_from_slice(&0u32.to_le_bytes());
             bytes.extend_from_slice(&0u64.to_le_bytes());
-            while bytes.len() % 32 != 0 { bytes.push(0); }
-            for value in values { bytes.extend_from_slice(&value.to_le_bytes()); }
+            while bytes.len() % 32 != 0 {
+                bytes.push(0);
+            }
+            for value in values {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
             let path = std::env::temp_dir().join(format!(
-                "llmbridge-f32-invalid-{}-{}", std::process::id(),
+                "llmbridge-f32-invalid-{}-{}",
+                std::process::id(),
                 NEXT.fetch_add(1, AtomicOrdering::Relaxed)
             ));
             File::create(&path).unwrap().write_all(&bytes).unwrap();
@@ -354,9 +448,15 @@ mod tests {
             let mut reader = BoundedLocalReader::open(&path, 8, 16).unwrap();
             let mut output = [123.0f32];
             let error = f32_matvec_cancellable(
-                &index, &mut reader, "w", &[input, input], &mut output,
-                &AtomicBool::new(false), 8,
-            ).unwrap_err();
+                &index,
+                &mut reader,
+                "w",
+                &[input, input],
+                &mut output,
+                &AtomicBool::new(false),
+                8,
+            )
+            .unwrap_err();
             assert_eq!(error.kind(), ErrorKind::InvalidData);
             assert_eq!(output, [123.0]);
             std::fs::remove_file(path).unwrap();
@@ -379,12 +479,15 @@ mod tests {
         bytes.extend_from_slice(&1u64.to_le_bytes());
         bytes.extend_from_slice(&0u32.to_le_bytes());
         bytes.extend_from_slice(&0u64.to_le_bytes());
-        while bytes.len() % 32 != 0 { bytes.push(0); }
+        while bytes.len() % 32 != 0 {
+            bytes.push(0);
+        }
         for weight in [f32::MAX, 1., 1., 1.] {
             bytes.extend_from_slice(&weight.to_le_bytes());
         }
         let path = std::env::temp_dir().join(format!(
-            "llmbridge-f32-early-overflow-{}-{}", std::process::id(),
+            "llmbridge-f32-early-overflow-{}-{}",
+            std::process::id(),
             NEXT.fetch_add(1, AtomicOrdering::Relaxed)
         ));
         File::create(&path).unwrap().write_all(&bytes).unwrap();
@@ -392,9 +495,15 @@ mod tests {
         let mut reader = BoundedLocalReader::open(&path, 4, 8).unwrap();
         let mut output = [77f32];
         let err = f32_matvec_cancellable(
-            &index, &mut reader, "w", &[f32::MAX, 1., 1., 1.],
-            &mut output, &AtomicBool::new(false), 4
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "w",
+            &[f32::MAX, 1., 1., 1.],
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+        )
+        .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidData);
         assert_eq!(reader.disk_bytes_read(), 4);
         assert_eq!(output, [77.]);
