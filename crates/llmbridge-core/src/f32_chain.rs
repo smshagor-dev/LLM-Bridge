@@ -127,17 +127,17 @@ mod tests {
 
     #[test]
     fn second_stage_failure_never_commits_partial_output() {
-        let path = fixture(f32::NAN);
+        let path = fixture(1.);
         let index = GgufTensorIndex::inspect(&path).unwrap();
         let mut reader = BoundedLocalReader::open(&path, 4, 8).unwrap();
         let mut hidden = [0f32; 2];
         let mut scratch = [0f32; 1];
         let mut output = [77f32; 1];
         let err = f32_two_stage_cancellable(
-            &index, &mut reader, "first", "second", &[2., 3.],
+            &index, &mut reader, "first", "second", &[f32::MAX, f32::MAX],
             &mut hidden, &mut scratch, &mut output, &AtomicBool::new(false), 4
         ).unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::InvalidData);
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
         assert_eq!(output, [77.]);
         std::fs::remove_file(path).unwrap();
     }
