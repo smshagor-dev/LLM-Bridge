@@ -152,6 +152,26 @@ impl RuntimeMemoryLimits {
         result
     }
 
+    /// Like around_growth_with_sampler, but additionally requires a valid
+    /// process-lifetime peak RSS measurement after the operation. This catches
+    /// transient peaks missed by current-RSS postflight, at the cost of rejecting
+    /// platforms that cannot report a peak. It remains an audit, not a hard cap.
+    pub fn around_growth_with_peak_audit<T>(
+        self,
+        growth_bytes: u64,
+        reserve_bytes: u64,
+        mut sample: impl FnMut() -> ProcessMemory,
+        operation: impl FnOnce() -> io::Result<T>,
+    ) -> io::Result<T> {
+        self.check_growth(&sample(), growth_bytes, reserve_bytes)
+            .map_err(violation_io)?;
+        let result = operation();
+        let after = sample();
+        self.check(&after).map_err(violation_io)?;
+        self.check_peak(&after).map_err(violation_io)?;
+        result
+    }
+
     /// Execute a fallible native boundary only when both surrounding samples pass.
     /// The closure is never invoked on preflight failure. Its side effects cannot
     /// be rolled back if the postflight sample exceeds the limit.
@@ -316,6 +336,51 @@ mod tests {
         assert!(invoked.get());
         assert_eq!(samples.get(), 2);
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::OutOfMemory);
+    }
+
+    #[test]
+    fn audited_growth_rejects_transient_peak_even_when_current_rss_recovers() {
+        use std::cell::Cell;
+        let limits = RuntimeMemoryLimits {
+            max_process_rss_bytes: 100,
+            max_cgroup_current_bytes: None,
+        };
+        let calls = Cell::new(0);
+        let result = limits.around_growth_with_peak_audit(
+            10, 10,
+            || {
+                let n = calls.get();
+                calls.set(n + 1);
+                let mut reading = sample(Some(40), None);
+                reading.peak_rss_bytes = Some(if n == 0 { 50 } else { 110 });
+                reading
+            },
+            || Ok(42),
+        );
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::OutOfMemory);
+        assert_eq!(calls.get(), 2);
+    }
+
+    #[test]
+    fn audited_growth_rejects_missing_peak_and_preserves_safe_operation_errors() {
+        let limits = RuntimeMemoryLimits {
+            max_process_rss_bytes: 100,
+            max_cgroup_current_bytes: None,
+        };
+        let missing = limits.around_growth_with_peak_audit(
+            1, 0, || sample(Some(10), None), || Ok(()),
+        );
+        assert_eq!(missing.unwrap_err().kind(), io::ErrorKind::OutOfMemory);
+        let failed: io::Result<()> = limits.around_growth_with_peak_audit(
+            1, 0,
+            || {
+                let mut reading = sample(Some(10), None);
+                reading.peak_rss_bytes = Some(20);
+                reading
+            },
+            || Err(io::Error::new(io::ErrorKind::BrokenPipe, "native failure")),
+        );
+        assert_eq!(failed.unwrap_err().kind(), io::ErrorKind::BrokenPipe);
     }
 
     #[test]
