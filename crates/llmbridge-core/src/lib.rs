@@ -1,3 +1,4 @@
+pub mod allocation_admission;
 pub mod gguf_index;
 pub mod hardware;
 #[cfg(feature = "native")]
