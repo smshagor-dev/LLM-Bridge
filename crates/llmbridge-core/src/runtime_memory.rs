@@ -163,8 +163,12 @@ impl RuntimeMemoryLimits {
         mut sample: impl FnMut() -> ProcessMemory,
         operation: impl FnOnce() -> io::Result<T>,
     ) -> io::Result<T> {
-        self.check_growth(&sample(), growth_bytes, reserve_bytes)
+        let before = sample();
+        self.check_growth(&before, growth_bytes, reserve_bytes)
             .map_err(violation_io)?;
+        // A lifetime peak above the ceiling must deny execution even if
+        // current RSS has fallen; otherwise a pre-existing breach is hidden.
+        self.check_peak(&before).map_err(violation_io)?;
         let result = operation();
         let after = sample();
         self.check(&after).map_err(violation_io)?;
@@ -330,12 +334,55 @@ mod tests {
             },
             || {
                 invoked.set(true);
-                Err(io::Error::new(io::ErrorKind::Other, "native failed"))
+                Err(io::Error::other("native failed"))
             },
         );
         assert!(invoked.get());
         assert_eq!(samples.get(), 2);
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::OutOfMemory);
+    }
+
+    #[test]
+    fn peak_audit_denies_execution_when_prior_high_water_exceeded_limit() {
+        use std::cell::Cell;
+        let limits = RuntimeMemoryLimits {
+            max_process_rss_bytes: 100,
+            max_cgroup_current_bytes: None,
+        };
+        let invoked = Cell::new(false);
+        let result = limits.around_growth_with_peak_audit(
+            10, 0,
+            || {
+                let mut reading = sample(Some(20), None);
+                reading.peak_rss_bytes = Some(101);
+                reading
+            },
+            || {
+                invoked.set(true);
+                Ok(())
+            },
+        );
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::OutOfMemory);
+        assert!(!invoked.get());
+    }
+
+    #[test]
+    fn peak_audit_denies_execution_when_initial_peak_is_unknown() {
+        use std::cell::Cell;
+        let limits = RuntimeMemoryLimits {
+            max_process_rss_bytes: 100,
+            max_cgroup_current_bytes: None,
+        };
+        let invoked = Cell::new(false);
+        let result = limits.around_growth_with_peak_audit(
+            1, 0, || sample(Some(10), None),
+            || {
+                invoked.set(true);
+                Ok(())
+            },
+        );
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::OutOfMemory);
+        assert!(!invoked.get());
     }
 
     #[test]
@@ -347,7 +394,8 @@ mod tests {
         };
         let calls = Cell::new(0);
         let result = limits.around_growth_with_peak_audit(
-            10, 10,
+            10,
+            10,
             || {
                 let n = calls.get();
                 calls.set(n + 1);
@@ -367,12 +415,12 @@ mod tests {
             max_process_rss_bytes: 100,
             max_cgroup_current_bytes: None,
         };
-        let missing = limits.around_growth_with_peak_audit(
-            1, 0, || sample(Some(10), None), || Ok(()),
-        );
+        let missing =
+            limits.around_growth_with_peak_audit(1, 0, || sample(Some(10), None), || Ok(()));
         assert_eq!(missing.unwrap_err().kind(), io::ErrorKind::OutOfMemory);
         let failed: io::Result<()> = limits.around_growth_with_peak_audit(
-            1, 0,
+            1,
+            0,
             || {
                 let mut reading = sample(Some(10), None);
                 reading.peak_rss_bytes = Some(20);

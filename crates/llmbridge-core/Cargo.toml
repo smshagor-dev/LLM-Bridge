@@ -15,3 +15,7 @@ cmake = "0.1.54"
 [[example]]
 name = "model_contract"
 required-features = ["native"]
+
+[[example]]
+name = "q8_two_stage"
+required-features = ["native"]

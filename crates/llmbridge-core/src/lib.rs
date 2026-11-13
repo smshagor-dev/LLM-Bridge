@@ -1,16 +1,20 @@
+pub mod allocation_admission;
 pub mod gguf_index;
 pub mod hardware;
 #[cfg(feature = "native")]
 pub mod inference;
 pub mod models;
 
-pub mod f32_stream;
-pub mod f32_residual;
 pub mod f32_chain;
+pub mod f32_residual;
+pub mod f32_stream;
 pub mod f32_swiglu;
 pub mod memory_plan;
+pub mod memory_budget;
 #[cfg(feature = "native")]
 pub mod q8_batch;
+#[cfg(feature = "native")]
+pub mod q8_chain;
 pub mod runtime_memory;
 pub mod storage;
 pub mod tensor_batch;

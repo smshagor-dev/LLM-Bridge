@@ -116,9 +116,11 @@ impl BoundedLocalReader {
         // A descriptor can still read the old inode after its path is replaced.
         // Reject a renamed, deleted or symlink-substituted model before returning bytes.
         let path_metadata = fs::symlink_metadata(&self.source_path)?;
-        if !path_metadata.is_file() || path_metadata.file_type().is_symlink()
+        if !path_metadata.is_file()
+            || path_metadata.file_type().is_symlink()
             || SourceIdentity::from_metadata(&path_metadata) != self.source_identity
-            || SourceIdentity::from_metadata(&current) != self.source_identity {
+            || SourceIdentity::from_metadata(&current) != self.source_identity
+        {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "source changed while reading; reject stale or mixed tensor bytes",
@@ -141,9 +143,15 @@ impl BoundedLocalReader {
         }
         // Reject accounting overflow before touching the source. Saturating the
         // counter would make an I/O audit appear valid after losing bytes.
-        let next_disk_bytes_read = self.disk_bytes_read
-            .checked_add(bytes as u64)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "tensor read accounting overflow"))?;
+        let next_disk_bytes_read =
+            self.disk_bytes_read
+                .checked_add(bytes as u64)
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "tensor read accounting overflow",
+                    )
+                })?;
         self.assert_unchanged()?;
         self.file.seek(SeekFrom::Start(offset))?;
         self.file.read_exact(&mut self.buffer[..bytes])?;
@@ -162,12 +170,18 @@ impl BoundedLocalReader {
         mut cancelled: impl FnMut() -> bool,
     ) -> io::Result<&[u8]> {
         if cancelled() {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "range read cancelled"));
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "range read cancelled",
+            ));
         }
         // Keep the read within the existing source-identity and accounting checks.
         self.read_range(offset, bytes)?;
         if cancelled() {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "range read cancelled"));
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "range read cancelled",
+            ));
         }
         Ok(&self.buffer[..bytes])
     }
@@ -202,6 +216,9 @@ impl BoundedLocalReader {
                 "model hash cancelled",
             ));
         }
+        // Even an empty file must still refer to the opened, unchanged source.
+        // Detect a replacement after the last chunk or during final cancellation.
+        self.assert_unchanged()?;
         Ok(format!("{:x}", hash.finalize()))
     }
 
@@ -243,7 +260,6 @@ impl BoundedLocalReader {
     pub fn verify_sha256(&mut self, expected: &str) -> io::Result<String> {
         self.verify_sha256_cancellable(expected, || false)
     }
-
 }
 
 #[cfg(test)]
@@ -268,21 +284,28 @@ mod tests {
         let path = fixture(b"abcdef");
         let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
         let mut checks = 0usize;
-        let err = reader.read_range_cancellable(0, 2, || {
-            checks += 1;
-            checks == 1
-        }).unwrap_err();
+        let err = reader
+            .read_range_cancellable(0, 2, || {
+                checks += 1;
+                checks == 1
+            })
+            .unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::Interrupted);
         assert_eq!(reader.disk_bytes_read(), 0);
         checks = 0;
-        let err = reader.read_range_cancellable(0, 2, || {
-            checks += 1;
-            checks == 2
-        }).unwrap_err();
+        let err = reader
+            .read_range_cancellable(0, 2, || {
+                checks += 1;
+                checks == 2
+            })
+            .unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::Interrupted);
         assert_eq!(reader.disk_bytes_read(), 2);
         assert_eq!(checks, 2);
-        assert_eq!(reader.read_range_cancellable(2, 2, || false).unwrap(), b"cd");
+        assert_eq!(
+            reader.read_range_cancellable(2, 2, || false).unwrap(),
+            b"cd"
+        );
         assert_eq!(reader.disk_bytes_read(), 4);
         fs::remove_file(path).unwrap();
     }
@@ -311,10 +334,12 @@ mod tests {
         let path = fixture(b"abcd");
         let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
         let mut checks = 0usize;
-        let error = reader.sha256_cancellable(|| {
-            checks += 1;
-            checks == 4
-        }).unwrap_err();
+        let error = reader
+            .sha256_cancellable(|| {
+                checks += 1;
+                checks == 4
+            })
+            .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::Interrupted);
         assert_eq!(reader.disk_bytes_read(), 4);
         assert_eq!(checks, 4);
@@ -327,10 +352,12 @@ mod tests {
         let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
         let expected = format!("{:x}", Sha256::digest(b"abcd"));
         let mut checks = 0usize;
-        let err = reader.verify_sha256_cancellable(&expected, || {
-            checks += 1;
-            checks == 4
-        }).unwrap_err();
+        let err = reader
+            .verify_sha256_cancellable(&expected, || {
+                checks += 1;
+                checks == 4
+            })
+            .unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::Interrupted);
         assert_eq!(reader.disk_bytes_read(), 4);
         assert_eq!(checks, 4);
@@ -339,14 +366,48 @@ mod tests {
     }
 
     #[test]
-    fn empty_model_hash_checks_cancellation_before_success() {
+    fn empty_model_hash_rejects_path_replacement() {
         let path = fixture(b"");
+        let replacement = fixture(b"");
+        let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
+        fs::rename(&replacement, &path).unwrap();
+        assert_eq!(
+            reader.sha256_cancellable(|| false).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(reader.disk_bytes_read(), 0);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn hash_rejects_replacement_during_final_cancellation_check() {
+        let path = fixture(b"abcd");
+        let replacement = fixture(b"abcd");
         let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
         let mut checks = 0usize;
         let error = reader.sha256_cancellable(|| {
             checks += 1;
-            checks == 2
+            if checks == 4 {
+                fs::rename(&replacement, &path).unwrap();
+            }
+            false
         }).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(reader.disk_bytes_read(), 4);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn empty_model_hash_checks_cancellation_before_success() {
+        let path = fixture(b"");
+        let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
+        let mut checks = 0usize;
+        let error = reader
+            .sha256_cancellable(|| {
+                checks += 1;
+                checks == 2
+            })
+            .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::Interrupted);
         assert_eq!(checks, 2);
         assert_eq!(reader.disk_bytes_read(), 0);
@@ -411,17 +472,27 @@ mod tests {
         let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
         let full = "bef57ec7f53a6d40beb640a780a639c83bc29ac8a9816f1fc6c5c6dcd93c4721";
         let mut checks = 0;
-        let err = reader.verify_sha256_cancellable(full, || {
-            checks += 1;
-            checks == 2
-        }).unwrap_err();
+        let err = reader
+            .verify_sha256_cancellable(full, || {
+                checks += 1;
+                checks == 2
+            })
+            .unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::Interrupted);
         assert_eq!(reader.disk_bytes_read(), 2);
         assert_eq!(checks, 2);
-        assert_eq!(reader.verify_sha256_cancellable(full, || false).unwrap(), full);
+        assert_eq!(
+            reader.verify_sha256_cancellable(full, || false).unwrap(),
+            full
+        );
         assert_eq!(reader.disk_bytes_read(), 8);
-        assert_eq!(reader.verify_sha256_cancellable("bad", || true).unwrap_err().kind(),
-            io::ErrorKind::InvalidInput);
+        assert_eq!(
+            reader
+                .verify_sha256_cancellable("bad", || true)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidInput
+        );
         fs::remove_file(path).unwrap();
     }
 
@@ -459,5 +530,4 @@ mod tests {
         assert!(reader.read_range(0, 4).is_err());
         assert_eq!(reader.disk_bytes_read(), 0);
     }
-
 }

@@ -1,9 +1,9 @@
 //! Explicitly budgeted cache for verified tensor chunks. No OS RSS guarantee.
 //! Entries are keyed by source identity supplied by the caller, tensor offset and length.
 //! A changed source must receive a different identity or the caller must clear the cache.
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
 use std::io;
-use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ChunkKey {
@@ -37,6 +37,10 @@ impl TensorChunkCache {
     }
     pub fn len(&self) -> usize {
         self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 
     /// Change the logical chunk-cache budget at runtime. Evict least-recently
@@ -96,7 +100,11 @@ impl TensorChunkCache {
     /// Return a cached chunk only when it matches an independently trusted digest.
     /// A mismatched entry is removed so it cannot be served by a later unchecked get.
     /// The caller must still authenticate the model revision and expected digest.
-    pub fn get_verified(&mut self, key: &ChunkKey, expected_sha256: &[u8; 32]) -> io::Result<Option<&[u8]>> {
+    pub fn get_verified(
+        &mut self,
+        key: &ChunkKey,
+        expected_sha256: &[u8; 32],
+    ) -> io::Result<Option<&[u8]>> {
         let Some(bytes) = self.entries.get(key) else {
             return Ok(None);
         };
@@ -104,7 +112,10 @@ impl TensorChunkCache {
             let removed = self.entries.remove(key).expect("entry checked above");
             self.used -= removed.len();
             self.lru.retain(|item| item != key);
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "cached tensor chunk SHA-256 mismatch"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "cached tensor chunk SHA-256 mismatch",
+            ));
         }
         Ok(self.get(key))
     }
@@ -119,11 +130,17 @@ impl TensorChunkCache {
         expected_sha256: &[u8; 32],
     ) -> io::Result<()> {
         if key.length == 0 || key.length != bytes.len() {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "cache key length mismatch"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "cache key length mismatch",
+            ));
         }
         let digest = Sha256::digest(bytes);
         if digest.as_slice() != expected_sha256 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "tensor chunk SHA-256 mismatch"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "tensor chunk SHA-256 mismatch",
+            ));
         }
         self.insert(key, bytes)
     }
@@ -139,30 +156,37 @@ impl TensorChunkCache {
         }
         // Reject overlapping ranges for one authenticated revision: otherwise
         // distinct keys could return conflicting bytes for the same tensor region.
-        let end = key.file_offset.checked_add(key.length as u64).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "cache range offset overflow")
-        })?;
+        let end = key
+            .file_offset
+            .checked_add(key.length as u64)
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "cache range offset overflow")
+            })?;
         for existing in self.entries.keys() {
             if existing.source_revision != key.source_revision || *existing == key {
                 continue;
             }
-            let existing_end = existing.file_offset.checked_add(existing.length as u64)
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid cached range"))?;
+            let existing_end = existing
+                .file_offset
+                .checked_add(existing.length as u64)
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "invalid cached range")
+                })?;
             if key.file_offset < existing_end && existing.file_offset < end {
-                return Err(io::Error::new(io::ErrorKind::InvalidInput, "overlapping cached tensor ranges"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "overlapping cached tensor ranges",
+                ));
             }
         }
         if bytes.len() > self.capacity {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "chunk exceeds cache budget",
-            ));
+            return Err(io::Error::other("chunk exceeds cache budget"));
         }
         // Allocate before evicting so a failed allocation leaves existing entries intact.
         let mut owned = Vec::new();
         owned
             .try_reserve_exact(bytes.len())
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "cache allocation failed"))?;
+            .map_err(|_| io::Error::other("cache allocation failed"))?;
         owned.extend_from_slice(bytes);
         if let Some(previous) = self.entries.remove(&key) {
             self.used -= previous.len();
@@ -192,12 +216,29 @@ mod tests {
     }
 
     #[test]
+    fn cache_empty_state_tracks_revision_unload_and_byte_accounting() {
+        let mut cache = TensorChunkCache::new(4);
+        assert!(cache.is_empty());
+        assert_eq!(cache.len(), 0);
+        cache.insert(key(1, 0, 2), b"ok").unwrap();
+        assert!(!cache.is_empty());
+        assert_eq!(cache.used_bytes(), 2);
+        assert_eq!(cache.evict_revision([1; 32]), 2);
+        assert!(cache.is_empty());
+        assert_eq!(cache.len(), 0);
+        assert_eq!(cache.used_bytes(), 0);
+    }
+
+    #[test]
     fn verified_cache_hit_updates_lru_without_changing_budget() {
         let mut cache = TensorChunkCache::new(6);
         cache.insert(key(1, 0, 3), b"abc").unwrap();
         cache.insert(key(1, 3, 3), b"def").unwrap();
         let digest: [u8; 32] = Sha256::digest(b"abc").into();
-        assert_eq!(cache.get_verified(&key(1, 0, 3), &digest).unwrap(), Some(&b"abc"[..]));
+        assert_eq!(
+            cache.get_verified(&key(1, 0, 3), &digest).unwrap(),
+            Some(&b"abc"[..])
+        );
         cache.insert(key(1, 6, 3), b"ghi").unwrap();
         assert!(cache.get(&key(1, 3, 3)).is_none());
         assert_eq!(cache.used_bytes(), 6);
@@ -209,7 +250,13 @@ mod tests {
         cache.insert(key(1, 0, 4), b"evil").unwrap();
         cache.insert(key(1, 4, 4), b"safe").unwrap();
         let digest: [u8; 32] = Sha256::digest(b"good").into();
-        assert_eq!(cache.get_verified(&key(1, 0, 4), &digest).unwrap_err().kind(), io::ErrorKind::InvalidData);
+        assert_eq!(
+            cache
+                .get_verified(&key(1, 0, 4), &digest)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
         assert_eq!(cache.used_bytes(), 4);
         assert!(cache.get(&key(1, 0, 4)).is_none());
         assert_eq!(cache.get(&key(1, 4, 4)), Some(&b"safe"[..]));
@@ -257,12 +304,17 @@ mod tests {
         let correct: [u8; 32] = Sha256::digest(b"next").into();
         let wrong = [0u8; 32];
         assert_eq!(
-            cache.insert_verified(key(1, 4, 4), b"next", &wrong)
-                .unwrap_err().kind(), io::ErrorKind::InvalidData
+            cache
+                .insert_verified(key(1, 4, 4), b"next", &wrong)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
         );
         assert_eq!(cache.get(&key(1, 0, 4)), Some(&b"safe"[..]));
         assert_eq!(cache.used_bytes(), 4);
-        cache.insert_verified(key(1, 4, 4), b"next", &correct).unwrap();
+        cache
+            .insert_verified(key(1, 4, 4), b"next", &correct)
+            .unwrap();
         assert_eq!(cache.get(&key(1, 4, 4)), Some(&b"next"[..]));
         assert_eq!(cache.used_bytes(), 4);
         assert!(cache.get(&key(1, 0, 4)).is_none());
@@ -274,8 +326,11 @@ mod tests {
         cache.insert(key(1, 0, 4), b"good").unwrap();
         let digest: [u8; 32] = Sha256::digest(b"good").into();
         assert_eq!(
-            cache.insert_verified(key(1, 0, 4), b"evil", &digest)
-                .unwrap_err().kind(), io::ErrorKind::InvalidData
+            cache
+                .insert_verified(key(1, 0, 4), b"evil", &digest)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
         );
         assert_eq!(cache.get(&key(1, 0, 4)), Some(&b"good"[..]));
     }
