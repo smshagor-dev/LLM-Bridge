@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// Scratch is caller-owned and may be modified on failure; output is only
 /// committed after all reads, arithmetic and cancellation checks succeed.
 /// This does not guarantee ggml floating-point/bitwise parity.
+#[allow(clippy::too_many_arguments)] // Preserve the existing caller-owned buffer API.
 pub fn f32_matvec_residual_cancellable(
     index: &GgufTensorIndex,
     reader: &mut BoundedLocalReader,
@@ -123,6 +124,7 @@ pub fn f32_matvec_residual_cancellable(
 }
 
 #[cfg(test)]
+#[allow(clippy::manual_is_multiple_of)] // Keep test fixtures Rust 1.82-compatible.
 mod tests {
     use super::*;
     use std::io::Write;
