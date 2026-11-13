@@ -38,8 +38,12 @@ The four initial core SwiGLU tests passed in native CI job
 The overall job **failed** because four pre-existing tests in
 `f32_stream` and `tensor_batch` failed (102 passed, 4 failed). The fixture
 and formatting repairs are covered separately by draft PR #62.
-That CI run predates the residual implementation, which must be retested
-before this draft PR is ready for review.
+In subsequent native CI run
+[43478032674](https://github.com/smshagor-dev/LLM-Bridge/actions/runs/43478032674),
+**all seven** SwiGLU/residual tests passed. The complete suite still failed
+on the same four pre-existing fixture defects (105 passed, 4 failed).
+The duplicate residual function introduced by simultaneous branch changes
+was removed afterwards; the latest branch revision still requires CI checks.
 
 New residual-specific tests exercise independent scalar numerical values,
 overflow after all projections with unchanged final output, and invalid
