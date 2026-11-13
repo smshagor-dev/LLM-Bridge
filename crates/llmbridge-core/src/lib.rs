@@ -19,3 +19,4 @@ pub mod runtime_memory;
 pub mod storage;
 pub mod tensor_batch;
 pub mod tensor_cache;
+pub mod tensor_layout;
