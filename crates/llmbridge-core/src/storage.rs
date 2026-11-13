@@ -174,6 +174,14 @@ impl BoundedLocalReader {
             hash.update(self.read_range(offset, bytes)?);
             offset += bytes as u64;
         }
+        // Cancellation may arrive while the final chunk is being processed.
+        // Never publish a completed digest after a late cancellation request.
+        if cancelled() {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "model hash cancelled",
+            ));
+        }
         Ok(format!("{:x}", hash.finalize()))
     }
 
@@ -251,6 +259,36 @@ mod tests {
         assert_eq!(checks, 2);
         let digest = reader.sha256_cancellable(|| false).unwrap();
         assert_eq!(digest.len(), 64);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn cancellation_after_last_hash_chunk_rejects_digest() {
+        let path = fixture(b"abcd");
+        let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
+        let mut checks = 0usize;
+        let error = reader.sha256_cancellable(|| {
+            checks += 1;
+            checks == 3
+        }).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(reader.disk_bytes_read(), 4);
+        assert_eq!(checks, 3);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn empty_model_hash_checks_cancellation_before_success() {
+        let path = fixture(b"");
+        let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
+        let mut checks = 0usize;
+        let error = reader.sha256_cancellable(|| {
+            checks += 1;
+            checks == 2
+        }).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(checks, 2);
+        assert_eq!(reader.disk_bytes_read(), 0);
         fs::remove_file(path).unwrap();
     }
 
