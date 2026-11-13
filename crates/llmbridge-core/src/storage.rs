@@ -216,6 +216,9 @@ impl BoundedLocalReader {
                 "model hash cancelled",
             ));
         }
+        // Even an empty file must still refer to the opened, unchanged source.
+        // Detect a replacement after the last chunk or during final cancellation.
+        self.assert_unchanged()?;
         Ok(format!("{:x}", hash.finalize()))
     }
 
@@ -359,6 +362,38 @@ mod tests {
         assert_eq!(reader.disk_bytes_read(), 4);
         assert_eq!(checks, 4);
         assert_eq!(reader.verify_sha256(&expected).unwrap(), expected);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn empty_model_hash_rejects_path_replacement() {
+        let path = fixture(b"");
+        let replacement = fixture(b"");
+        let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
+        fs::rename(&replacement, &path).unwrap();
+        assert_eq!(
+            reader.sha256_cancellable(|| false).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(reader.disk_bytes_read(), 0);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn hash_rejects_replacement_during_final_cancellation_check() {
+        let path = fixture(b"abcd");
+        let replacement = fixture(b"abcd");
+        let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
+        let mut checks = 0usize;
+        let error = reader.sha256_cancellable(|| {
+            checks += 1;
+            if checks == 4 {
+                fs::rename(&replacement, &path).unwrap();
+            }
+            false
+        }).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(reader.disk_bytes_read(), 4);
         fs::remove_file(path).unwrap();
     }
 
