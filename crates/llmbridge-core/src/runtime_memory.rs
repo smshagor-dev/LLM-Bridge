@@ -97,6 +97,26 @@ impl RuntimeMemoryLimits {
         Ok(())
     }
 
+    /// Audit Linux's process-lifetime high-water RSS after a native call.
+    /// This detects transient RSS spikes missed by pre/post current-RSS samples.
+    /// A missing peak is rejected rather than silently treated as safe.
+    /// Peak RSS is lifetime-wide: a breach may predate this operation.
+    pub fn check_peak(self, sample: &ProcessMemory) -> Result<(), MemoryViolation> {
+        if self.max_process_rss_bytes == 0 || self.max_cgroup_current_bytes == Some(0) {
+            return Err(MemoryViolation::InvalidLimit);
+        }
+        let peak = sample
+            .peak_rss_bytes
+            .ok_or(MemoryViolation::UnknownProcessRss)?;
+        if peak > self.max_process_rss_bytes {
+            return Err(MemoryViolation::ProcessRssExceeded {
+                observed: peak,
+                limit: self.max_process_rss_bytes,
+            });
+        }
+        Ok(())
+    }
+
     /// Read current process/cgroup counters and reject on any limit violation.
     /// On platforms without RSS measurement this deliberately rejects admission.
     pub fn check_current(self) -> Result<ProcessMemory, MemoryViolation> {
@@ -296,6 +316,31 @@ mod tests {
         assert!(invoked.get());
         assert_eq!(samples.get(), 2);
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::OutOfMemory);
+    }
+
+    #[test]
+    fn peak_audit_detects_transient_native_memory_spikes() {
+        let limits = RuntimeMemoryLimits {
+            max_process_rss_bytes: 100,
+            max_cgroup_current_bytes: None,
+        };
+        let mut observed = sample(Some(20), None);
+        observed.peak_rss_bytes = Some(101);
+        assert!(limits.check(&observed).is_ok());
+        assert_eq!(
+            limits.check_peak(&observed),
+            Err(MemoryViolation::ProcessRssExceeded {
+                observed: 101,
+                limit: 100,
+            })
+        );
+        observed.peak_rss_bytes = Some(100);
+        assert!(limits.check_peak(&observed).is_ok());
+        observed.peak_rss_bytes = None;
+        assert_eq!(
+            limits.check_peak(&observed),
+            Err(MemoryViolation::UnknownProcessRss)
+        );
     }
 
     #[test]
