@@ -28,15 +28,21 @@ pub fn plan_cpu(hardware: &Hardware, request: PlanRequest) -> Result<MemoryPlan,
     if request.safety_margin_percent > 90 {
         return Err("safety margin must be between 0 and 90 percent".into());
     }
-    let available = hardware.available_ram_bytes
+    let available = hardware
+        .available_ram_bytes
         .ok_or("available RAM is unknown; refusing admission")?;
-    let kv = request.context_tokens.checked_mul(request.kv_bytes_per_token)
+    let kv = request
+        .context_tokens
+        .checked_mul(request.kv_bytes_per_token)
         .ok_or("KV cache size overflow")?;
-    let base = request.model_file_bytes.checked_add(kv)
+    let base = request
+        .model_file_bytes
+        .checked_add(kv)
         .and_then(|n| n.checked_add(request.scratch_bytes))
         .ok_or("memory estimate overflow")?;
     let multiplier = 100u64 + u64::from(request.safety_margin_percent);
-    let estimated_peak_bytes = base.checked_mul(multiplier)
+    let estimated_peak_bytes = base
+        .checked_mul(multiplier)
         .and_then(|n| n.checked_add(99))
         .map(|n| n / 100)
         .ok_or("memory safety margin overflow")?;
@@ -57,13 +63,20 @@ pub fn plan_cpu(hardware: &Hardware, request: PlanRequest) -> Result<MemoryPlan,
 mod tests {
     use super::*;
     fn hw(available: Option<u64>) -> Hardware {
-        Hardware { logical_cpus: 4, total_ram_bytes: Some(4096), available_ram_bytes: available }
+        Hardware {
+            logical_cpus: 4,
+            total_ram_bytes: Some(4096),
+            available_ram_bytes: available,
+        }
     }
     fn req() -> PlanRequest {
         PlanRequest {
-            model_file_bytes: 1000, context_tokens: 10,
-            kv_bytes_per_token: 20, scratch_bytes: 300,
-            os_reserve_bytes: 500, safety_margin_percent: 20,
+            model_file_bytes: 1000,
+            context_tokens: 10,
+            kv_bytes_per_token: 20,
+            scratch_bytes: 300,
+            os_reserve_bytes: 500,
+            safety_margin_percent: 20,
         }
     }
     #[test]

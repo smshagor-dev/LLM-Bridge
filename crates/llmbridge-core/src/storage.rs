@@ -74,7 +74,8 @@ impl BoundedLocalReader {
         // symlink_metadata and File::open must not bypass the source policy.
         // Compare the opened descriptor with the final path identity on Unix.
         let path_metadata = fs::symlink_metadata(path)?;
-        if path_metadata.file_type().is_symlink() || !path_metadata.is_file()
+        if path_metadata.file_type().is_symlink()
+            || !path_metadata.is_file()
             || SourceIdentity::from_metadata(&path_metadata)
                 != SourceIdentity::from_metadata(&metadata)
         {
@@ -141,12 +142,18 @@ impl BoundedLocalReader {
 
     /// Hash with cooperative cancellation checked before each bounded read.
     /// A cancelled pass returns Interrupted and never yields a partial digest.
-    pub fn sha256_cancellable(&mut self, mut cancelled: impl FnMut() -> bool) -> io::Result<String> {
+    pub fn sha256_cancellable(
+        &mut self,
+        mut cancelled: impl FnMut() -> bool,
+    ) -> io::Result<String> {
         let mut hash = Sha256::new();
         let mut offset = 0u64;
         loop {
             if cancelled() {
-                return Err(io::Error::new(io::ErrorKind::Interrupted, "model hash cancelled"));
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "model hash cancelled",
+                ));
             }
             if offset == self.file_len {
                 break;
@@ -210,10 +217,12 @@ mod tests {
         let path = fixture(b"abcdef");
         let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
         let mut checks = 0;
-        let err = reader.sha256_cancellable(|| {
-            checks += 1;
-            checks == 2
-        }).unwrap_err();
+        let err = reader
+            .sha256_cancellable(|| {
+                checks += 1;
+                checks == 2
+            })
+            .unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::Interrupted);
         assert_eq!(reader.disk_bytes_read(), 2);
         assert_eq!(checks, 2);

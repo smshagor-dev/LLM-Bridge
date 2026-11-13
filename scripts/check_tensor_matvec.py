@@ -61,8 +61,13 @@ def actual(binary, path, tensor, expected_digest):
             rows.append(float(value))
         if line.startswith("weight bytes read: "):
             bytes_read = int(line.removeprefix("weight bytes read: "))
-    if bytes_read != tensor["size"]:
-        raise AssertionError(f"unexpected native I/O count: {bytes_read} not {tensor['size']}")
+    # Authenticated execution reads the tensor once for SHA-256 verification
+    # and once for the bounded native matrix-vector product.
+    expected_bytes = tensor["size"] * 2
+    if bytes_read != expected_bytes:
+        raise AssertionError(
+            f"unexpected authenticated tensor I/O count: {bytes_read} not {expected_bytes}"
+        )
     if len(rows) != tensor["dims"][1]:
         raise AssertionError("missing native output rows")
     return rows, bytes_read
@@ -94,6 +99,7 @@ def main():
     result = {
         "model": path.name, "tensor": tensor, "verified_tensor_sha256": digest,
         "rows": tensor["dims"][1],
+        "authenticated_tensor_passes": 2,
         "columns": tensor["dims"][0], "bytes_read": bytes_read,
         "max_abs_difference": max(differences, default=0.0),
         "relative_tolerance": 1e-5, "absolute_tolerance": 1e-4,

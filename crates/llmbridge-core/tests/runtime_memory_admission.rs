@@ -59,12 +59,8 @@ fn exact_headroom_boundary_succeeds_and_returns_native_result() {
         max_process_rss_bytes: 200,
         max_cgroup_current_bytes: Some(300),
     };
-    let result = limits.around_growth_with_sampler(
-        40,
-        10,
-        || sample(Some(150), Some(250)),
-        || Ok(42),
-    );
+    let result =
+        limits.around_growth_with_sampler(40, 10, || sample(Some(150), Some(250)), || Ok(42));
     assert_eq!(result.unwrap(), 42);
 }
 
