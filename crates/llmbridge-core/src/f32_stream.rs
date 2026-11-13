@@ -194,6 +194,32 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
 
+    /// Valid but tiny GGUF: preflight tests must reach the operator's
+    /// rejection path rather than fail in GGUF index admission.
+    fn preflight_fixture(label: &str) -> std::path::PathBuf {
+        let mut bytes = b"GGUF".to_vec();
+        bytes.extend_from_slice(&3u32.to_le_bytes());
+        bytes.extend_from_slice(&1u64.to_le_bytes()); // one tensor (zero is invalid)
+        bytes.extend_from_slice(&0u64.to_le_bytes()); // no metadata
+        bytes.extend_from_slice(&1u64.to_le_bytes());
+        bytes.push(b'p');
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // rank one
+        bytes.extend_from_slice(&1u64.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // F32
+        bytes.extend_from_slice(&0u64.to_le_bytes()); // tensor offset
+        while bytes.len() % 32 != 0 {
+            bytes.push(0);
+        }
+        bytes.extend_from_slice(&1f32.to_le_bytes());
+        let path = std::env::temp_dir().join(format!(
+            "llmbridge-f32-{label}-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, AtomicOrdering::Relaxed),
+        ));
+        File::create(&path).unwrap().write_all(&bytes).unwrap();
+        path
+    }
+
     #[test]
     fn atomic_projection_preserves_output_on_late_weight_failure() {
         let mut bytes = b"GGUF".to_vec();
@@ -231,15 +257,7 @@ mod tests {
 
     #[test]
     fn atomic_projection_rejects_wrong_scratch_before_io() {
-        let mut reader_path = std::env::temp_dir().join(format!(
-            "llmbridge-f32-atomic-shape-{}-{}", std::process::id(),
-            NEXT.fetch_add(1, AtomicOrdering::Relaxed)
-        ));
-        let mut bytes = b"GGUF".to_vec();
-        bytes.extend_from_slice(&3u32.to_le_bytes());
-        bytes.extend_from_slice(&0u64.to_le_bytes());
-        bytes.extend_from_slice(&0u64.to_le_bytes());
-        File::create(&reader_path).unwrap().write_all(&bytes).unwrap();
+        let reader_path = preflight_fixture("atomic-shape");
         let index = GgufTensorIndex::inspect(&reader_path).unwrap();
         let mut reader = BoundedLocalReader::open(&reader_path, 4, 8).unwrap();
         let mut scratch = [11f32; 1];
@@ -295,15 +313,7 @@ mod tests {
 
     #[test]
     fn invalid_bias_rejects_before_tensor_reads() {
-        let mut bytes = b"GGUF".to_vec();
-        bytes.extend_from_slice(&3u32.to_le_bytes());
-        bytes.extend_from_slice(&0u64.to_le_bytes());
-        bytes.extend_from_slice(&0u64.to_le_bytes());
-        let path = std::env::temp_dir().join(format!(
-            "llmbridge-f32-bias-preflight-{}-{}", std::process::id(),
-            NEXT.fetch_add(1, AtomicOrdering::Relaxed)
-        ));
-        File::create(&path).unwrap().write_all(&bytes).unwrap();
+        let path = preflight_fixture("bias-preflight");
         let index = GgufTensorIndex::inspect(&path).unwrap();
         let mut reader = BoundedLocalReader::open(&path, 4, 8).unwrap();
         let mut scratch = [99f32; 1];
