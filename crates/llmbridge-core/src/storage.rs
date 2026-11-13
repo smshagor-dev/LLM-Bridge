@@ -152,6 +152,26 @@ impl BoundedLocalReader {
         Ok(&self.buffer[..bytes])
     }
 
+    /// Read a bounded range with cancellation checks before and after I/O.
+    /// A late cancellation never returns a borrowed tensor slice to the caller.
+    /// Bytes may have been read before cancellation; this is not an I/O rollback.
+    pub fn read_range_cancellable(
+        &mut self,
+        offset: u64,
+        bytes: usize,
+        mut cancelled: impl FnMut() -> bool,
+    ) -> io::Result<&[u8]> {
+        if cancelled() {
+            return Err(io::Error::new(io::ErrorKind::Interrupted, "range read cancelled"));
+        }
+        // Keep the read within the existing source-identity and accounting checks.
+        self.read_range(offset, bytes)?;
+        if cancelled() {
+            return Err(io::Error::new(io::ErrorKind::Interrupted, "range read cancelled"));
+        }
+        Ok(&self.buffer[..bytes])
+    }
+
     /// Hash with cooperative cancellation checked before each bounded read.
     /// A cancelled pass returns Interrupted and never yields a partial digest.
     pub fn sha256_cancellable(
@@ -241,6 +261,30 @@ mod tests {
         ));
         File::create(&path).unwrap().write_all(bytes).unwrap();
         path
+    }
+
+    #[test]
+    fn cancellable_range_rejects_before_io_and_after_completed_read() {
+        let path = fixture(b"abcdef");
+        let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
+        let mut checks = 0usize;
+        let err = reader.read_range_cancellable(0, 2, || {
+            checks += 1;
+            checks == 1
+        }).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(reader.disk_bytes_read(), 0);
+        checks = 0;
+        let err = reader.read_range_cancellable(0, 2, || {
+            checks += 1;
+            checks == 2
+        }).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(reader.disk_bytes_read(), 2);
+        assert_eq!(checks, 2);
+        assert_eq!(reader.read_range_cancellable(2, 2, || false).unwrap(), b"cd");
+        assert_eq!(reader.disk_bytes_read(), 4);
+        fs::remove_file(path).unwrap();
     }
 
     #[test]
