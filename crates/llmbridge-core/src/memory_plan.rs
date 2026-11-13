@@ -59,6 +59,41 @@ pub fn plan_cpu(hardware: &Hardware, request: PlanRequest) -> Result<MemoryPlan,
     })
 }
 
+/// Choose the largest admissible context within caller-specified bounds for the
+/// current resident-weight CPU backend. Uses the same conservative estimate as
+/// plan_cpu; does not make tensor weights out-of-core or enforce process RSS.
+/// A minimum context that does not fit is rejected rather than silently reduced.
+pub fn plan_cpu_adaptive_context(
+    hardware: &Hardware,
+    request: PlanRequest,
+    min_context_tokens: u64,
+) -> Result<(MemoryPlan, u64), String> {
+    if min_context_tokens == 0 || min_context_tokens > request.context_tokens {
+        return Err("minimum context must be nonzero and within requested context".into());
+    }
+    let minimum = PlanRequest { context_tokens: min_context_tokens, ..request };
+    let minimum_plan = plan_cpu(hardware, minimum)?;
+    if let Ok(full_plan) = plan_cpu(hardware, request) {
+        return Ok((full_plan, request.context_tokens));
+    }
+    // Validate non-memory request constraints up front; a lower context must
+    // never turn a malformed model or unknown hardware into an admission.
+    let mut low = min_context_tokens;
+    let mut high = request.context_tokens;
+    let mut best = minimum_plan;
+    while high - low > 1 {
+        let mid = low + (high - low) / 2;
+        match plan_cpu(hardware, PlanRequest { context_tokens: mid, ..request }) {
+            Ok(plan) => {
+                low = mid;
+                best = plan;
+            }
+            Err(_) => high = mid,
+        }
+    }
+    Ok((best, low))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -79,6 +114,43 @@ mod tests {
             safety_margin_percent: 20,
         }
     }
+    #[test]
+    fn adaptive_context_selects_largest_admissible_token_count() {
+        let (plan, tokens) = plan_cpu_adaptive_context(&hw(Some(2500)), req(), 1).unwrap();
+        assert_eq!(tokens, 18);
+        assert_eq!(plan.estimated_peak_bytes, 1992);
+        assert_eq!(plan.available_after_reserve_bytes, 2000);
+        assert!(plan_cpu(&hw(Some(2500)), PlanRequest { context_tokens: 19, ..req() }).is_err());
+    }
+
+    #[test]
+    fn adaptive_context_preserves_full_request_when_it_fits() {
+        let (plan, tokens) = plan_cpu_adaptive_context(&hw(Some(4096)), req(), 2).unwrap();
+        assert_eq!(tokens, 10);
+        assert_eq!(plan.estimated_peak_bytes, 1800);
+    }
+
+    #[test]
+    fn adaptive_context_rejects_unknown_ram_and_unreachable_minimum() {
+        assert!(plan_cpu_adaptive_context(&hw(None), req(), 1).is_err());
+        assert!(plan_cpu_adaptive_context(&hw(Some(1400)), req(), 1).is_err());
+        assert!(plan_cpu_adaptive_context(&hw(Some(4096)), req(), 0).is_err());
+        assert!(plan_cpu_adaptive_context(&hw(Some(4096)), req(), 11).is_err());
+    }
+
+    #[test]
+    fn adaptive_context_handles_large_bounds_without_midpoint_overflow() {
+        let request = PlanRequest {
+            model_file_bytes: 1, context_tokens: u64::MAX,
+            kv_bytes_per_token: 1, scratch_bytes: 0, os_reserve_bytes: 0,
+            safety_margin_percent: 0,
+        };
+        let hardware = hw(Some(100));
+        let (plan, tokens) = plan_cpu_adaptive_context(&hardware, request, 1).unwrap();
+        assert_eq!(tokens, 99);
+        assert_eq!(plan.estimated_peak_bytes, 100);
+    }
+
     #[test]
     fn accounts_for_weights_kv_scratch_margin_and_reserve() {
         let plan = plan_cpu(&hw(Some(2500)), req()).unwrap();
