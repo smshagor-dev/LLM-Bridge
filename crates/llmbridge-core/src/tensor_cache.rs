@@ -39,6 +39,10 @@ impl TensorChunkCache {
         self.entries.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
     /// Change the logical chunk-cache budget at runtime. Evict least-recently
     /// used chunks immediately when shrinking; never retain bytes over budget.
     /// This does not limit process RSS or the allocator's retained pages.
@@ -176,16 +180,13 @@ impl TensorChunkCache {
             }
         }
         if bytes.len() > self.capacity {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "chunk exceeds cache budget",
-            ));
+            return Err(io::Error::other("chunk exceeds cache budget"));
         }
         // Allocate before evicting so a failed allocation leaves existing entries intact.
         let mut owned = Vec::new();
         owned
             .try_reserve_exact(bytes.len())
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "cache allocation failed"))?;
+            .map_err(|_| io::Error::other("cache allocation failed"))?;
         owned.extend_from_slice(bytes);
         if let Some(previous) = self.entries.remove(&key) {
             self.used -= previous.len();
