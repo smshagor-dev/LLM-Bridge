@@ -216,6 +216,24 @@ fn align_up(offset: u64, alignment: u64) -> io::Result<u64> {
         .ok_or_else(|| invalid("aligned metadata offset overflow"))
 }
 
+/// Validate both the descriptor and the pathname: checking only the open
+/// descriptor misses rename/unlink replacement during metadata parsing.
+fn assert_metadata_source_unchanged(
+    path: &Path,
+    file: &File,
+    expected: &SourceIdentity,
+) -> io::Result<()> {
+    let current_path = std::fs::symlink_metadata(path)?;
+    if current_path.file_type().is_symlink()
+        || !current_path.is_file()
+        || SourceIdentity::from_metadata(&current_path) != *expected
+        || SourceIdentity::from_metadata(&file.metadata()?) != *expected
+    {
+        return Err(invalid("GGUF file or path changed during tensor index construction"));
+    }
+    Ok(())
+}
+
 impl GgufTensorIndex {
     /// Read GGUF v2/v3 metadata and index tensor byte ranges without loading tensor payloads.
     /// Bounded metadata parsing prevents untrusted declared lengths from allocating whole weights.
@@ -335,13 +353,7 @@ impl GgufTensorIndex {
             }
         }
 
-        if SourceIdentity::from_metadata(&reader.file.get_ref().metadata()?)
-            != reader.source_identity
-        {
-            return Err(invalid(
-                "GGUF file changed during tensor index construction",
-            ));
-        }
+        assert_metadata_source_unchanged(path, reader.file.get_ref(), &reader.source_identity)?;
         Ok(Self {
             path: path.to_path_buf(),
             file_bytes: reader.file_bytes,
@@ -622,6 +634,37 @@ mod tests {
             .stream_tensor(&mut reader, "final.weight", |_| Ok(()))
             .is_err());
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reject_replaced_path_at_metadata_completion() {
+        let path = write(&fixture(8, 0, 96));
+        let old_descriptor = File::open(&path).unwrap();
+        let old_identity = SourceIdentity::from_metadata(&old_descriptor.metadata().unwrap());
+        let replacement = write(&fixture(8, 0, 96));
+        std::fs::rename(&replacement, &path).unwrap();
+        let new_file = std::fs::symlink_metadata(&path).unwrap();
+        assert_ne!(old_identity, SourceIdentity::from_metadata(&new_file));
+        assert!(assert_metadata_source_unchanged(&path, &old_descriptor, &old_identity).is_err());
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        assert_eq!(index.source_identity, SourceIdentity::from_metadata(&new_file));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reject_symlink_substitution_at_metadata_completion() {
+        use std::os::unix::fs::symlink;
+        let path = write(&fixture(8, 0, 96));
+        let old_descriptor = File::open(&path).unwrap();
+        let identity = SourceIdentity::from_metadata(&old_descriptor.metadata().unwrap());
+        let other = write(&fixture(8, 0, 96));
+        std::fs::remove_file(&path).unwrap();
+        symlink(&other, &path).unwrap();
+        assert!(assert_metadata_source_unchanged(&path, &old_descriptor, &identity).is_err());
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_file(other).unwrap();
     }
 
     #[test]
