@@ -116,11 +116,27 @@ mod tests {
     }
     #[test]
     fn adaptive_context_selects_largest_admissible_token_count() {
-        let (plan, tokens) = plan_cpu_adaptive_context(&hw(Some(2500)), req(), 1).unwrap();
+        let requested = PlanRequest { context_tokens: 30, ..req() };
+        let (plan, tokens) = plan_cpu_adaptive_context(&hw(Some(2500)), requested, 1).unwrap();
         assert_eq!(tokens, 18);
         assert_eq!(plan.estimated_peak_bytes, 1992);
         assert_eq!(plan.available_after_reserve_bytes, 2000);
-        assert!(plan_cpu(&hw(Some(2500)), PlanRequest { context_tokens: 19, ..req() }).is_err());
+        assert!(plan_cpu(&hw(Some(2500)), PlanRequest { context_tokens: 19, ..requested }).is_err());
+        assert!(tokens <= requested.context_tokens);
+    }
+
+    #[test]
+    fn adaptive_context_never_exceeds_requested_context_when_memory_is_abundant() {
+        let request = req();
+        let (plan, tokens) = plan_cpu_adaptive_context(&hw(Some(2500)), request, 1).unwrap();
+        assert_eq!(tokens, request.context_tokens);
+        assert_eq!(plan.estimated_peak_bytes, 1800);
+    }
+
+    #[test]
+    fn adaptive_context_rejects_minimum_above_memory_limit() {
+        let request = PlanRequest { context_tokens: 30, ..req() };
+        assert!(plan_cpu_adaptive_context(&hw(Some(2500)), request, 19).is_err());
     }
 
     #[test]
