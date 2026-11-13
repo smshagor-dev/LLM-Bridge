@@ -90,36 +90,52 @@ mod tests {
         }
         bytes.extend_from_slice(&[0, 0x38]); // f16 scale 0.5
         bytes.extend(1u8..=32u8);
-        std::fs::File::create(&path).unwrap().write_all(&bytes).unwrap();
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(&bytes)
+            .unwrap();
         let index = GgufTensorIndex::inspect(&path).unwrap();
         let mut reader = BoundedLocalReader::open(&path, 64, 128).unwrap();
         let cancelled = AtomicBool::new(false);
         let vectors = vec![vec![1.0f32; 32], vec![2.0; 32], vec![3.0; 32]];
         let mut observed = Vec::new();
         let error = q8_0_matvec_each(
-            &index, &mut reader, "w", &vectors, &cancelled, 256 * 1024,
+            &index,
+            &mut reader,
+            "w",
+            &vectors,
+            &cancelled,
+            256 * 1024,
             |i, result| {
                 observed.push((i, result.to_vec()));
                 i == 0
             },
-        ).unwrap_err();
+        )
+        .unwrap_err();
         assert!(error.contains("callback"));
         assert_eq!(observed, vec![(0, vec![264.0]), (1, vec![528.0])]);
         assert_eq!(reader.disk_bytes_read(), 68);
 
         cancelled.store(true, Ordering::Release);
         assert!(q8_0_matvec_each(
-            &index, &mut reader, "w", &vectors, &cancelled, 256 * 1024,
+            &index,
+            &mut reader,
+            "w",
+            &vectors,
+            &cancelled,
+            256 * 1024,
             |_, _| true,
-        ).is_err());
+        )
+        .is_err());
         assert_eq!(reader.disk_bytes_read(), 68);
         cancelled.store(false, Ordering::Release);
-        assert!(q8_0_matvec_each(
-            &index, &mut reader, "w", &vectors, &cancelled, 1,
-            |_, _| true,
-        ).is_err());
+        assert!(
+            q8_0_matvec_each(&index, &mut reader, "w", &vectors, &cancelled, 1, |_, _| {
+                true
+            },)
+            .is_err()
+        );
         assert_eq!(reader.disk_bytes_read(), 68);
         std::fs::remove_file(path).unwrap();
     }
-
 }

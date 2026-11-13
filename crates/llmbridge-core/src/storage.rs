@@ -33,6 +33,7 @@ impl SourceIdentity {
 /// Bound applies to its explicit buffer only; OS page cache and process RSS are NOT capped.
 pub struct BoundedLocalReader {
     file: File,
+    source_path: std::path::PathBuf,
     file_len: u64,
     source_identity: SourceIdentity,
     buffer: Box<[u8]>,
@@ -74,7 +75,8 @@ impl BoundedLocalReader {
         // symlink_metadata and File::open must not bypass the source policy.
         // Compare the opened descriptor with the final path identity on Unix.
         let path_metadata = fs::symlink_metadata(path)?;
-        if path_metadata.file_type().is_symlink() || !path_metadata.is_file()
+        if path_metadata.file_type().is_symlink()
+            || !path_metadata.is_file()
             || SourceIdentity::from_metadata(&path_metadata)
                 != SourceIdentity::from_metadata(&metadata)
         {
@@ -85,6 +87,7 @@ impl BoundedLocalReader {
         }
         Ok(Self {
             file,
+            source_path: path.to_path_buf(),
             file_len: metadata.len(),
             source_identity: SourceIdentity::from_metadata(&metadata),
             buffer: vec![0u8; max_chunk_bytes].into_boxed_slice(),
@@ -110,7 +113,12 @@ impl BoundedLocalReader {
 
     fn assert_unchanged(&self) -> io::Result<()> {
         let current = self.file.metadata()?;
-        if SourceIdentity::from_metadata(&current) != self.source_identity {
+        // A descriptor can still read the old inode after its path is replaced.
+        // Reject a renamed, deleted or symlink-substituted model before returning bytes.
+        let path_metadata = fs::symlink_metadata(&self.source_path)?;
+        if !path_metadata.is_file() || path_metadata.file_type().is_symlink()
+            || SourceIdentity::from_metadata(&path_metadata) != self.source_identity
+            || SourceIdentity::from_metadata(&current) != self.source_identity {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "source changed while reading; reject stale or mixed tensor bytes",
@@ -131,22 +139,33 @@ impl BoundedLocalReader {
                 "range exceeds file or chunk budget",
             ));
         }
+        // Reject accounting overflow before touching the source. Saturating the
+        // counter would make an I/O audit appear valid after losing bytes.
+        let next_disk_bytes_read = self.disk_bytes_read
+            .checked_add(bytes as u64)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "tensor read accounting overflow"))?;
         self.assert_unchanged()?;
         self.file.seek(SeekFrom::Start(offset))?;
         self.file.read_exact(&mut self.buffer[..bytes])?;
         self.assert_unchanged()?;
-        self.disk_bytes_read = self.disk_bytes_read.saturating_add(bytes as u64);
+        self.disk_bytes_read = next_disk_bytes_read;
         Ok(&self.buffer[..bytes])
     }
 
     /// Hash with cooperative cancellation checked before each bounded read.
     /// A cancelled pass returns Interrupted and never yields a partial digest.
-    pub fn sha256_cancellable(&mut self, mut cancelled: impl FnMut() -> bool) -> io::Result<String> {
+    pub fn sha256_cancellable(
+        &mut self,
+        mut cancelled: impl FnMut() -> bool,
+    ) -> io::Result<String> {
         let mut hash = Sha256::new();
         let mut offset = 0u64;
         loop {
             if cancelled() {
-                return Err(io::Error::new(io::ErrorKind::Interrupted, "model hash cancelled"));
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "model hash cancelled",
+                ));
             }
             if offset == self.file_len {
                 break;
@@ -210,15 +229,31 @@ mod tests {
         let path = fixture(b"abcdef");
         let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
         let mut checks = 0;
-        let err = reader.sha256_cancellable(|| {
-            checks += 1;
-            checks == 2
-        }).unwrap_err();
+        let err = reader
+            .sha256_cancellable(|| {
+                checks += 1;
+                checks == 2
+            })
+            .unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::Interrupted);
         assert_eq!(reader.disk_bytes_read(), 2);
         assert_eq!(checks, 2);
         let digest = reader.sha256_cancellable(|| false).unwrap();
         assert_eq!(digest.len(), 64);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn read_counter_overflow_fails_before_disk_io() {
+        let path = fixture(b"abcdef");
+        let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
+        reader.disk_bytes_read = u64::MAX - 1;
+        let err = reader.read_range(0, 2).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(reader.disk_bytes_read(), u64::MAX - 1);
+        // A rejected read must not disturb the counter or reader usability.
+        assert_eq!(reader.read_range(0, 1).unwrap(), b"a");
+        assert_eq!(reader.disk_bytes_read(), u64::MAX);
         fs::remove_file(path).unwrap();
     }
 
@@ -274,4 +309,25 @@ mod tests {
         assert!(reader.read_range(0, 1).is_err());
         fs::remove_file(path).unwrap();
     }
+    #[test]
+    fn rejects_model_path_replacement_after_open() {
+        let path = fixture(b"original");
+        let replacement = fixture(b"replacement");
+        let mut reader = BoundedLocalReader::open(&path, 4, 8).unwrap();
+        fs::rename(&replacement, &path).unwrap();
+        let error = reader.read_range(0, 4).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(reader.disk_bytes_read(), 0);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn rejects_model_path_disappearance_after_open() {
+        let path = fixture(b"original");
+        let mut reader = BoundedLocalReader::open(&path, 4, 8).unwrap();
+        fs::remove_file(&path).unwrap();
+        assert!(reader.read_range(0, 4).is_err());
+        assert_eq!(reader.disk_bytes_read(), 0);
+    }
+
 }

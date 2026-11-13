@@ -127,7 +127,6 @@ pub fn generate<F: FnMut(&[u8]) -> bool>(
     }
 }
 
-
 /**
  * Cooperatively cancel native CPU token generation without crossing the FFI
  * boundary. The native callback is synchronous; cancellation is observed
@@ -182,7 +181,11 @@ extern "C" fn poll_generation<F>(userdata: *mut c_void) -> i32 {
         let state = unsafe { &*(userdata.cast::<PolledGeneration<'_, F>>()) };
         !state.cancelled.load(Ordering::Acquire)
     }));
-    if matches!(result, Ok(true)) { 1 } else { 0 }
+    if matches!(result, Ok(true)) {
+        1
+    } else {
+        0
+    }
 }
 
 extern "C" fn dispatch_polled<F: FnMut(&[u8]) -> bool>(
@@ -201,7 +204,11 @@ extern "C" fn dispatch_polled<F: FnMut(&[u8]) -> bool>(
         let piece = unsafe { slice::from_raw_parts(data.cast::<u8>(), length) };
         (state.on_piece)(piece) && !state.cancelled.load(Ordering::Acquire)
     }));
-    if matches!(result, Ok(true)) { 1 } else { 0 }
+    if matches!(result, Ok(true)) {
+        1
+    } else {
+        0
+    }
 }
 
 /// Cooperative native generation cancellation before loading and at decode
@@ -225,20 +232,31 @@ pub fn generate_polled<F: FnMut(&[u8]) -> bool>(
     if abi != 1 {
         return Err(format!("native ABI mismatch: expected 1, found {abi}"));
     }
-    let mut state = PolledGeneration { cancelled, on_piece };
+    let mut state = PolledGeneration {
+        cancelled,
+        on_piece,
+    };
     let mut error = [0 as c_char; 1024];
     let status = unsafe {
         llmbridge_generate_cpu_polled(
-            model.as_ptr(), prompt.as_ptr(), context_tokens, max_tokens, threads,
-            dispatch_polled::<F>, poll_generation::<F>,
+            model.as_ptr(),
+            prompt.as_ptr(),
+            context_tokens,
+            max_tokens,
+            threads,
+            dispatch_polled::<F>,
+            poll_generation::<F>,
             (&mut state as *mut PolledGeneration<'_, F>).cast(),
-            error.as_mut_ptr(), error.len(),
+            error.as_mut_ptr(),
+            error.len(),
         )
     };
     if cancelled.load(Ordering::Acquire) || status == 2 {
         return Err("generation cancelled".into());
     }
-    if status == 0 { return Ok(()); }
+    if status == 0 {
+        return Ok(());
+    }
     let diagnostic = unsafe { CStr::from_ptr(error.as_ptr()) }.to_string_lossy();
     Err(format!("native CPU inference failed: {diagnostic}"))
 }
@@ -477,11 +495,19 @@ pub fn q8_0_matvec_with_memory_limits(
 ) -> Result<Vec<f32>, String> {
     let growth = u64::try_from(workspace_budget_bytes)
         .map_err(|_| "operator workspace budget does not fit u64")?;
-    limits.around_growth(growth, reserve_bytes, || {
-        q8_0_matvec_with_budget(
-            index, reader, tensor_name, activation, cancelled, workspace_budget_bytes,
-        ).map_err(|message| std::io::Error::new(std::io::ErrorKind::Other, message))
-    }).map_err(|error| error.to_string())
+    limits
+        .around_growth(growth, reserve_bytes, || {
+            q8_0_matvec_with_budget(
+                index,
+                reader,
+                tensor_name,
+                activation,
+                cancelled,
+                workspace_budget_bytes,
+            )
+            .map_err(|message| std::io::Error::new(std::io::ErrorKind::Other, message))
+        })
+        .map_err(|error| error.to_string())
 }
 
 /// Authenticate tensor bytes before computing a Q8_0 matrix-vector product,
@@ -808,7 +834,9 @@ mod tests {
                 true
             },
         );
-        assert!(result.unwrap_err().contains("cancelled before native admission"));
+        assert!(result
+            .unwrap_err()
+            .contains("cancelled before native admission"));
         assert_eq!(pieces, 0);
     }
 
@@ -833,8 +861,16 @@ mod tests {
         let cancelled = AtomicBool::new(true);
         let mut calls = 0;
         let result = generate_polled(
-            Path::new("/llmbridge/nonexistent.gguf"), "hello", 128, 8, 1,
-            &cancelled, |_| { calls += 1; true },
+            Path::new("/llmbridge/nonexistent.gguf"),
+            "hello",
+            128,
+            8,
+            1,
+            &cancelled,
+            |_| {
+                calls += 1;
+                true
+            },
         );
         assert!(result.unwrap_err().contains("cancelled"));
         assert_eq!(calls, 0);
@@ -844,19 +880,26 @@ mod tests {
     fn polled_generation_preserves_invalid_model_error() {
         let cancelled = AtomicBool::new(false);
         assert!(generate_polled(
-            Path::new("/llmbridge/nonexistent.gguf"), "hello", 128, 8, 1,
-            &cancelled, |_| true,
-        ).is_err());
+            Path::new("/llmbridge/nonexistent.gguf"),
+            "hello",
+            128,
+            8,
+            1,
+            &cancelled,
+            |_| true,
+        )
+        .is_err());
     }
 
     #[test]
     fn native_range_callback_cannot_read_adjacent_tensor_or_overflow() {
         use std::io::Write;
-        let path = std::env::temp_dir().join(format!(
-            "llmbridge-native-range-{}", std::process::id()
-        ));
-        std::fs::File::create(&path).unwrap()
-            .write_all(b"prefixTENSORsuffix").unwrap();
+        let path =
+            std::env::temp_dir().join(format!("llmbridge-native-range-{}", std::process::id()));
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(b"prefixTENSORsuffix")
+            .unwrap();
         let mut reader = BoundedLocalReader::open(&path, 8, 16).unwrap();
         let mut state = ReaderState {
             reader: &mut reader,
@@ -866,12 +909,24 @@ mod tests {
         };
         let mut output = [0u8; 8];
         let userdata = (&mut state as *mut ReaderState<'_>).cast();
-        assert_eq!(read_range_callback(userdata, output.as_mut_ptr().cast(), 6, 6), 6);
+        assert_eq!(
+            read_range_callback(userdata, output.as_mut_ptr().cast(), 6, 6),
+            6
+        );
         assert_eq!(&output[..6], b"TENSOR");
         let bytes_read = state.reader.disk_bytes_read();
-        assert_eq!(read_range_callback(userdata, output.as_mut_ptr().cast(), 5, 2), 0);
-        assert_eq!(read_range_callback(userdata, output.as_mut_ptr().cast(), 11, 2), 0);
-        assert_eq!(read_range_callback(userdata, output.as_mut_ptr().cast(), u64::MAX, 2), 0);
+        assert_eq!(
+            read_range_callback(userdata, output.as_mut_ptr().cast(), 5, 2),
+            0
+        );
+        assert_eq!(
+            read_range_callback(userdata, output.as_mut_ptr().cast(), 11, 2),
+            0
+        );
+        assert_eq!(
+            read_range_callback(userdata, output.as_mut_ptr().cast(), u64::MAX, 2),
+            0
+        );
         assert_eq!(state.reader.disk_bytes_read(), bytes_read);
         assert!(state.failure.as_deref().unwrap().contains("range overflow"));
         std::fs::remove_file(path).unwrap();
@@ -880,9 +935,8 @@ mod tests {
     #[test]
     fn memory_guard_rejects_before_tensor_access_when_limit_is_invalid() {
         let cancelled = AtomicBool::new(false);
-        let path = std::env::temp_dir().join(format!(
-            "llmbridge-memory-preflight-{}", std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("llmbridge-memory-preflight-{}", std::process::id()));
         std::fs::write(&path, b"not a gguf").unwrap();
         let mut reader = BoundedLocalReader::open(&path, 4, 8).unwrap();
         // A zero RSS limit must fail before indexing or native execution.
@@ -896,7 +950,10 @@ mod tests {
             let _ = (&mut reader, &cancelled);
             Ok(())
         });
-        assert_eq!(rejected.unwrap_err().kind(), std::io::ErrorKind::OutOfMemory);
+        assert_eq!(
+            rejected.unwrap_err().kind(),
+            std::io::ErrorKind::OutOfMemory
+        );
         assert_eq!(reader.disk_bytes_read(), 0);
         std::fs::remove_file(path).unwrap();
     }

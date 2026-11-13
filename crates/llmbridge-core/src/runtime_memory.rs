@@ -37,7 +37,9 @@ impl RuntimeMemoryLimits {
             });
         }
         if let Some(limit) = self.max_cgroup_current_bytes {
-            let used = sample.cgroup_current_bytes.ok_or(MemoryViolation::UnknownCgroupUsage)?;
+            let used = sample
+                .cgroup_current_bytes
+                .ok_or(MemoryViolation::UnknownCgroupUsage)?;
             if used > limit {
                 return Err(MemoryViolation::CgroupUsageExceeded {
                     observed: used,
@@ -61,7 +63,8 @@ impl RuntimeMemoryLimits {
             return Err(MemoryViolation::InvalidLimit);
         }
         let rss = sample.rss_bytes.ok_or(MemoryViolation::UnknownProcessRss)?;
-        let projected = rss.checked_add(growth_bytes)
+        let projected = rss
+            .checked_add(growth_bytes)
             .and_then(|value| value.checked_add(reserve_bytes))
             .ok_or(MemoryViolation::ProcessRssExceeded {
                 observed: u64::MAX,
@@ -74,8 +77,11 @@ impl RuntimeMemoryLimits {
             });
         }
         if let Some(limit) = self.max_cgroup_current_bytes {
-            let used = sample.cgroup_current_bytes.ok_or(MemoryViolation::UnknownCgroupUsage)?;
-            let projected = used.checked_add(growth_bytes)
+            let used = sample
+                .cgroup_current_bytes
+                .ok_or(MemoryViolation::UnknownCgroupUsage)?;
+            let projected = used
+                .checked_add(growth_bytes)
                 .and_then(|value| value.checked_add(reserve_bytes))
                 .ok_or(MemoryViolation::CgroupUsageExceeded {
                     observed: u64::MAX,
@@ -87,6 +93,26 @@ impl RuntimeMemoryLimits {
                     limit,
                 });
             }
+        }
+        Ok(())
+    }
+
+    /// Audit Linux's process-lifetime high-water RSS after a native call.
+    /// This detects transient RSS spikes missed by pre/post current-RSS samples.
+    /// A missing peak is rejected rather than silently treated as safe.
+    /// Peak RSS is lifetime-wide: a breach may predate this operation.
+    pub fn check_peak(self, sample: &ProcessMemory) -> Result<(), MemoryViolation> {
+        if self.max_process_rss_bytes == 0 || self.max_cgroup_current_bytes == Some(0) {
+            return Err(MemoryViolation::InvalidLimit);
+        }
+        let peak = sample
+            .peak_rss_bytes
+            .ok_or(MemoryViolation::UnknownProcessRss)?;
+        if peak > self.max_process_rss_bytes {
+            return Err(MemoryViolation::ProcessRssExceeded {
+                observed: peak,
+                limit: self.max_process_rss_bytes,
+            });
         }
         Ok(())
     }
@@ -129,10 +155,7 @@ impl RuntimeMemoryLimits {
     /// Execute a fallible native boundary only when both surrounding samples pass.
     /// The closure is never invoked on preflight failure. Its side effects cannot
     /// be rolled back if the postflight sample exceeds the limit.
-    pub fn around<T>(
-        self,
-        operation: impl FnOnce() -> io::Result<T>,
-    ) -> io::Result<T> {
+    pub fn around<T>(self, operation: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
         self.check_current().map_err(violation_io)?;
         let result = operation();
         // Check even if the native call failed; do not hide a memory breach.
@@ -143,7 +166,10 @@ impl RuntimeMemoryLimits {
 }
 
 fn violation_io(violation: MemoryViolation) -> io::Error {
-    io::Error::new(io::ErrorKind::OutOfMemory, format!("runtime memory admission: {violation:?}"))
+    io::Error::new(
+        io::ErrorKind::OutOfMemory,
+        format!("runtime memory admission: {violation:?}"),
+    )
 }
 
 #[cfg(test)]
@@ -162,11 +188,26 @@ mod tests {
             max_process_rss_bytes: 100,
             max_cgroup_current_bytes: None,
         };
-        assert_eq!(limits.check(&sample(None, None)), Err(MemoryViolation::UnknownProcessRss));
-        assert_eq!(RuntimeMemoryLimits { max_process_rss_bytes: 0, ..limits }
-            .check(&sample(Some(0), None)), Err(MemoryViolation::InvalidLimit));
-        assert_eq!(RuntimeMemoryLimits { max_cgroup_current_bytes: Some(0), ..limits }
-            .check(&sample(Some(0), Some(0))), Err(MemoryViolation::InvalidLimit));
+        assert_eq!(
+            limits.check(&sample(None, None)),
+            Err(MemoryViolation::UnknownProcessRss)
+        );
+        assert_eq!(
+            RuntimeMemoryLimits {
+                max_process_rss_bytes: 0,
+                ..limits
+            }
+            .check(&sample(Some(0), None)),
+            Err(MemoryViolation::InvalidLimit)
+        );
+        assert_eq!(
+            RuntimeMemoryLimits {
+                max_cgroup_current_bytes: Some(0),
+                ..limits
+            }
+            .check(&sample(Some(0), Some(0))),
+            Err(MemoryViolation::InvalidLimit)
+        );
     }
     #[test]
     fn enforces_both_independent_counters_inclusively() {
@@ -175,11 +216,24 @@ mod tests {
             max_cgroup_current_bytes: Some(200),
         };
         assert!(limits.check(&sample(Some(100), Some(200))).is_ok());
-        assert_eq!(limits.check(&sample(Some(101), Some(1))),
-            Err(MemoryViolation::ProcessRssExceeded { observed: 101, limit: 100 }));
-        assert_eq!(limits.check(&sample(Some(1), None)), Err(MemoryViolation::UnknownCgroupUsage));
-        assert_eq!(limits.check(&sample(Some(1), Some(201))),
-            Err(MemoryViolation::CgroupUsageExceeded { observed: 201, limit: 200 }));
+        assert_eq!(
+            limits.check(&sample(Some(101), Some(1))),
+            Err(MemoryViolation::ProcessRssExceeded {
+                observed: 101,
+                limit: 100
+            })
+        );
+        assert_eq!(
+            limits.check(&sample(Some(1), None)),
+            Err(MemoryViolation::UnknownCgroupUsage)
+        );
+        assert_eq!(
+            limits.check(&sample(Some(1), Some(201))),
+            Err(MemoryViolation::CgroupUsageExceeded {
+                observed: 201,
+                limit: 200
+            })
+        );
     }
     #[test]
     fn unknown_cgroup_is_allowed_only_when_no_cgroup_ceiling_requested() {
@@ -195,15 +249,34 @@ mod tests {
             max_process_rss_bytes: 100,
             max_cgroup_current_bytes: Some(120),
         };
-        assert!(limits.check_growth(&sample(Some(50), Some(70)), 30, 20).is_ok());
-        assert_eq!(limits.check_growth(&sample(Some(50), Some(70)), 31, 20),
-            Err(MemoryViolation::ProcessRssExceeded { observed: 101, limit: 100 }));
-        assert_eq!(limits.check_growth(&sample(Some(10), Some(90)), 20, 11),
-            Err(MemoryViolation::CgroupUsageExceeded { observed: 121, limit: 120 }));
-        assert_eq!(limits.check_growth(&sample(Some(u64::MAX), Some(0)), 1, 0),
-            Err(MemoryViolation::ProcessRssExceeded { observed: u64::MAX, limit: 100 }));
-        assert_eq!(limits.check_growth(&sample(Some(1), None), 1, 0),
-            Err(MemoryViolation::UnknownCgroupUsage));
+        assert!(limits
+            .check_growth(&sample(Some(50), Some(70)), 30, 20)
+            .is_ok());
+        assert_eq!(
+            limits.check_growth(&sample(Some(50), Some(70)), 31, 20),
+            Err(MemoryViolation::ProcessRssExceeded {
+                observed: 101,
+                limit: 100
+            })
+        );
+        assert_eq!(
+            limits.check_growth(&sample(Some(10), Some(90)), 20, 11),
+            Err(MemoryViolation::CgroupUsageExceeded {
+                observed: 121,
+                limit: 120
+            })
+        );
+        assert_eq!(
+            limits.check_growth(&sample(Some(u64::MAX), Some(0)), 1, 0),
+            Err(MemoryViolation::ProcessRssExceeded {
+                observed: u64::MAX,
+                limit: 100
+            })
+        );
+        assert_eq!(
+            limits.check_growth(&sample(Some(1), None), 1, 0),
+            Err(MemoryViolation::UnknownCgroupUsage)
+        );
     }
 
     #[test]
@@ -214,23 +287,60 @@ mod tests {
             max_cgroup_current_bytes: None,
         };
         let invoked = Cell::new(false);
-        let rejected = limits.around_growth_with_sampler(30, 10,
+        let rejected = limits.around_growth_with_sampler(
+            30,
+            10,
             || sample(Some(70), None),
-            || { invoked.set(true); Ok(()) });
+            || {
+                invoked.set(true);
+                Ok(())
+            },
+        );
         assert_eq!(rejected.unwrap_err().kind(), io::ErrorKind::OutOfMemory);
         assert!(!invoked.get());
 
         let samples = Cell::new(0usize);
-        let result: io::Result<()> = limits.around_growth_with_sampler(20, 10,
+        let result: io::Result<()> = limits.around_growth_with_sampler(
+            20,
+            10,
             || {
                 let n = samples.get();
                 samples.set(n + 1);
                 sample(Some(if n == 0 { 50 } else { 101 }), None)
             },
-            || { invoked.set(true); Err(io::Error::new(io::ErrorKind::Other, "native failed")) });
+            || {
+                invoked.set(true);
+                Err(io::Error::new(io::ErrorKind::Other, "native failed"))
+            },
+        );
         assert!(invoked.get());
         assert_eq!(samples.get(), 2);
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::OutOfMemory);
+    }
+
+    #[test]
+    fn peak_audit_detects_transient_native_memory_spikes() {
+        let limits = RuntimeMemoryLimits {
+            max_process_rss_bytes: 100,
+            max_cgroup_current_bytes: None,
+        };
+        let mut observed = sample(Some(20), None);
+        observed.peak_rss_bytes = Some(101);
+        assert!(limits.check(&observed).is_ok());
+        assert_eq!(
+            limits.check_peak(&observed),
+            Err(MemoryViolation::ProcessRssExceeded {
+                observed: 101,
+                limit: 100,
+            })
+        );
+        observed.peak_rss_bytes = Some(100);
+        assert!(limits.check_peak(&observed).is_ok());
+        observed.peak_rss_bytes = None;
+        assert_eq!(
+            limits.check_peak(&observed),
+            Err(MemoryViolation::UnknownProcessRss)
+        );
     }
 
     #[test]
@@ -239,10 +349,12 @@ mod tests {
             max_process_rss_bytes: 100,
             max_cgroup_current_bytes: None,
         };
-        let result: io::Result<()> = limits.around_growth_with_sampler(10, 5,
+        let result: io::Result<()> = limits.around_growth_with_sampler(
+            10,
+            5,
             || sample(Some(40), None),
-            || Err(io::Error::new(io::ErrorKind::InvalidData, "native failed")));
+            || Err(io::Error::new(io::ErrorKind::InvalidData, "native failed")),
+        );
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidData);
     }
-
 }
