@@ -87,6 +87,7 @@ where
 }
 
 #[cfg(test)]
+#[allow(clippy::manual_is_multiple_of)] // GGUF fixture padding remains Rust 1.82-compatible.
 mod tests {
     use super::*;
     use crate::gguf_index::GgufTensorIndex;
