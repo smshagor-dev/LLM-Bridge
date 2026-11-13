@@ -522,12 +522,12 @@ mod tests {
             ([0.; 2], [0.; 2], [0.; 2], [0.; 2], [77.; 2]);
         let err = f32_swiglu_residual_cancellable(
             &index, &mut reader, "gate", "up", "down",
-            &[2., 3.], &[f32::MAX, f32::MAX], &mut gate, &mut up,
+            &[1.0e19, 1.], &[f32::MAX, 0.], &mut gate, &mut up,
             &mut scratch, &mut projection, &mut output,
             &AtomicBool::new(false), 4, 56,
         ).unwrap_err();
-        // The first result is finite, but the second residual addition
-        // overflows. Neither output element may be committed.
+        // The first projected result is finite (~1e38), but adding
+        // f32::MAX overflows. Neither output element may be committed.
         assert_eq!(err.kind(), ErrorKind::InvalidData);
         assert_eq!(output, [77.; 2]);
         assert_eq!(reader.disk_bytes_read(), 48);
