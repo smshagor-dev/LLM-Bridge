@@ -22,8 +22,8 @@ pub fn f32_two_stage_cancellable(
     cancelled: &AtomicBool,
     staging_budget_bytes: usize,
 ) -> io::Result<()> {
-    if output.len() != final_scratch.len() {
-        return Err(io::Error::new(ErrorKind::InvalidInput, "final scratch/output shape mismatch"));
+    if output.len() != final_scratch.len() || input.iter().any(|value| !value.is_finite()) {
+        return Err(io::Error::new(ErrorKind::InvalidInput, "invalid input activation or final scratch/output shape"));
     }
     if cancelled.load(Ordering::Acquire) {
         return Err(io::Error::new(ErrorKind::Interrupted, "two-stage operation cancelled"));
@@ -126,6 +126,26 @@ mod tests {
     }
 
     #[test]
+    fn nonfinite_input_is_rejected_before_either_stage_reads() {
+        let path = fixture(1.);
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 4, 8).unwrap();
+        let mut hidden = [55f32; 2];
+        let mut scratch = [66f32; 1];
+        let mut output = [77f32; 1];
+        let err = f32_two_stage_cancellable(
+            &index, &mut reader, "first", "second", &[f32::NAN, 3.],
+            &mut hidden, &mut scratch, &mut output, &AtomicBool::new(false), 4
+        ).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+        assert_eq!(reader.disk_bytes_read(), 0);
+        assert_eq!(hidden, [55.; 2]);
+        assert_eq!(scratch, [66.]);
+        assert_eq!(output, [77.]);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn second_stage_failure_never_commits_partial_output() {
         let path = fixture(1.);
         let index = GgufTensorIndex::inspect(&path).unwrap();
@@ -137,7 +157,7 @@ mod tests {
             &index, &mut reader, "first", "second", &[f32::MAX, f32::MAX],
             &mut hidden, &mut scratch, &mut output, &AtomicBool::new(false), 4
         ).unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+        assert_eq!(err.kind(), ErrorKind::InvalidData);
         assert_eq!(output, [77.]);
         std::fs::remove_file(path).unwrap();
     }
