@@ -21,6 +21,7 @@ def main():
     p.add_argument('--reference', type=Path, required=True)
     p.add_argument('--model', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
+    p.add_argument('--cache-mb', type=int, default=0)
     p.add_argument('--max-address-space-mb', type=int, default=0, help='Linux child RLIMIT_AS; 0 disables')
     args = p.parse_args()
     if sys.byteorder != 'little':
@@ -46,7 +47,7 @@ def main():
         reference_logits.unlink(missing_ok=True)
         streamed_logits.unlink(missing_ok=True)
         base = [str(args.binary.resolve()), 'chat', str(args.model.resolve()), '--prompt', prompt,
-                '--max-tokens', '8', '--ctx', '128', '--metrics']
+                '--max-tokens', '8', '--ctx', '128', '--metrics', '--cache-mb', str(args.cache_mb)]
         started = time.monotonic()
         actual = subprocess.run(base + ['--backend', 'streamed', '--workspace-mb', '8',
                                        '--logits', str(streamed_logits)], capture_output=True, timeout=240,
@@ -60,6 +61,8 @@ def main():
                   'reference_text': expected.stdout.decode(errors='replace'),
                   'streamed_stderr': actual.stderr.decode(errors='replace'),
                   'reference_stderr': expected.stderr.decode(errors='replace')}
+        cache_metrics = re.search(r'^LLMBRIDGE_STREAMED (.*)$', result['streamed_stderr'], re.MULTILINE)
+        result['reader_metrics'] = {key: int(value) for key, value in re.findall(r'(\w+)=(\d+)', cache_metrics.group(1))} if cache_metrics else {}
         result['wall_seconds_including_load'] = wall_seconds
         memory = re.search(r'^LLMBRIDGE_MEMORY (\{.*\})$', result['streamed_stderr'], re.MULTILINE)
         result['memory'] = json.loads(memory.group(1)) if memory else {}
@@ -84,7 +87,8 @@ def main():
               'binary_sha256': binary_digest, 'reference_binary_sha256': reference_digest,
               'reference_revision': 'cd959bae99ff4bed22bef2604f45241c09bbb8c8',
               'working_tree_dirty': bool(subprocess.run(['git', 'status', '--porcelain'], capture_output=True, text=True, check=True).stdout.strip()),
-              'source_sha256': {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in [Path('native/src/streamed.cpp'), Path('crates/llmbridge-core/src/streamed.rs')]},
+              'source_sha256': {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in [Path('native/src/streamed.cpp'), Path('crates/llmbridge-core/src/streamed.rs'), Path('crates/llmbridge-core/src/read_cache.rs'), Path('crates/llmbridge-core/src/storage.rs')]},
+              'cache_budget_bytes': args.cache_mb * 1024 * 1024,
               'address_space_limit_bytes': limit_bytes or None, 'host': platform.platform(),
               'git_sha': subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True, check=True).stdout.strip(),
               'kv_precision': 'FP32 on both paths; reference flash attention disabled',

@@ -111,6 +111,8 @@ cargo run --release -p llmbridge -- chat /models/model.gguf --prompt "The sky is
   --backend streamed --ctx 128 --max-tokens 8 --workspace-mb 8 --metrics
 ```
 
+Optional `--cache-mb 1` enables bounded session-local block caching/read-ahead, with source identity and cancellation checks on hits. Default caching is disabled. [Measured cache behavior](docs/STREAMED_CACHE.md).
+
 For Linux standalone CLI use, `--address-space-mb 24` enforces `RLIMIT_AS`. This is a virtual-address limit, distinct from an explicit workspace budget, cgroup memory or physical machine RAM. Only the pinned tiny checkpoint has been verified end to end. [Protocol, evidence and limits](docs/STREAMED_DECODER.md).
 
 ### Run checks before proposing changes

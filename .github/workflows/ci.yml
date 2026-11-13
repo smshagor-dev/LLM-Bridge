@@ -73,6 +73,12 @@ jobs:
       - name: Compare complete streamed decoder output and logits
         run: python3 scripts/check_streamed_parity.py --binary ./target/release/llmbridge --reference ./reference-build/bin/llama-simple --model models/stories15M-q8_0.gguf --output benchmarks/results/streamed --max-address-space-mb 24
 
+      - name: Verify cached streamed decoder within the same process cap
+        run: python3 scripts/check_streamed_parity.py --binary ./target/release/llmbridge --reference ./reference-build/bin/llama-simple --model models/stories15M-q8_0.gguf --output benchmarks/results/streamed-cached --max-address-space-mb 24 --cache-mb 1
+
+      - name: Require identical cached logits and measured read-call reduction
+        run: python3 scripts/compare_cache_results.py --uncached benchmarks/results/streamed/streamed_parity.json --cached benchmarks/results/streamed-cached/streamed_parity.json --output benchmarks/results/cache_comparison.json
+
       - name: Streamed decoder cancellation and refusal contracts
         run: cargo run --release -p llmbridge-core --features native --example streamed_contract -- models/stories15M-q8_0.gguf
 

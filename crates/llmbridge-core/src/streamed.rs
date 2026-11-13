@@ -1,6 +1,10 @@
 //! Experimental complete Llama F32/Q8_0 decoder backed by bounded local reads.
 //! The explicit workspace budget is not an enforced process RSS limit.
-use crate::{gguf_index::GgufTensorIndex, storage::BoundedLocalReader};
+use crate::{
+    gguf_index::GgufTensorIndex,
+    read_cache::{CachedLocalReader, ReadCacheMetrics},
+    storage::BoundedLocalReader,
+};
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,6 +15,7 @@ pub struct StreamedConfig {
     pub max_tokens: u32,
     pub chunk_bytes: usize,
     pub workspace_bytes: u64,
+    pub cache_bytes: usize,
 }
 impl Default for StreamedConfig {
     fn default() -> Self {
@@ -19,6 +24,7 @@ impl Default for StreamedConfig {
             max_tokens: 16,
             chunk_bytes: 64 * 1024,
             workspace_bytes: 8 * 1024 * 1024,
+            cache_bytes: 0,
         }
     }
 }
@@ -26,6 +32,7 @@ impl Default for StreamedConfig {
 pub struct StreamedMetrics {
     pub source_bytes_read: u64,
     pub reader_buffer_bytes: usize,
+    pub cache: ReadCacheMetrics,
 }
 
 extern "C" {
@@ -48,7 +55,7 @@ extern "C" {
     ) -> i32;
 }
 struct State<'a, F, L> {
-    reader: BoundedLocalReader,
+    reader: CachedLocalReader,
     cancelled: &'a AtomicBool,
     emit: F,
     logits: L,
@@ -135,7 +142,7 @@ extern "C" fn logits<F, L: FnMut(&[f32]) -> bool>(
     })
 }
 
-/// Runs every decoder layer for each input token; only requested tensor rows are read.
+/// Runs every decoder layer. Optional caching reads bounded adjacent blocks ahead.
 /// Tokenizer metadata uses upstream vocabulary-only loading. No mmap weight loader is used.
 /// Unknown architecture options/tensor layouts fail; logits are exposed before greedy sampling.
 /// Callbacks may see prior tokens before a later read fails, as with other streaming APIs.
@@ -153,6 +160,7 @@ pub fn generate_streamed<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
     if !(64..=8192).contains(&config.context_tokens)
         || !(1..=2048).contains(&config.max_tokens)
         || !(34..=1024 * 1024).contains(&config.chunk_bytes)
+        || config.cache_bytes > 32 * 1024 * 1024
         || config.workspace_bytes == 0
         || config.workspace_bytes > 1024 * 1024 * 1024
         || prompt.is_empty()
@@ -174,7 +182,7 @@ pub fn generate_streamed<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
         return Err("streamed native ABI mismatch".into());
     }
     let mut state = State {
-        reader,
+        reader: CachedLocalReader::new(reader, config.cache_bytes).map_err(|e| e.to_string())?,
         cancelled,
         emit: on_piece,
         logits: on_logits,
@@ -210,8 +218,9 @@ pub fn generate_streamed<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
         ));
     }
     Ok(StreamedMetrics {
-        source_bytes_read: state.reader.disk_bytes_read(),
+        source_bytes_read: state.reader.source_bytes_read(),
         reader_buffer_bytes: config.chunk_bytes,
+        cache: state.reader.metrics(),
     })
 }
 
