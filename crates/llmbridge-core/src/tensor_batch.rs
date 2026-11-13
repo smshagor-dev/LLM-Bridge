@@ -45,7 +45,19 @@ where
         if cancelled.load(Ordering::Acquire) {
             return Err(io::Error::new(io::ErrorKind::Interrupted, "batch cancelled"));
         }
-        index.stream_tensor_cancellable(reader, name, cancelled, |chunk| consume(name, chunk))?;
+        index.stream_tensor_cancellable(reader, name, cancelled, |chunk| {
+            if cancelled.load(Ordering::Acquire) {
+                return Err(io::Error::new(io::ErrorKind::Interrupted, "batch cancelled"));
+            }
+            consume(name, chunk)?;
+            if cancelled.load(Ordering::Acquire) {
+                return Err(io::Error::new(io::ErrorKind::Interrupted, "batch cancelled"));
+            }
+            Ok(())
+        })?;
+        if cancelled.load(Ordering::Acquire) {
+            return Err(io::Error::new(io::ErrorKind::Interrupted, "batch cancelled"));
+        }
     }
     Ok(total)
 }
@@ -90,6 +102,47 @@ mod tests {
         }
         assert!(stream_tensor_batch(&index, &mut reader, &["weights"], 15, &cancel, |_, _| Ok(())).is_err());
         assert_eq!(reader.disk_bytes_read(), 0);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn cancellation_from_last_chunk_is_not_reported_as_success() {
+        let path = fixture();
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 16, 10).unwrap();
+        let cancelled = AtomicBool::new(false);
+        let mut callbacks = 0usize;
+        let result = stream_tensor_batch(
+            &index, &mut reader, &["weights"], 16, &cancelled,
+            |_, chunk| {
+                assert!(!chunk.is_empty());
+                callbacks += 1;
+                cancelled.store(true, Ordering::Release);
+                Ok(())
+            },
+        );
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Interrupted);
+        assert_eq!(callbacks, 1);
+        assert_eq!(reader.disk_bytes_read(), 16);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn consumer_error_is_preserved_without_replaying_chunks() {
+        let path = fixture();
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 16, 10).unwrap();
+        let cancelled = AtomicBool::new(false);
+        let mut callbacks = 0;
+        let result = stream_tensor_batch(
+            &index, &mut reader, &["weights"], 16, &cancelled,
+            |_, _| {
+                callbacks += 1;
+                Err(io::Error::new(io::ErrorKind::BrokenPipe, "consumer stopped"))
+            },
+        );
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::BrokenPipe);
+        assert_eq!(callbacks, 1);
         std::fs::remove_file(path).unwrap();
     }
 
