@@ -204,6 +204,25 @@ mod tests {
     }
 
     #[test]
+    fn verified_batch_cancellation_during_digest_never_delivers_chunks() {
+        use sha2::{Digest, Sha256};
+        let path = fixture();
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 4, 8).unwrap();
+        let expected = format!("{:x}", Sha256::digest([7u8; 16]));
+        let cancel = AtomicBool::new(true);
+        let mut callbacks = 0usize;
+        let err = stream_verified_tensor_batch(
+            &index, &mut reader, &[("weights", expected.as_str())], 16, &cancel,
+            |_, _| { callbacks += 1; Ok(()) },
+        ).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(callbacks, 0);
+        assert_eq!(reader.disk_bytes_read(), 0);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn verified_batch_invalid_manifest_fails_without_tensor_io() {
         let path = fixture();
         let index = GgufTensorIndex::inspect(&path).unwrap();
