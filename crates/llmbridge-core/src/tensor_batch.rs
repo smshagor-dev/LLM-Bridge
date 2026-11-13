@@ -62,16 +62,25 @@ where
         }
         index.stream_tensor_cancellable(reader, name, cancelled, |chunk| {
             if cancelled.load(Ordering::Acquire) {
-                return Err(io::Error::new(io::ErrorKind::Interrupted, "batch cancelled"));
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "batch cancelled",
+                ));
             }
             consume(name, chunk)?;
             if cancelled.load(Ordering::Acquire) {
-                return Err(io::Error::new(io::ErrorKind::Interrupted, "batch cancelled"));
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "batch cancelled",
+                ));
             }
             Ok(())
         })?;
         if cancelled.load(Ordering::Acquire) {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "batch cancelled"));
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "batch cancelled",
+            ));
         }
     }
     Ok(total)
@@ -146,7 +155,11 @@ mod tests {
         let cancelled = AtomicBool::new(false);
         let mut callbacks = 0usize;
         let result = stream_tensor_batch(
-            &index, &mut reader, &["weights"], 16, &cancelled,
+            &index,
+            &mut reader,
+            &["weights"],
+            16,
+            &cancelled,
             |_, chunk| {
                 assert!(!chunk.is_empty());
                 callbacks += 1;
@@ -167,13 +180,14 @@ mod tests {
         let mut reader = BoundedLocalReader::open(&path, 16, 32).unwrap();
         let cancelled = AtomicBool::new(false);
         let mut callbacks = 0;
-        let result = stream_tensor_batch(
-            &index, &mut reader, &["weights"], 16, &cancelled,
-            |_, _| {
+        let result =
+            stream_tensor_batch(&index, &mut reader, &["weights"], 16, &cancelled, |_, _| {
                 callbacks += 1;
-                Err(io::Error::new(io::ErrorKind::BrokenPipe, "consumer stopped"))
-            },
-        );
+                Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "consumer stopped",
+                ))
+            });
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::BrokenPipe);
         assert_eq!(callbacks, 1);
         std::fs::remove_file(path).unwrap();
