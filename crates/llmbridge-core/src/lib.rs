@@ -5,6 +5,7 @@ pub mod inference;
 pub mod models;
 
 pub mod f32_stream;
+pub mod f32_chain;
 pub mod memory_plan;
 #[cfg(feature = "native")]
 pub mod q8_batch;
