@@ -269,11 +269,11 @@ mod tests {
         let mut checks = 0usize;
         let error = reader.sha256_cancellable(|| {
             checks += 1;
-            checks == 3
+            checks == 4
         }).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::Interrupted);
         assert_eq!(reader.disk_bytes_read(), 4);
-        assert_eq!(checks, 3);
+        assert_eq!(checks, 4);
         fs::remove_file(path).unwrap();
     }
 
