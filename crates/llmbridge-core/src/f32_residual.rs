@@ -26,6 +26,19 @@ pub fn f32_matvec_residual_cancellable(
     {
         return Err(io::Error::new(ErrorKind::InvalidInput, "residual shape or values invalid"));
     }
+    // Validate the indexed output shape before any tensor I/O or scratch writes.
+    // Otherwise the matrix primitive can read rows and partially overwrite scratch
+    // before discovering a caller-supplied residual/output length mismatch.
+    let tensor = index.tensor(tensor_name)
+        .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "GGUF tensor does not exist"))?;
+    if tensor.ggml_type != 0 || tensor.dimensions.len() != 2 {
+        return Err(io::Error::new(ErrorKind::InvalidInput, "expected rank-2 F32 projection"));
+    }
+    let rows = usize::try_from(tensor.dimensions[1])
+        .map_err(|_| io::Error::new(ErrorKind::InvalidInput, "projection row count exceeds usize"))?;
+    if rows != output.len() {
+        return Err(io::Error::new(ErrorKind::InvalidInput, "projection and residual dimensions differ"));
+    }
     if cancelled.load(Ordering::Acquire) {
         return Err(io::Error::new(ErrorKind::Interrupted, "residual operation cancelled"));
     }
@@ -109,6 +122,42 @@ mod tests {
         ).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidInput);
         assert_eq!(reader.disk_bytes_read(), 0);
+        assert_eq!(output, [77.; 2]);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn indexed_output_shape_mismatch_fails_before_io_and_scratch_mutation() {
+        let path = fixture([1., 2., 3., 4.]);
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 4, 8).unwrap();
+        let mut scratch = [55.; 1];
+        let mut output = [77.; 1];
+        let err = f32_matvec_residual_cancellable(
+            &index, &mut reader, "projection", &[2., 3.], &[0.],
+            &mut scratch, &mut output, &AtomicBool::new(false), 4
+        ).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+        assert_eq!(reader.disk_bytes_read(), 0);
+        assert_eq!(scratch, [55.]);
+        assert_eq!(output, [77.]);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn missing_tensor_fails_before_io_and_scratch_mutation() {
+        let path = fixture([1., 2., 3., 4.]);
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 4, 8).unwrap();
+        let mut scratch = [55.; 2];
+        let mut output = [77.; 2];
+        let err = f32_matvec_residual_cancellable(
+            &index, &mut reader, "not_present", &[2., 3.], &[0., 0.],
+            &mut scratch, &mut output, &AtomicBool::new(false), 4
+        ).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::NotFound);
+        assert_eq!(reader.disk_bytes_read(), 0);
+        assert_eq!(scratch, [55.; 2]);
         assert_eq!(output, [77.; 2]);
         std::fs::remove_file(path).unwrap();
     }
