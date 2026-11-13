@@ -216,6 +216,20 @@ mod tests {
     }
 
     #[test]
+    fn cache_empty_state_tracks_revision_unload_and_byte_accounting() {
+        let mut cache = TensorChunkCache::new(4);
+        assert!(cache.is_empty());
+        assert_eq!(cache.len(), 0);
+        cache.insert(key(1, 0, 2), b"ok").unwrap();
+        assert!(!cache.is_empty());
+        assert_eq!(cache.used_bytes(), 2);
+        assert_eq!(cache.evict_revision([1; 32]), 2);
+        assert!(cache.is_empty());
+        assert_eq!(cache.len(), 0);
+        assert_eq!(cache.used_bytes(), 0);
+    }
+
+    #[test]
     fn verified_cache_hit_updates_lru_without_changing_budget() {
         let mut cache = TensorChunkCache::new(6);
         cache.insert(key(1, 0, 3), b"abc").unwrap();
