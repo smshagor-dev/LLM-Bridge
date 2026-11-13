@@ -24,3 +24,10 @@ required-features = ["native"]
 [[example]]
 name = "streamed_contract"
 required-features = ["native"]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "=0.2.191"
+
+[[example]]
+name = "verified_contract"
+required-features = ["native"]

@@ -76,6 +76,9 @@ impl CachedLocalReader {
     pub fn metrics(&self) -> ReadCacheMetrics {
         self.metrics
     }
+    pub fn authentication_metrics(&self) -> Option<crate::storage::AuthenticationMetrics> {
+        self.source.authentication_metrics()
+    }
     pub fn source_bytes_read(&self) -> u64 {
         self.source.disk_bytes_read()
     }

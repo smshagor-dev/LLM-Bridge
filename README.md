@@ -111,6 +111,8 @@ cargo run --release -p llmbridge -- chat /models/model.gguf --prompt "The sky is
   --backend streamed --ctx 128 --max-tokens 8 --workspace-mb 8 --metrics
 ```
 
+On Linux, `--sha256 <trusted-digest>` binds streamed generation to authenticated blocks and sealed tokenizer metadata. `--verification-mb` bounds verification overhead. [Verified session protocol](docs/VERIFIED_MODEL_SESSIONS.md).
+
 Optional `--cache-mb 1` enables bounded session-local block caching/read-ahead, with source identity and cancellation checks on hits. Default caching is disabled. [Measured cache behavior](docs/STREAMED_CACHE.md).
 
 For Linux standalone CLI use, `--address-space-mb 24` enforces `RLIMIT_AS`. This is a virtual-address limit, distinct from an explicit workspace budget, cgroup memory or physical machine RAM. Only the pinned tiny checkpoint has been verified end to end. [Protocol, evidence and limits](docs/STREAMED_DECODER.md).
@@ -127,7 +129,7 @@ Native dependencies and test coverage may vary by platform; consult CI workflows
 
 ## Roadmap and acceptance criteria
 
-**M2 — current priority:** Build on the experimental full-decoder checkpoint: integrate verified immutable sessions, cache/prefetch, scheduling, portable worker limits, broader correctness and memory validation. The current Linux/tiny-model proof does **not** complete every M2 or product requirement.
+**M2 — current priority:** Build on the experimental full-decoder checkpoint: extend verified sessions and bounded caches, prefetch, scheduling, portable worker limits, broader correctness and memory validation. The current Linux/tiny-model proof does **not** complete every M2 or product requirement.
 
 **M3 — adaptive hardware/memory planning:** Calculate feasible context, KV-cache, activation and staging budgets; choose execution strategies based on measured hardware; fail safely when a workload cannot be admitted.
 

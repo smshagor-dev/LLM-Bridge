@@ -16,6 +16,7 @@ pub struct StreamedConfig {
     pub chunk_bytes: usize,
     pub workspace_bytes: u64,
     pub cache_bytes: usize,
+    pub authentication_budget_bytes: usize,
 }
 impl Default for StreamedConfig {
     fn default() -> Self {
@@ -25,6 +26,7 @@ impl Default for StreamedConfig {
             chunk_bytes: 64 * 1024,
             workspace_bytes: 8 * 1024 * 1024,
             cache_bytes: 0,
+            authentication_budget_bytes: 8 * 1024 * 1024,
         }
     }
 }
@@ -33,11 +35,12 @@ pub struct StreamedMetrics {
     pub source_bytes_read: u64,
     pub reader_buffer_bytes: usize,
     pub cache: ReadCacheMetrics,
+    pub authentication: Option<crate::storage::AuthenticationMetrics>,
 }
 
 extern "C" {
     fn llmbridge_abi_version() -> u32;
-    fn llmbridge_generate_streamed_cpu(
+    fn llmbridge_generate_streamed_cpu_v2(
         path: *const c_char,
         prompt: *const c_char,
         context: u32,
@@ -45,6 +48,7 @@ extern "C" {
         file_bytes: u64,
         max_chunk: usize,
         workspace: u64,
+        tokenizer_prefix: u64,
         reader: extern "C" fn(*mut c_void, *mut c_void, u64, usize) -> usize,
         emit: extern "C" fn(*const c_char, usize, *mut c_void) -> i32,
         logits: extern "C" fn(*const f32, usize, *mut c_void) -> i32,
@@ -154,6 +158,39 @@ pub fn generate_streamed<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
     on_piece: F,
     on_logits: L,
 ) -> Result<StreamedMetrics, String> {
+    generate_streamed_internal(model, prompt, config, cancelled, None, on_piece, on_logits)
+}
+
+/// Opt-in authenticated generation: expected whole-file hash must be independently trusted.
+/// Sealed tokenizer metadata and per-block verification prevent a hash/load source race.
+pub fn generate_streamed_verified<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
+    model: &Path,
+    prompt: &str,
+    config: StreamedConfig,
+    cancelled: &AtomicBool,
+    expected_sha256: &str,
+    on_piece: F,
+    on_logits: L,
+) -> Result<StreamedMetrics, String> {
+    generate_streamed_internal(
+        model,
+        prompt,
+        config,
+        cancelled,
+        Some(expected_sha256),
+        on_piece,
+        on_logits,
+    )
+}
+fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
+    model: &Path,
+    prompt: &str,
+    config: StreamedConfig,
+    cancelled: &AtomicBool,
+    expected_sha256: Option<&str>,
+    on_piece: F,
+    on_logits: L,
+) -> Result<StreamedMetrics, String> {
     if cancelled.load(Ordering::Acquire) {
         return Err("streamed generation cancelled before admission".into());
     }
@@ -161,6 +198,8 @@ pub fn generate_streamed<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
         || !(1..=2048).contains(&config.max_tokens)
         || !(34..=1024 * 1024).contains(&config.chunk_bytes)
         || config.cache_bytes > 32 * 1024 * 1024
+        || config.authentication_budget_bytes == 0
+        || config.authentication_budget_bytes > 64 * 1024 * 1024
         || config.workspace_bytes == 0
         || config.workspace_bytes > 1024 * 1024 * 1024
         || prompt.is_empty()
@@ -168,15 +207,32 @@ pub fn generate_streamed<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
     {
         return Err("invalid streamed generation configuration".into());
     }
-    let path = CString::new(model.to_str().ok_or("model path must be UTF-8")?)
-        .map_err(|_| "NUL in model path")?;
+    if expected_sha256
+        .is_some_and(|hash| hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()))
+    {
+        return Err("expected SHA-256 must be 64 hex digits".into());
+    }
     let prompt = CString::new(prompt).map_err(|_| "NUL in prompt")?;
     let index = GgufTensorIndex::inspect(model).map_err(|e| e.to_string())?;
-    let reader = BoundedLocalReader::open(model, config.chunk_bytes, config.chunk_bytes * 2)
+    let mut reader = BoundedLocalReader::open(model, config.chunk_bytes, config.chunk_bytes * 2)
         .map_err(|e| e.to_string())?;
     if reader.identity() != &index.source_identity {
         return Err("streamed model changed after index".into());
     }
+    let sealed = expected_sha256
+        .map(|hash| {
+            reader.authenticate_model(
+                hash,
+                index.data_offset,
+                config.authentication_budget_bytes,
+                || cancelled.load(Ordering::Acquire),
+            )
+        })
+        .transpose()
+        .map_err(|e| e.to_string())?;
+    let tokenizer_path = sealed.as_ref().map_or(model, |snapshot| snapshot.path());
+    let path = CString::new(tokenizer_path.to_str().ok_or("model path must be UTF-8")?)
+        .map_err(|_| "NUL in model path")?;
     // SAFETY: constant ABI query; all pointers below remain live for this synchronous call.
     if unsafe { llmbridge_abi_version() } != 1 {
         return Err("streamed native ABI mismatch".into());
@@ -190,7 +246,7 @@ pub fn generate_streamed<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
     };
     let mut error = [0 as c_char; 1024];
     let status = unsafe {
-        llmbridge_generate_streamed_cpu(
+        llmbridge_generate_streamed_cpu_v2(
             path.as_ptr(),
             prompt.as_ptr(),
             config.context_tokens,
@@ -198,6 +254,7 @@ pub fn generate_streamed<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
             index.file_bytes,
             config.chunk_bytes,
             config.workspace_bytes,
+            sealed.as_ref().map_or(0, |snapshot| snapshot.prefix_bytes),
             read::<F, L>,
             emit::<F, L>,
             logits::<F, L>,
@@ -221,6 +278,7 @@ pub fn generate_streamed<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
         source_bytes_read: state.reader.source_bytes_read(),
         reader_buffer_bytes: config.chunk_bytes,
         cache: state.reader.metrics(),
+        authentication: state.reader.authentication_metrics(),
     })
 }
 
