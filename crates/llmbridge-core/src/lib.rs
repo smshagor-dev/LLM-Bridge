@@ -10,6 +10,8 @@ pub mod f32_chain;
 pub mod memory_plan;
 #[cfg(feature = "native")]
 pub mod q8_batch;
+#[cfg(feature = "native")]
+pub mod q8_chain;
 pub mod runtime_memory;
 pub mod storage;
 pub mod tensor_batch;
