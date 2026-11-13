@@ -8,6 +8,7 @@ pub mod f32_stream;
 pub mod f32_residual;
 pub mod f32_chain;
 pub mod memory_plan;
+pub mod memory_budget;
 #[cfg(feature = "native")]
 pub mod q8_batch;
 pub mod runtime_memory;
