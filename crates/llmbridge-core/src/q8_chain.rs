@@ -61,9 +61,6 @@ pub fn q8_0_two_stage_with_budget(
     }
     let (first_columns, first_rows) = q8_shape(index, first_name)?;
     let (second_columns, _second_rows) = q8_shape(index, second_name)?;
-    if first_name == second_name {
-        return Err("a two-stage graph requires distinct tensor names".into());
-    }
     if input.len() != first_columns || first_rows != second_columns
         || input.iter().any(|value| !value.is_finite())
     {
@@ -169,6 +166,20 @@ mod tests {
         assert_eq!(output, vec![64f32]);
         assert_eq!(reader.disk_bytes_read(), 32 * 34 + 34);
         assert_eq!(reader.allocated_chunk_bytes(), 64);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn shared_weight_tensor_may_be_reused_in_both_stages() {
+        let path = fixture(32, false);
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 64, 128).unwrap();
+        let output = q8_0_two_stage_with_budget(
+            &index, &mut reader, "first", "first", &[2f32; 32],
+            &AtomicBool::new(false), OP_BUDGET, GRAPH_BUDGET,
+        ).unwrap();
+        assert_eq!(output, vec![2f32; 32]);
+        assert_eq!(reader.disk_bytes_read(), 2 * 32 * 34);
         std::fs::remove_file(path).unwrap();
     }
 
