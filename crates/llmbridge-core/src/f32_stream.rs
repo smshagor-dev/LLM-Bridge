@@ -149,6 +149,43 @@ pub fn f32_matvec_atomic_cancellable(
     Ok(())
 }
 
+/// Compute y = W*x + bias with caller-owned scratch and atomic output commit.
+/// Bias is an activation-sized slice, not an indexed GGUF tensor. No full
+/// weight matrix is allocated; this is not a full native transformer graph.
+pub fn f32_matvec_bias_cancellable(
+    index: &GgufTensorIndex,
+    reader: &mut BoundedLocalReader,
+    tensor_name: &str,
+    input: &[f32],
+    bias: &[f32],
+    scratch: &mut [f32],
+    output: &mut [f32],
+    cancelled: &AtomicBool,
+    workspace_budget_bytes: usize,
+) -> io::Result<()> {
+    if bias.len() != output.len() || scratch.len() != output.len()
+        || bias.iter().any(|value| !value.is_finite())
+    {
+        return Err(reject(ErrorKind::InvalidInput, "invalid bias or scratch/output shape"));
+    }
+    f32_matvec_cancellable(index, reader, tensor_name, input, scratch, cancelled, workspace_budget_bytes)?;
+    for (value, addition) in scratch.iter_mut().zip(bias) {
+        if cancelled.load(Ordering::Acquire) {
+            return Err(reject(ErrorKind::Interrupted, "biased matrix operation cancelled"));
+        }
+        let sum = *value + *addition;
+        if !sum.is_finite() {
+            return Err(reject(ErrorKind::InvalidData, "non-finite biased matrix result"));
+        }
+        *value = sum;
+    }
+    if cancelled.load(Ordering::Acquire) {
+        return Err(reject(ErrorKind::Interrupted, "biased matrix operation cancelled"));
+    }
+    output.copy_from_slice(scratch);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,6 +252,71 @@ mod tests {
         assert_eq!(reader.disk_bytes_read(), 0);
         assert_eq!(output, [22.; 2]);
         std::fs::remove_file(reader_path).unwrap();
+    }
+
+    #[test]
+    fn biased_projection_commits_only_after_finite_bias_addition() {
+        let mut bytes = b"GGUF".to_vec();
+        bytes.extend_from_slice(&3u32.to_le_bytes());
+        bytes.extend_from_slice(&1u64.to_le_bytes());
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        bytes.extend_from_slice(&1u64.to_le_bytes());
+        bytes.push(b'w');
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        bytes.extend_from_slice(&1u64.to_le_bytes());
+        bytes.extend_from_slice(&2u64.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        while bytes.len() % 32 != 0 { bytes.push(0); }
+        for value in [2f32, f32::MAX] { bytes.extend_from_slice(&value.to_le_bytes()); }
+        let path = std::env::temp_dir().join(format!(
+            "llmbridge-f32-bias-{}-{}", std::process::id(),
+            NEXT.fetch_add(1, AtomicOrdering::Relaxed)
+        ));
+        File::create(&path).unwrap().write_all(&bytes).unwrap();
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 4, 8).unwrap();
+        let mut scratch = [0f32; 2];
+        let mut output = [77f32; 2];
+        let err = f32_matvec_bias_cancellable(
+            &index, &mut reader, "w", &[1.], &[1., f32::MAX],
+            &mut scratch, &mut output, &AtomicBool::new(false), 4
+        ).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidData);
+        assert_eq!(output, [77.; 2]);
+        assert_eq!(reader.disk_bytes_read(), 8);
+        f32_matvec_bias_cancellable(
+            &index, &mut reader, "w", &[1.], &[1., -f32::MAX],
+            &mut scratch, &mut output, &AtomicBool::new(false), 4
+        ).unwrap();
+        assert_eq!(output, [3., 0.]);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn invalid_bias_rejects_before_tensor_reads() {
+        let mut bytes = b"GGUF".to_vec();
+        bytes.extend_from_slice(&3u32.to_le_bytes());
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        let path = std::env::temp_dir().join(format!(
+            "llmbridge-f32-bias-preflight-{}-{}", std::process::id(),
+            NEXT.fetch_add(1, AtomicOrdering::Relaxed)
+        ));
+        File::create(&path).unwrap().write_all(&bytes).unwrap();
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 4, 8).unwrap();
+        let mut scratch = [99f32; 1];
+        let mut output = [77f32; 1];
+        let err = f32_matvec_bias_cancellable(
+            &index, &mut reader, "missing", &[1.], &[f32::NAN],
+            &mut scratch, &mut output, &AtomicBool::new(false), 4
+        ).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+        assert_eq!(reader.disk_bytes_read(), 0);
+        assert_eq!(scratch, [99.]);
+        assert_eq!(output, [77.]);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
