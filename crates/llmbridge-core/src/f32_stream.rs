@@ -124,6 +124,31 @@ pub fn f32_matvec_cancellable(
     Ok(())
 }
 
+/// Execute a streamed projection with transactional output semantics.
+/// The caller provides a distinct scratch buffer of the same length as output;
+/// scratch may contain partial results on failure, but output is never committed.
+/// This does not bound the caller's activation allocations or process RSS.
+pub fn f32_matvec_atomic_cancellable(
+    index: &GgufTensorIndex,
+    reader: &mut BoundedLocalReader,
+    tensor_name: &str,
+    input: &[f32],
+    scratch: &mut [f32],
+    output: &mut [f32],
+    cancelled: &AtomicBool,
+    workspace_budget_bytes: usize,
+) -> io::Result<()> {
+    if scratch.len() != output.len() {
+        return Err(reject(ErrorKind::InvalidInput, "scratch/output shape mismatch"));
+    }
+    f32_matvec_cancellable(index, reader, tensor_name, input, scratch, cancelled, workspace_budget_bytes)?;
+    if cancelled.load(Ordering::Acquire) {
+        return Err(reject(ErrorKind::Interrupted, "matrix operation cancelled"));
+    }
+    output.copy_from_slice(scratch);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,6 +156,66 @@ mod tests {
     use std::io::Write;
     use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn atomic_projection_preserves_output_on_late_weight_failure() {
+        let mut bytes = b"GGUF".to_vec();
+        bytes.extend_from_slice(&3u32.to_le_bytes());
+        bytes.extend_from_slice(&1u64.to_le_bytes());
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        bytes.extend_from_slice(&1u64.to_le_bytes());
+        bytes.push(b'w');
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        bytes.extend_from_slice(&1u64.to_le_bytes());
+        bytes.extend_from_slice(&2u64.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        while bytes.len() % 32 != 0 { bytes.push(0); }
+        for value in [2f32, f32::NAN] { bytes.extend_from_slice(&value.to_le_bytes()); }
+        let path = std::env::temp_dir().join(format!(
+            "llmbridge-f32-atomic-{}-{}", std::process::id(),
+            NEXT.fetch_add(1, AtomicOrdering::Relaxed)
+        ));
+        File::create(&path).unwrap().write_all(&bytes).unwrap();
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 4, 8).unwrap();
+        let mut scratch = [99f32; 2];
+        let mut output = [77f32; 2];
+        let err = f32_matvec_atomic_cancellable(
+            &index, &mut reader, "w", &[3.], &mut scratch, &mut output,
+            &AtomicBool::new(false), 4
+        ).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidData);
+        assert_eq!(scratch[0], 6.);
+        assert_eq!(output, [77.; 2]);
+        assert_eq!(reader.disk_bytes_read(), 8);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn atomic_projection_rejects_wrong_scratch_before_io() {
+        let mut reader_path = std::env::temp_dir().join(format!(
+            "llmbridge-f32-atomic-shape-{}-{}", std::process::id(),
+            NEXT.fetch_add(1, AtomicOrdering::Relaxed)
+        ));
+        let mut bytes = b"GGUF".to_vec();
+        bytes.extend_from_slice(&3u32.to_le_bytes());
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        File::create(&reader_path).unwrap().write_all(&bytes).unwrap();
+        let index = GgufTensorIndex::inspect(&reader_path).unwrap();
+        let mut reader = BoundedLocalReader::open(&reader_path, 4, 8).unwrap();
+        let mut scratch = [11f32; 1];
+        let mut output = [22f32; 2];
+        let err = f32_matvec_atomic_cancellable(
+            &index, &mut reader, "missing", &[1.], &mut scratch, &mut output,
+            &AtomicBool::new(false), 4
+        ).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+        assert_eq!(reader.disk_bytes_read(), 0);
+        assert_eq!(output, [22.; 2]);
+        std::fs::remove_file(reader_path).unwrap();
+    }
 
     #[test]
     fn nonfinite_weights_and_accumulation_fail_closed() {
