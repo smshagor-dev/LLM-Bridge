@@ -75,6 +75,22 @@ impl TensorChunkCache {
         self.entries.get(key).map(Vec::as_slice)
     }
 
+    /// Return a cached chunk only when it matches an independently trusted digest.
+    /// A mismatched entry is removed so it cannot be served by a later unchecked get.
+    /// The caller must still authenticate the model revision and expected digest.
+    pub fn get_verified(&mut self, key: &ChunkKey, expected_sha256: &[u8; 32]) -> io::Result<Option<&[u8]>> {
+        let Some(bytes) = self.entries.get(key) else {
+            return Ok(None);
+        };
+        if Sha256::digest(bytes).as_slice() != expected_sha256 {
+            let removed = self.entries.remove(key).expect("entry checked above");
+            self.used -= removed.len();
+            self.lru.retain(|item| item != key);
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "cached tensor chunk SHA-256 mismatch"));
+        }
+        Ok(self.get(key))
+    }
+
     /// Authenticate the exact chunk bytes against an independently trusted SHA-256
     /// before changing the cache. The model revision in ChunkKey must separately
     /// identify a trusted source; this digest alone does not authenticate a model.
@@ -155,6 +171,31 @@ mod tests {
             file_offset: offset,
             length,
         }
+    }
+
+    #[test]
+    fn verified_cache_hit_updates_lru_without_changing_budget() {
+        let mut cache = TensorChunkCache::new(6);
+        cache.insert(key(1, 0, 3), b"abc").unwrap();
+        cache.insert(key(1, 3, 3), b"def").unwrap();
+        let digest: [u8; 32] = Sha256::digest(b"abc").into();
+        assert_eq!(cache.get_verified(&key(1, 0, 3), &digest).unwrap(), Some(&b"abc"[..]));
+        cache.insert(key(1, 6, 3), b"ghi").unwrap();
+        assert!(cache.get(&key(1, 3, 3)).is_none());
+        assert_eq!(cache.used_bytes(), 6);
+    }
+
+    #[test]
+    fn verified_cache_mismatch_evicts_untrusted_entry_only() {
+        let mut cache = TensorChunkCache::new(8);
+        cache.insert(key(1, 0, 4), b"evil").unwrap();
+        cache.insert(key(1, 4, 4), b"safe").unwrap();
+        let digest: [u8; 32] = Sha256::digest(b"good").into();
+        assert_eq!(cache.get_verified(&key(1, 0, 4), &digest).unwrap_err().kind(), io::ErrorKind::InvalidData);
+        assert_eq!(cache.used_bytes(), 4);
+        assert!(cache.get(&key(1, 0, 4)).is_none());
+        assert_eq!(cache.get(&key(1, 4, 4)), Some(&b"safe"[..]));
+        assert_eq!(cache.get_verified(&key(1, 0, 4), &digest).unwrap(), None);
     }
 
     #[test]
