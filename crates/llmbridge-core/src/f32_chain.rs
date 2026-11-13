@@ -23,41 +23,75 @@ pub fn f32_two_stage_cancellable(
     staging_budget_bytes: usize,
 ) -> io::Result<()> {
     if output.len() != final_scratch.len() || input.iter().any(|value| !value.is_finite()) {
-        return Err(io::Error::new(ErrorKind::InvalidInput, "invalid input activation or final scratch/output shape"));
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "invalid input activation or final scratch/output shape",
+        ));
     }
     if cancelled.load(Ordering::Acquire) {
-        return Err(io::Error::new(ErrorKind::Interrupted, "two-stage operation cancelled"));
+        return Err(io::Error::new(
+            ErrorKind::Interrupted,
+            "two-stage operation cancelled",
+        ));
     }
     // Preflight both matrix shapes before reading either tensor.
-    let first_tensor = index.tensor(first).ok_or_else(|| {
-        io::Error::new(ErrorKind::NotFound, "first tensor missing")
-    })?;
-    let second_tensor = index.tensor(second).ok_or_else(|| {
-        io::Error::new(ErrorKind::NotFound, "second tensor missing")
-    })?;
-    if first_tensor.ggml_type != 0 || second_tensor.ggml_type != 0
-        || first_tensor.dimensions.len() != 2 || second_tensor.dimensions.len() != 2
+    let first_tensor = index
+        .tensor(first)
+        .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "first tensor missing"))?;
+    let second_tensor = index
+        .tensor(second)
+        .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "second tensor missing"))?;
+    if first_tensor.ggml_type != 0
+        || second_tensor.ggml_type != 0
+        || first_tensor.dimensions.len() != 2
+        || second_tensor.dimensions.len() != 2
         || first_tensor.dimensions[0] != input.len() as u64
         || first_tensor.dimensions[1] != intermediate.len() as u64
         || second_tensor.dimensions[0] != intermediate.len() as u64
         || second_tensor.dimensions[1] != output.len() as u64
     {
-        return Err(io::Error::new(ErrorKind::InvalidInput, "incompatible F32 graph shapes"));
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "incompatible F32 graph shapes",
+        ));
     }
     // Validate shared reader admission before the first stage modifies any
     // intermediate buffer. Both stages use the same bounded staging allocation.
     if reader.identity() != &index.source_identity {
-        return Err(io::Error::new(ErrorKind::InvalidData, "GGUF source identity mismatch"));
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            "GGUF source identity mismatch",
+        ));
     }
-    if reader.allocated_chunk_bytes() < 4
-        || reader.allocated_chunk_bytes() > staging_budget_bytes
-    {
-        return Err(io::Error::new(ErrorKind::InvalidInput, "insufficient chain staging budget"));
+    if reader.allocated_chunk_bytes() < 4 || reader.allocated_chunk_bytes() > staging_budget_bytes {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "insufficient chain staging budget",
+        ));
     }
-    f32_matvec_cancellable(index, reader, first, input, intermediate, cancelled, staging_budget_bytes)?;
-    f32_matvec_cancellable(index, reader, second, intermediate, final_scratch, cancelled, staging_budget_bytes)?;
+    f32_matvec_cancellable(
+        index,
+        reader,
+        first,
+        input,
+        intermediate,
+        cancelled,
+        staging_budget_bytes,
+    )?;
+    f32_matvec_cancellable(
+        index,
+        reader,
+        second,
+        intermediate,
+        final_scratch,
+        cancelled,
+        staging_budget_bytes,
+    )?;
     if cancelled.load(Ordering::Acquire) {
-        return Err(io::Error::new(ErrorKind::Interrupted, "two-stage operation cancelled"));
+        return Err(io::Error::new(
+            ErrorKind::Interrupted,
+            "two-stage operation cancelled",
+        ));
     }
     output.copy_from_slice(final_scratch);
     Ok(())
@@ -75,10 +109,7 @@ mod tests {
         bytes.extend_from_slice(&3u32.to_le_bytes());
         bytes.extend_from_slice(&2u64.to_le_bytes());
         bytes.extend_from_slice(&0u64.to_le_bytes());
-        for (name, columns, rows, offset) in [
-            ("first", 2u64, 2u64, 0u64),
-            ("second", 2, 1, 32),
-        ] {
+        for (name, columns, rows, offset) in [("first", 2u64, 2u64, 0u64), ("second", 2, 1, 32)] {
             bytes.extend_from_slice(&(name.len() as u64).to_le_bytes());
             bytes.extend_from_slice(name.as_bytes());
             bytes.extend_from_slice(&2u32.to_le_bytes());
@@ -87,15 +118,25 @@ mod tests {
             bytes.extend_from_slice(&0u32.to_le_bytes());
             bytes.extend_from_slice(&offset.to_le_bytes());
         }
-        while bytes.len() % 32 != 0 { bytes.push(0); }
-        for value in [1f32, 2., 3., 4.] { bytes.extend_from_slice(&value.to_le_bytes()); }
+        while bytes.len() % 32 != 0 {
+            bytes.push(0);
+        }
+        for value in [1f32, 2., 3., 4.] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
         bytes.extend_from_slice(&[0u8; 16]);
-        for value in [second_value, 2.] { bytes.extend_from_slice(&value.to_le_bytes()); }
+        for value in [second_value, 2.] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
         let path = std::env::temp_dir().join(format!(
-            "llmbridge-f32-chain-{}-{}", std::process::id(),
+            "llmbridge-f32-chain-{}-{}",
+            std::process::id(),
             NEXT.fetch_add(1, AtomicOrdering::Relaxed)
         ));
-        std::fs::File::create(&path).unwrap().write_all(&bytes).unwrap();
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(&bytes)
+            .unwrap();
         path
     }
 
@@ -108,9 +149,18 @@ mod tests {
         let mut scratch = [0f32; 1];
         let mut result = [-1f32; 1];
         f32_two_stage_cancellable(
-            &index, &mut reader, "first", "second", &[2., 3.],
-            &mut hidden, &mut scratch, &mut result, &AtomicBool::new(false), 4
-        ).unwrap();
+            &index,
+            &mut reader,
+            "first",
+            "second",
+            &[2., 3.],
+            &mut hidden,
+            &mut scratch,
+            &mut result,
+            &AtomicBool::new(false),
+            4,
+        )
+        .unwrap();
         assert_eq!(hidden, [8., 18.]);
         assert_eq!(result, [44.]);
         assert_eq!(reader.disk_bytes_read(), 24);
@@ -126,9 +176,18 @@ mod tests {
         let mut scratch = [0f32; 1];
         let mut output = [77f32; 1];
         let err = f32_two_stage_cancellable(
-            &index, &mut reader, "first", "second", &[2., 3.],
-            &mut hidden, &mut scratch, &mut output, &AtomicBool::new(false), 4
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "first",
+            "second",
+            &[2., 3.],
+            &mut hidden,
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+        )
+        .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidInput);
         assert_eq!(reader.disk_bytes_read(), 0);
         assert_eq!(output, [77.]);
@@ -144,9 +203,18 @@ mod tests {
         let mut scratch = [66f32; 1];
         let mut output = [77f32; 1];
         let err = f32_two_stage_cancellable(
-            &index, &mut reader, "first", "second", &[f32::NAN, 3.],
-            &mut hidden, &mut scratch, &mut output, &AtomicBool::new(false), 4
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "first",
+            "second",
+            &[f32::NAN, 3.],
+            &mut hidden,
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+        )
+        .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidInput);
         assert_eq!(reader.disk_bytes_read(), 0);
         assert_eq!(hidden, [55.; 2]);
@@ -164,9 +232,18 @@ mod tests {
         let mut scratch = [99f32; 1];
         let mut output = [77f32; 1];
         let err = f32_two_stage_cancellable(
-            &index, &mut reader, "first", "second", &[2., 3.],
-            &mut hidden, &mut scratch, &mut output, &AtomicBool::new(false), 4,
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "first",
+            "second",
+            &[2., 3.],
+            &mut hidden,
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+        )
+        .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidData);
         assert_eq!(hidden, [8., 18.]);
         assert_eq!(output, [77.]);
@@ -183,9 +260,18 @@ mod tests {
         let mut scratch = [66f32; 1];
         let mut output = [77f32; 1];
         let err = f32_two_stage_cancellable(
-            &index, &mut reader, "first", "second", &[2., 3.],
-            &mut hidden, &mut scratch, &mut output, &AtomicBool::new(false), 4
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "first",
+            "second",
+            &[2., 3.],
+            &mut hidden,
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+        )
+        .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidInput);
         assert_eq!(reader.disk_bytes_read(), 0);
         assert_eq!(hidden, [55.; 2]);
@@ -203,9 +289,18 @@ mod tests {
         let mut scratch = [0f32; 1];
         let mut output = [77f32; 1];
         let err = f32_two_stage_cancellable(
-            &index, &mut reader, "first", "second", &[f32::MAX, f32::MAX],
-            &mut hidden, &mut scratch, &mut output, &AtomicBool::new(false), 4
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "first",
+            "second",
+            &[f32::MAX, f32::MAX],
+            &mut hidden,
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+        )
+        .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidData);
         assert_eq!(output, [77.]);
         std::fs::remove_file(path).unwrap();
