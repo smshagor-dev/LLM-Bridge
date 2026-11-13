@@ -278,6 +278,23 @@ mod tests {
     }
 
     #[test]
+    fn verified_digest_never_escapes_final_cancellation() {
+        let path = fixture(b"abcd");
+        let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
+        let expected = format!("{:x}", Sha256::digest(b"abcd"));
+        let mut checks = 0usize;
+        let err = reader.verify_sha256_cancellable(&expected, || {
+            checks += 1;
+            checks == 4
+        }).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(reader.disk_bytes_read(), 4);
+        assert_eq!(checks, 4);
+        assert_eq!(reader.verify_sha256(&expected).unwrap(), expected);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn empty_model_hash_checks_cancellation_before_success() {
         let path = fixture(b"");
         let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
