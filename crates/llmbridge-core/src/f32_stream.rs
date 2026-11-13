@@ -93,6 +93,11 @@ pub fn f32_matvec_cancellable(
                 .checked_add(consumed as u64)
                 .ok_or_else(|| reject(ErrorKind::InvalidData, "chunk offset overflow"))?;
             let bytes = reader.read_range(offset, count)?;
+            // A cancellation can arrive during a blocking read. Never consume
+            // returned bytes after the request has been cancelled.
+            if cancelled.load(Ordering::Acquire) {
+                return Err(reject(ErrorKind::Interrupted, "matrix operation cancelled"));
+            }
             for (j, encoded) in bytes.chunks_exact(4).enumerate() {
                 let value = f32::from_le_bytes(encoded.try_into().expect("four bytes"));
                 if !value.is_finite() {
@@ -100,6 +105,11 @@ pub fn f32_matvec_cancellable(
                 }
                 let column = consumed / 4 + j;
                 sum += value * input[column];
+                // Reject overflow as soon as it occurs rather than reading the
+                // remainder of a corrupt or numerically unsafe tensor row.
+                if !sum.is_finite() {
+                    return Err(reject(ErrorKind::InvalidData, "non-finite F32 matrix result"));
+                }
             }
             consumed += count;
         }
@@ -157,6 +167,41 @@ mod tests {
         check([f32::NAN, 1.0], 1.0);
         check([f32::INFINITY, 1.0], 1.0);
         check([f32::MAX, f32::MAX], f32::MAX);
+    }
+
+    #[test]
+    fn overflowing_first_chunk_does_not_read_remaining_weight_chunks() {
+        let mut bytes = b"GGUF".to_vec();
+        bytes.extend_from_slice(&3u32.to_le_bytes());
+        bytes.extend_from_slice(&1u64.to_le_bytes());
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        bytes.extend_from_slice(&1u64.to_le_bytes());
+        bytes.push(b'w');
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        bytes.extend_from_slice(&4u64.to_le_bytes());
+        bytes.extend_from_slice(&1u64.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        while bytes.len() % 32 != 0 { bytes.push(0); }
+        for weight in [f32::MAX, 1., 1., 1.] {
+            bytes.extend_from_slice(&weight.to_le_bytes());
+        }
+        let path = std::env::temp_dir().join(format!(
+            "llmbridge-f32-early-overflow-{}-{}", std::process::id(),
+            NEXT.fetch_add(1, AtomicOrdering::Relaxed)
+        ));
+        File::create(&path).unwrap().write_all(&bytes).unwrap();
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 4, 8).unwrap();
+        let mut output = [77f32];
+        let err = f32_matvec_cancellable(
+            &index, &mut reader, "w", &[f32::MAX, 1., 1., 1.],
+            &mut output, &AtomicBool::new(false), 4
+        ).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidData);
+        assert_eq!(reader.disk_bytes_read(), 4);
+        assert_eq!(output, [77.]);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
