@@ -347,7 +347,8 @@ mod tests {
         };
         let calls = Cell::new(0);
         let result = limits.around_growth_with_peak_audit(
-            10, 10,
+            10,
+            10,
             || {
                 let n = calls.get();
                 calls.set(n + 1);
@@ -367,12 +368,12 @@ mod tests {
             max_process_rss_bytes: 100,
             max_cgroup_current_bytes: None,
         };
-        let missing = limits.around_growth_with_peak_audit(
-            1, 0, || sample(Some(10), None), || Ok(()),
-        );
+        let missing =
+            limits.around_growth_with_peak_audit(1, 0, || sample(Some(10), None), || Ok(()));
         assert_eq!(missing.unwrap_err().kind(), io::ErrorKind::OutOfMemory);
         let failed: io::Result<()> = limits.around_growth_with_peak_audit(
-            1, 0,
+            1,
+            0,
             || {
                 let mut reading = sample(Some(10), None);
                 reading.peak_rss_bytes = Some(20);
