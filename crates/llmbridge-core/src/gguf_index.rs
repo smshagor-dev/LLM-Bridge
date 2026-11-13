@@ -335,11 +335,18 @@ impl GgufTensorIndex {
             }
         }
 
-        if SourceIdentity::from_metadata(&reader.file.get_ref().metadata()?)
-            != reader.source_identity
+        // An open descriptor remains readable after its path is renamed or
+        // replaced. Reject an index for a path that no longer names the file
+        // whose tensor metadata we parsed; subsequent tensor reads use path.
+        let current_path = std::fs::symlink_metadata(path)?;
+        if current_path.file_type().is_symlink()
+            || !current_path.is_file()
+            || SourceIdentity::from_metadata(&current_path) != reader.source_identity
+            || SourceIdentity::from_metadata(&reader.file.get_ref().metadata()?)
+                != reader.source_identity
         {
             return Err(invalid(
-                "GGUF file changed during tensor index construction",
+                "GGUF file or path changed during tensor index construction",
             ));
         }
         Ok(Self {
@@ -621,6 +628,24 @@ mod tests {
         assert!(index
             .stream_tensor(&mut reader, "final.weight", |_| Ok(()))
             .is_err());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reject_replaced_path_at_metadata_completion() {
+        let path = write(&fixture(8, 0, 96));
+        let original = std::fs::symlink_metadata(&path).unwrap();
+        let replacement = write(&fixture(8, 0, 96));
+        std::fs::rename(&replacement, &path).unwrap();
+        let new_file = std::fs::symlink_metadata(&path).unwrap();
+        assert_ne!(
+            SourceIdentity::from_metadata(&original),
+            SourceIdentity::from_metadata(&new_file)
+        );
+        // The index must describe the current path, not a stale descriptor.
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        assert_eq!(index.source_identity, SourceIdentity::from_metadata(&new_file));
         std::fs::remove_file(path).unwrap();
     }
 
