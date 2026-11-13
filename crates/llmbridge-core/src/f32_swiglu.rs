@@ -17,7 +17,10 @@ fn f32_shape(index: &GgufTensorIndex, name: &str) -> io::Result<(usize, usize)> 
         .tensor(name)
         .ok_or_else(|| rejected(ErrorKind::NotFound, "feed-forward tensor missing"))?;
     if tensor.ggml_type != 0 || tensor.dimensions.len() != 2 {
-        return Err(rejected(ErrorKind::InvalidInput, "expected rank-2 F32 feed-forward tensor"));
+        return Err(rejected(
+            ErrorKind::InvalidInput,
+            "expected rank-2 F32 feed-forward tensor",
+        ));
     }
     let cols = usize::try_from(tensor.dimensions[0])
         .map_err(|_| rejected(ErrorKind::InvalidInput, "F32 tensor column count overflow"))?;
@@ -55,9 +58,20 @@ pub fn f32_swiglu_cancellable(
     activation_budget_bytes: usize,
 ) -> io::Result<()> {
     f32_swiglu_internal(
-        index, reader, gate_tensor, up_tensor, down_tensor, input, None,
-        gate, up, final_scratch, output, cancelled,
-        staging_budget_bytes, activation_budget_bytes,
+        index,
+        reader,
+        gate_tensor,
+        up_tensor,
+        down_tensor,
+        input,
+        None,
+        gate,
+        up,
+        final_scratch,
+        output,
+        cancelled,
+        staging_budget_bytes,
+        activation_budget_bytes,
     )
 }
 
@@ -83,9 +97,20 @@ pub fn f32_swiglu_residual_cancellable(
     activation_budget_bytes: usize,
 ) -> io::Result<()> {
     f32_swiglu_internal(
-        index, reader, gate_tensor, up_tensor, down_tensor, input,
-        Some(residual), gate, up, final_scratch, output, cancelled,
-        staging_budget_bytes, activation_budget_bytes,
+        index,
+        reader,
+        gate_tensor,
+        up_tensor,
+        down_tensor,
+        input,
+        Some(residual),
+        gate,
+        up,
+        final_scratch,
+        output,
+        cancelled,
+        staging_budget_bytes,
+        activation_budget_bytes,
     )
 }
 
@@ -121,43 +146,72 @@ fn f32_swiglu_internal(
         || down_shape != (gate.len(), output.len())
         || input.iter().any(|value| !value.is_finite())
     {
-        return Err(rejected(ErrorKind::InvalidInput, "incompatible SwiGLU shapes or inputs"));
+        return Err(rejected(
+            ErrorKind::InvalidInput,
+            "incompatible SwiGLU shapes or inputs",
+        ));
     }
     if let Some(values) = residual {
         if values.len() != output.len() || values.iter().any(|v| !v.is_finite()) {
-            return Err(rejected(ErrorKind::InvalidInput, "invalid SwiGLU residual values or shape"));
+            return Err(rejected(
+                ErrorKind::InvalidInput,
+                "invalid SwiGLU residual values or shape",
+            ));
         }
     }
     let elements = [
-        input.len(), gate.len(), up.len(), final_scratch.len(),
-        output.len(), residual.map_or(0, <[f32]>::len),
+        input.len(),
+        gate.len(),
+        up.len(),
+        final_scratch.len(),
+        output.len(),
+        residual.map_or(0, <[f32]>::len),
     ]
-        .into_iter()
-        .try_fold(0usize, |sum, len| sum.checked_add(len))
-        .ok_or_else(|| rejected(ErrorKind::InvalidInput, "activation size overflow"))?;
+    .into_iter()
+    .try_fold(0usize, |sum, len| sum.checked_add(len))
+    .ok_or_else(|| rejected(ErrorKind::InvalidInput, "activation size overflow"))?;
     let required = elements
         .checked_mul(std::mem::size_of::<f32>())
         .ok_or_else(|| rejected(ErrorKind::InvalidInput, "activation budget overflow"))?;
     if required > activation_budget_bytes {
-        return Err(rejected(ErrorKind::InvalidInput, "SwiGLU activation budget exceeded"));
+        return Err(rejected(
+            ErrorKind::InvalidInput,
+            "SwiGLU activation budget exceeded",
+        ));
     }
     if reader.identity() != &index.source_identity {
-        return Err(rejected(ErrorKind::InvalidData, "GGUF source identity mismatch"));
+        return Err(rejected(
+            ErrorKind::InvalidData,
+            "GGUF source identity mismatch",
+        ));
     }
-    if reader.allocated_chunk_bytes() < 4
-        || reader.allocated_chunk_bytes() > staging_budget_bytes
-    {
-        return Err(rejected(ErrorKind::InvalidInput, "insufficient bounded reader budget"));
+    if reader.allocated_chunk_bytes() < 4 || reader.allocated_chunk_bytes() > staging_budget_bytes {
+        return Err(rejected(
+            ErrorKind::InvalidInput,
+            "insufficient bounded reader budget",
+        ));
     }
     if cancelled.load(Ordering::Acquire) {
         return Err(rejected(ErrorKind::Interrupted, "SwiGLU cancelled"));
     }
 
     f32_matvec_cancellable(
-        index, reader, gate_tensor, input, gate, cancelled, staging_budget_bytes,
+        index,
+        reader,
+        gate_tensor,
+        input,
+        gate,
+        cancelled,
+        staging_budget_bytes,
     )?;
     f32_matvec_cancellable(
-        index, reader, up_tensor, input, up, cancelled, staging_budget_bytes,
+        index,
+        reader,
+        up_tensor,
+        input,
+        up,
+        cancelled,
+        staging_budget_bytes,
     )?;
 
     // Reuse gate in place as the gated activation. No vector allocation.
@@ -168,7 +222,10 @@ fn f32_swiglu_internal(
         let sigmoid = 1.0f32 / (1.0f32 + (-*gate_value).exp());
         let gated = (*gate_value * sigmoid) * *up_value;
         if !gated.is_finite() {
-            return Err(rejected(ErrorKind::InvalidData, "non-finite SwiGLU activation"));
+            return Err(rejected(
+                ErrorKind::InvalidData,
+                "non-finite SwiGLU activation",
+            ));
         }
         *gate_value = gated;
     }
@@ -176,7 +233,13 @@ fn f32_swiglu_internal(
         return Err(rejected(ErrorKind::Interrupted, "SwiGLU cancelled"));
     }
     f32_matvec_cancellable(
-        index, reader, down_tensor, gate, final_scratch, cancelled, staging_budget_bytes,
+        index,
+        reader,
+        down_tensor,
+        gate,
+        final_scratch,
+        cancelled,
+        staging_budget_bytes,
     )?;
     if let Some(values) = residual {
         for (computed, addition) in final_scratch.iter_mut().zip(values.iter()) {
@@ -185,7 +248,10 @@ fn f32_swiglu_internal(
             }
             let sum = *computed + *addition;
             if !sum.is_finite() {
-                return Err(rejected(ErrorKind::InvalidData, "non-finite SwiGLU residual result"));
+                return Err(rejected(
+                    ErrorKind::InvalidData,
+                    "non-finite SwiGLU residual result",
+                ));
             }
             *computed = sum;
         }
@@ -247,10 +313,21 @@ mod tests {
         let mut scratch = [0f32; 2];
         let mut output = [-1f32; 2];
         f32_swiglu_cancellable(
-            &index, &mut reader, "gate", "up", "down", &[2., 3.],
-            &mut gate, &mut up, &mut scratch, &mut output,
-            &AtomicBool::new(false), 4, 40,
-        ).unwrap();
+            &index,
+            &mut reader,
+            "gate",
+            "up",
+            "down",
+            &[2., 3.],
+            &mut gate,
+            &mut up,
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+            40,
+        )
+        .unwrap();
         for (observed, (g, u)) in output.iter().zip([(2.0f64, 2.0), (3.0, 6.0)]) {
             let expected = (g / (1.0 + (-g).exp())) * u;
             assert!((*observed as f64 - expected).abs() < 0.00001);
@@ -271,16 +348,38 @@ mod tests {
         let mut scratch = [66f32; 2];
         let mut output = [77f32; 2];
         let error = f32_swiglu_cancellable(
-            &index, &mut reader, "gate", "up", "down", &[2., 3.],
-            &mut gate, &mut up, &mut scratch, &mut output,
-            &AtomicBool::new(false), 4, 39,
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "gate",
+            "up",
+            "down",
+            &[2., 3.],
+            &mut gate,
+            &mut up,
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+            39,
+        )
+        .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidInput);
         let error = f32_swiglu_cancellable(
-            &index, &mut reader, "gate", "up", "absent", &[2., 3.],
-            &mut gate, &mut up, &mut scratch, &mut output,
-            &AtomicBool::new(false), 4, 40,
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "gate",
+            "up",
+            "absent",
+            &[2., 3.],
+            &mut gate,
+            &mut up,
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+            40,
+        )
+        .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::NotFound);
         assert_eq!(reader.disk_bytes_read(), 0);
         assert_eq!(gate, [44.; 2]);
@@ -300,10 +399,21 @@ mod tests {
         let mut scratch = [66f32; 2];
         let mut output = [77f32; 2];
         let error = f32_swiglu_cancellable(
-            &index, &mut reader, "gate", "up", "down", &[2., 3.],
-            &mut gate, &mut up, &mut scratch, &mut output,
-            &AtomicBool::new(false), 4, 40,
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "gate",
+            "up",
+            "down",
+            &[2., 3.],
+            &mut gate,
+            &mut up,
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+            40,
+        )
+        .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidData);
         assert_eq!(reader.disk_bytes_read(), 36);
         assert_eq!(output, [77.; 2]);
@@ -320,12 +430,24 @@ mod tests {
         let mut scratch = [0f32; 2];
         let mut output = [-1f32; 2];
         f32_swiglu_residual_cancellable(
-            &index, &mut reader, "gate", "up", "down", &[2., 3.], &[10., -2.],
-            &mut gate, &mut up, &mut scratch, &mut output,
-            &AtomicBool::new(false), 4, 48,
-        ).unwrap();
-        for (observed, (g, u, residual)) in output.iter()
-            .zip([(2.0f64, 2.0, 10.0), (3.0, 6.0, -2.0)])
+            &index,
+            &mut reader,
+            "gate",
+            "up",
+            "down",
+            &[2., 3.],
+            &[10., -2.],
+            &mut gate,
+            &mut up,
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+            48,
+        )
+        .unwrap();
+        for (observed, (g, u, residual)) in
+            output.iter().zip([(2.0f64, 2.0, 10.0), (3.0, 6.0, -2.0)])
         {
             let expected = (g / (1.0 + (-g).exp())) * u + residual;
             assert!((*observed as f64 - expected).abs() < 0.00001);
@@ -344,10 +466,22 @@ mod tests {
         let mut scratch = [0f32; 2];
         let mut output = [77f32; 2];
         let error = f32_swiglu_residual_cancellable(
-            &index, &mut reader, "gate", "up", "down", &[2., 3.],
-            &[f32::MAX, 0.], &mut gate, &mut up,
-            &mut scratch, &mut output, &AtomicBool::new(false), 4, 48,
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "gate",
+            "up",
+            "down",
+            &[2., 3.],
+            &[f32::MAX, 0.],
+            &mut gate,
+            &mut up,
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+            48,
+        )
+        .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidData);
         assert_eq!(reader.disk_bytes_read(), 48);
         assert_eq!(output, [77.; 2]);
@@ -369,10 +503,22 @@ mod tests {
             (&[1.0f32][..], 48usize),
         ] {
             let error = f32_swiglu_residual_cancellable(
-                &index, &mut reader, "gate", "up", "down", &[2., 3.],
-                residual, &mut gate, &mut up, &mut scratch, &mut output,
-                &AtomicBool::new(false), 4, budget,
-            ).unwrap_err();
+                &index,
+                &mut reader,
+                "gate",
+                "up",
+                "down",
+                &[2., 3.],
+                residual,
+                &mut gate,
+                &mut up,
+                &mut scratch,
+                &mut output,
+                &AtomicBool::new(false),
+                4,
+                budget,
+            )
+            .unwrap_err();
             assert_eq!(error.kind(), ErrorKind::InvalidInput);
         }
         assert_eq!(reader.disk_bytes_read(), 0);
@@ -393,10 +539,21 @@ mod tests {
         let mut scratch = [66f32; 2];
         let mut output = [77f32; 2];
         let error = f32_swiglu_cancellable(
-            &index, &mut reader, "gate", "up", "down", &[2., 3.],
-            &mut gate, &mut up, &mut scratch, &mut output,
-            &AtomicBool::new(true), 4, 40,
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "gate",
+            "up",
+            "down",
+            &[2., 3.],
+            &mut gate,
+            &mut up,
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(true),
+            4,
+            40,
+        )
+        .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::Interrupted);
         assert_eq!(reader.disk_bytes_read(), 0);
         assert_eq!(gate, [44.; 2]);
