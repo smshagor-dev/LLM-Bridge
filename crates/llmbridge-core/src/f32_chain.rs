@@ -44,6 +44,16 @@ pub fn f32_two_stage_cancellable(
     {
         return Err(io::Error::new(ErrorKind::InvalidInput, "incompatible F32 graph shapes"));
     }
+    // Validate shared reader admission before the first stage modifies any
+    // intermediate buffer. Both stages use the same bounded staging allocation.
+    if reader.identity() != &index.source_identity {
+        return Err(io::Error::new(ErrorKind::InvalidData, "GGUF source identity mismatch"));
+    }
+    if reader.allocated_chunk_bytes() < 4
+        || reader.allocated_chunk_bytes() > staging_budget_bytes
+    {
+        return Err(io::Error::new(ErrorKind::InvalidInput, "insufficient chain staging budget"));
+    }
     f32_matvec_cancellable(index, reader, first, input, intermediate, cancelled, staging_budget_bytes)?;
     f32_matvec_cancellable(index, reader, second, intermediate, final_scratch, cancelled, staging_budget_bytes)?;
     if cancelled.load(Ordering::Acquire) {
@@ -161,6 +171,26 @@ mod tests {
         assert_eq!(hidden, [8., 18.]);
         assert_eq!(output, [77.]);
         assert_eq!(reader.disk_bytes_read(), 20);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn insufficient_shared_staging_budget_preserves_all_buffers_without_io() {
+        let path = fixture(1.);
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 8, 16).unwrap();
+        let mut hidden = [55f32; 2];
+        let mut scratch = [66f32; 1];
+        let mut output = [77f32; 1];
+        let err = f32_two_stage_cancellable(
+            &index, &mut reader, "first", "second", &[2., 3.],
+            &mut hidden, &mut scratch, &mut output, &AtomicBool::new(false), 4
+        ).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+        assert_eq!(reader.disk_bytes_read(), 0);
+        assert_eq!(hidden, [55.; 2]);
+        assert_eq!(scratch, [66.]);
+        assert_eq!(output, [77.]);
         std::fs::remove_file(path).unwrap();
     }
 
