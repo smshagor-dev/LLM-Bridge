@@ -142,7 +142,7 @@ mod tests {
     fn cancellation_from_last_chunk_is_not_reported_as_success() {
         let path = fixture();
         let index = GgufTensorIndex::inspect(&path).unwrap();
-        let mut reader = BoundedLocalReader::open(&path, 16, 10).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 16, 32).unwrap();
         let cancelled = AtomicBool::new(false);
         let mut callbacks = 0usize;
         let result = stream_tensor_batch(
@@ -164,7 +164,7 @@ mod tests {
     fn consumer_error_is_preserved_without_replaying_chunks() {
         let path = fixture();
         let index = GgufTensorIndex::inspect(&path).unwrap();
-        let mut reader = BoundedLocalReader::open(&path, 16, 10).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 16, 32).unwrap();
         let cancelled = AtomicBool::new(false);
         let mut callbacks = 0;
         let result = stream_tensor_batch(
