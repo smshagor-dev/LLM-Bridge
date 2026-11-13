@@ -307,8 +307,27 @@ extern "C" fn read_range_callback(
                 return 0;
             }
         }
-        match state.reader.read_range(file_offset, requested) {
+        // A blocking local read can finish after cancellation is requested.
+        // The bounded cancellable reader rejects that late cancellation before
+        // any returned bytes become visible to native ggml.
+        let bytes = match state.cancelled {
+            Some(flag) => state.reader.read_range_cancellable(file_offset, requested, || {
+                flag.load(Ordering::Acquire)
+            }),
+            None => state.reader.read_range(file_offset, requested),
+        };
+        match bytes {
             Ok(chunk) => {
+                // Recheck at the FFI copy boundary as well. We cannot roll back
+                // a copy once started, but must not knowingly deliver cancelled
+                // tensor bytes to native execution.
+                if state
+                    .cancelled
+                    .is_some_and(|flag| flag.load(Ordering::Acquire))
+                {
+                    state.failure = Some("tensor operator cancelled after read".into());
+                    return 0;
+                }
                 // SAFETY: native callback contract guarantees an output region
                 // of at least requested bytes, not overlapping the Rust buffer.
                 unsafe {
@@ -889,6 +908,47 @@ mod tests {
             |_| true,
         )
         .is_err());
+    }
+
+    #[test]
+    fn cancelled_native_range_callback_never_exposes_new_tensor_bytes() {
+        use std::io::Write;
+        let path = std::env::temp_dir().join(format!(
+            "llmbridge-native-cancel-range-{}", std::process::id()
+        ));
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(b"01234567")
+            .unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 8, 16).unwrap();
+        let cancelled = AtomicBool::new(false);
+        let mut state = ReaderState {
+            reader: &mut reader,
+            failure: None,
+            cancelled: Some(&cancelled),
+            allowed_range: Some((0, 8)),
+        };
+        let userdata = (&mut state as *mut ReaderState<'_>).cast();
+        let mut output = [0xa5u8; 8];
+        assert_eq!(
+            read_range_callback(userdata, output.as_mut_ptr().cast(), 0, 8),
+            8
+        );
+        assert_eq!(&output, b"01234567");
+        assert_eq!(state.reader.disk_bytes_read(), 8);
+
+        // Cancel before asking for another range: callback must reject it
+        // without another disk read or exposing bytes to the native caller.
+        cancelled.store(true, Ordering::Release);
+        output.fill(0xa5);
+        assert_eq!(
+            read_range_callback(userdata, output.as_mut_ptr().cast(), 0, 8),
+            0
+        );
+        assert_eq!(output, [0xa5; 8]);
+        assert_eq!(state.reader.disk_bytes_read(), 8);
+        assert!(state.failure.as_deref().unwrap().contains("cancelled"));
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
