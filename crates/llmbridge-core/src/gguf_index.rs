@@ -453,13 +453,15 @@ impl GgufTensorIndex {
         self.stream_tensor_cancellable(reader, name, &AtomicBool::new(false), consume)
     }
 
-    /// Cooperative cancellation is checked before the first I/O and between chunks.
-    /// Cancellation is not transactional: consumers may already have received prior chunks.
-    /// The caller must discard incomplete tensors and must not execute them.
-    pub fn stream_tensor_cancellable<F>(
+    /// Stream an exact subrange of an indexed tensor without materializing it.
+    /// Offsets are relative to the tensor, not the GGUF file. All bounds are
+    /// checked before any I/O; cancellation can leave partial consumer output.
+    pub fn stream_tensor_slice_cancellable<F>(
         &self,
         reader: &mut BoundedLocalReader,
         name: &str,
+        relative_offset: u64,
+        length: u64,
         cancelled: &AtomicBool,
         mut consume: F,
     ) -> io::Result<u64>
@@ -467,26 +469,32 @@ impl GgufTensorIndex {
         F: FnMut(&[u8]) -> io::Result<()>,
     {
         if reader.identity() != &self.source_identity {
-            return Err(invalid(
-                "indexed tensor source identity changed before streaming",
-            ));
+            return Err(invalid("indexed tensor source identity changed before streaming"));
         }
         let tensor = self.tensor(name).ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, "tensor not found in indexed GGUF")
         })?;
-        let mut offset = tensor.file_offset;
+        let relative_end = relative_offset
+            .checked_add(length)
+            .ok_or_else(|| invalid("tensor slice length overflow"))?;
+        if relative_end > tensor.byte_len {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "tensor slice exceeds indexed region",
+            ));
+        }
+        let mut offset = tensor.file_offset
+            .checked_add(relative_offset)
+            .ok_or_else(|| invalid("tensor slice file offset overflow"))?;
         let end = offset
-            .checked_add(tensor.byte_len)
-            .ok_or_else(|| invalid("tensor offset overflow"))?;
+            .checked_add(length)
+            .ok_or_else(|| invalid("tensor slice file end overflow"))?;
         loop {
             if cancelled.load(Ordering::Acquire) {
-                return Err(io::Error::new(
-                    io::ErrorKind::Interrupted,
-                    "tensor stream cancelled",
-                ));
+                return Err(io::Error::new(io::ErrorKind::Interrupted, "tensor stream cancelled"));
             }
             if offset == end {
-                return Ok(tensor.byte_len);
+                return Ok(length);
             }
             let count = (end - offset).min(reader.allocated_chunk_bytes() as u64) as usize;
             let chunk = reader.read_range(offset, count)?;
@@ -494,6 +502,24 @@ impl GgufTensorIndex {
             offset += count as u64;
         }
     }
+
+    /// Stream a complete indexed tensor using the same bounded slice path.
+    pub fn stream_tensor_cancellable<F>(
+        &self,
+        reader: &mut BoundedLocalReader,
+        name: &str,
+        cancelled: &AtomicBool,
+        consume: F,
+    ) -> io::Result<u64>
+    where
+        F: FnMut(&[u8]) -> io::Result<()>,
+    {
+        let tensor = self.tensor(name).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "tensor not found in indexed GGUF")
+        })?;
+        self.stream_tensor_slice_cancellable(reader, name, 0, tensor.byte_len, cancelled, consume)
+    }
+
 }
 
 #[cfg(test)]
@@ -579,6 +605,38 @@ mod tests {
             .verify_tensor_sha256(&mut reader, &weight.name, &"0".repeat(64))
             .is_err());
         assert_eq!(reader.allocated_chunk_bytes(), 13);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn indexed_tensor_slice_reads_exact_range() {
+        let path = write(&fixture(8, 0, 96));
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 3, 6).unwrap();
+        let stop = AtomicBool::new(false);
+        let mut output = Vec::new();
+        let read = index.stream_tensor_slice_cancellable(
+            &mut reader, "final.weight", 1, 2, &stop,
+            |chunk| { output.extend_from_slice(chunk); Ok(()) }
+        ).unwrap();
+        assert_eq!(read, 2);
+        assert_eq!(output, [0x34, 0x56]);
+        assert_eq!(reader.disk_bytes_read(), 2);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn indexed_tensor_slice_rejects_out_of_bounds_without_io() {
+        let path = write(&fixture(8, 0, 96));
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 3, 6).unwrap();
+        let stop = AtomicBool::new(false);
+        for (offset, length) in [(3, 2), (u64::MAX, 2), (0, 5)] {
+            assert!(index.stream_tensor_slice_cancellable(
+                &mut reader, "final.weight", offset, length, &stop, |_| Ok(())
+            ).is_err());
+        }
+        assert_eq!(reader.disk_bytes_read(), 0);
         std::fs::remove_file(path).unwrap();
     }
 
