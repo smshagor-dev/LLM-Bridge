@@ -39,6 +39,21 @@ pub fn f32_matvec_residual_cancellable(
     if rows != output.len() {
         return Err(io::Error::new(ErrorKind::InvalidInput, "projection and residual dimensions differ"));
     }
+    // Fail before touching scratch when the activation or bounded reader is
+    // invalid; the underlying projection would otherwise discover this later.
+    let columns = usize::try_from(tensor.dimensions[0])
+        .map_err(|_| io::Error::new(ErrorKind::InvalidInput, "projection column count exceeds usize"))?;
+    if input.len() != columns || input.iter().any(|value| !value.is_finite()) {
+        return Err(io::Error::new(ErrorKind::InvalidInput, "projection input shape or values invalid"));
+    }
+    if reader.identity() != &index.source_identity {
+        return Err(io::Error::new(ErrorKind::InvalidData, "GGUF source identity mismatch"));
+    }
+    if reader.allocated_chunk_bytes() < 4
+        || reader.allocated_chunk_bytes() > staging_budget_bytes
+    {
+        return Err(io::Error::new(ErrorKind::InvalidInput, "insufficient residual staging budget"));
+    }
     if cancelled.load(Ordering::Acquire) {
         return Err(io::Error::new(ErrorKind::Interrupted, "residual operation cancelled"));
     }
@@ -156,6 +171,42 @@ mod tests {
             &mut scratch, &mut output, &AtomicBool::new(false), 4
         ).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::NotFound);
+        assert_eq!(reader.disk_bytes_read(), 0);
+        assert_eq!(scratch, [55.; 2]);
+        assert_eq!(output, [77.; 2]);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn nonfinite_projection_input_rejects_without_io_or_scratch_mutation() {
+        let path = fixture([1., 2., 3., 4.]);
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 4, 8).unwrap();
+        let mut scratch = [55.; 2];
+        let mut output = [77.; 2];
+        let err = f32_matvec_residual_cancellable(
+            &index, &mut reader, "projection", &[f32::NAN, 3.], &[0., 0.],
+            &mut scratch, &mut output, &AtomicBool::new(false), 4,
+        ).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+        assert_eq!(reader.disk_bytes_read(), 0);
+        assert_eq!(scratch, [55.; 2]);
+        assert_eq!(output, [77.; 2]);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn residual_staging_budget_rejects_before_projection_reads() {
+        let path = fixture([1., 2., 3., 4.]);
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let mut reader = BoundedLocalReader::open(&path, 8, 16).unwrap();
+        let mut scratch = [55.; 2];
+        let mut output = [77.; 2];
+        let err = f32_matvec_residual_cancellable(
+            &index, &mut reader, "projection", &[2., 3.], &[0., 0.],
+            &mut scratch, &mut output, &AtomicBool::new(false), 4,
+        ).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
         assert_eq!(reader.disk_bytes_read(), 0);
         assert_eq!(scratch, [55.; 2]);
         assert_eq!(output, [77.; 2]);
