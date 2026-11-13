@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// Scratch is caller-owned and may be modified on failure; output is only
 /// committed after all reads, arithmetic and cancellation checks succeed.
 /// This does not guarantee ggml floating-point/bitwise parity.
+#[allow(clippy::too_many_arguments)] // Preserve the existing caller-owned buffer API.
 pub fn f32_matvec_residual_cancellable(
     index: &GgufTensorIndex,
     reader: &mut BoundedLocalReader,
@@ -21,56 +22,100 @@ pub fn f32_matvec_residual_cancellable(
     cancelled: &AtomicBool,
     staging_budget_bytes: usize,
 ) -> io::Result<()> {
-    if residual.len() != output.len() || scratch.len() != output.len()
+    if residual.len() != output.len()
+        || scratch.len() != output.len()
         || residual.iter().any(|v| !v.is_finite())
     {
-        return Err(io::Error::new(ErrorKind::InvalidInput, "residual shape or values invalid"));
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "residual shape or values invalid",
+        ));
     }
     // Validate the indexed output shape before any tensor I/O or scratch writes.
     // Otherwise the matrix primitive can read rows and partially overwrite scratch
     // before discovering a caller-supplied residual/output length mismatch.
-    let tensor = index.tensor(tensor_name)
+    let tensor = index
+        .tensor(tensor_name)
         .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "GGUF tensor does not exist"))?;
     if tensor.ggml_type != 0 || tensor.dimensions.len() != 2 {
-        return Err(io::Error::new(ErrorKind::InvalidInput, "expected rank-2 F32 projection"));
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "expected rank-2 F32 projection",
+        ));
     }
-    let rows = usize::try_from(tensor.dimensions[1])
-        .map_err(|_| io::Error::new(ErrorKind::InvalidInput, "projection row count exceeds usize"))?;
+    let rows = usize::try_from(tensor.dimensions[1]).map_err(|_| {
+        io::Error::new(
+            ErrorKind::InvalidInput,
+            "projection row count exceeds usize",
+        )
+    })?;
     if rows != output.len() {
-        return Err(io::Error::new(ErrorKind::InvalidInput, "projection and residual dimensions differ"));
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "projection and residual dimensions differ",
+        ));
     }
     // Fail before touching scratch when the activation or bounded reader is
     // invalid; the underlying projection would otherwise discover this later.
-    let columns = usize::try_from(tensor.dimensions[0])
-        .map_err(|_| io::Error::new(ErrorKind::InvalidInput, "projection column count exceeds usize"))?;
+    let columns = usize::try_from(tensor.dimensions[0]).map_err(|_| {
+        io::Error::new(
+            ErrorKind::InvalidInput,
+            "projection column count exceeds usize",
+        )
+    })?;
     if input.len() != columns || input.iter().any(|value| !value.is_finite()) {
-        return Err(io::Error::new(ErrorKind::InvalidInput, "projection input shape or values invalid"));
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "projection input shape or values invalid",
+        ));
     }
     if reader.identity() != &index.source_identity {
-        return Err(io::Error::new(ErrorKind::InvalidData, "GGUF source identity mismatch"));
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            "GGUF source identity mismatch",
+        ));
     }
-    if reader.allocated_chunk_bytes() < 4
-        || reader.allocated_chunk_bytes() > staging_budget_bytes
-    {
-        return Err(io::Error::new(ErrorKind::InvalidInput, "insufficient residual staging budget"));
+    if reader.allocated_chunk_bytes() < 4 || reader.allocated_chunk_bytes() > staging_budget_bytes {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "insufficient residual staging budget",
+        ));
     }
     if cancelled.load(Ordering::Acquire) {
-        return Err(io::Error::new(ErrorKind::Interrupted, "residual operation cancelled"));
+        return Err(io::Error::new(
+            ErrorKind::Interrupted,
+            "residual operation cancelled",
+        ));
     }
     f32_matvec_cancellable(
-        index, reader, tensor_name, input, scratch, cancelled, staging_budget_bytes,
+        index,
+        reader,
+        tensor_name,
+        input,
+        scratch,
+        cancelled,
+        staging_budget_bytes,
     )?;
     // Validate all arithmetic before writing the caller-visible output.
     for (value, bias) in scratch.iter().zip(residual.iter()) {
         if cancelled.load(Ordering::Acquire) {
-            return Err(io::Error::new(ErrorKind::Interrupted, "residual operation cancelled"));
+            return Err(io::Error::new(
+                ErrorKind::Interrupted,
+                "residual operation cancelled",
+            ));
         }
         if !value.is_finite() || !(*value + *bias).is_finite() {
-            return Err(io::Error::new(ErrorKind::InvalidData, "non-finite residual result"));
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "non-finite residual result",
+            ));
         }
     }
     if cancelled.load(Ordering::Acquire) {
-        return Err(io::Error::new(ErrorKind::Interrupted, "residual operation cancelled"));
+        return Err(io::Error::new(
+            ErrorKind::Interrupted,
+            "residual operation cancelled",
+        ));
     }
     for ((destination, value), bias) in output.iter_mut().zip(scratch.iter()).zip(residual.iter()) {
         *destination = *value + *bias;
@@ -79,6 +124,7 @@ pub fn f32_matvec_residual_cancellable(
 }
 
 #[cfg(test)]
+#[allow(clippy::manual_is_multiple_of)] // Keep test fixtures Rust 1.82-compatible.
 mod tests {
     use super::*;
     use std::io::Write;
@@ -98,13 +144,21 @@ mod tests {
         bytes.extend_from_slice(&2u64.to_le_bytes());
         bytes.extend_from_slice(&0u32.to_le_bytes());
         bytes.extend_from_slice(&0u64.to_le_bytes());
-        while bytes.len() % 32 != 0 { bytes.push(0); }
-        for weight in weights { bytes.extend_from_slice(&weight.to_le_bytes()); }
+        while bytes.len() % 32 != 0 {
+            bytes.push(0);
+        }
+        for weight in weights {
+            bytes.extend_from_slice(&weight.to_le_bytes());
+        }
         let path = std::env::temp_dir().join(format!(
-            "llmbridge-residual-{}-{}", std::process::id(),
+            "llmbridge-residual-{}-{}",
+            std::process::id(),
             NEXT.fetch_add(1, AtomicOrdering::Relaxed)
         ));
-        std::fs::File::create(&path).unwrap().write_all(&bytes).unwrap();
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(&bytes)
+            .unwrap();
         path
     }
 
@@ -116,9 +170,17 @@ mod tests {
         let mut scratch = [0.; 2];
         let mut output = [-1.; 2];
         f32_matvec_residual_cancellable(
-            &index, &mut reader, "projection", &[2., 3.], &[10., -2.],
-            &mut scratch, &mut output, &AtomicBool::new(false), 4
-        ).unwrap();
+            &index,
+            &mut reader,
+            "projection",
+            &[2., 3.],
+            &[10., -2.],
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+        )
+        .unwrap();
         assert_eq!(output, [18., 16.]);
         assert_eq!(reader.disk_bytes_read(), 16);
         std::fs::remove_file(path).unwrap();
@@ -132,9 +194,17 @@ mod tests {
         let mut scratch = [0.; 2];
         let mut output = [77.; 2];
         let err = f32_matvec_residual_cancellable(
-            &index, &mut reader, "projection", &[2., 3.], &[f32::NAN, 0.],
-            &mut scratch, &mut output, &AtomicBool::new(false), 4
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "projection",
+            &[2., 3.],
+            &[f32::NAN, 0.],
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+        )
+        .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidInput);
         assert_eq!(reader.disk_bytes_read(), 0);
         assert_eq!(output, [77.; 2]);
@@ -149,9 +219,17 @@ mod tests {
         let mut scratch = [55.; 1];
         let mut output = [77.; 1];
         let err = f32_matvec_residual_cancellable(
-            &index, &mut reader, "projection", &[2., 3.], &[0.],
-            &mut scratch, &mut output, &AtomicBool::new(false), 4
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "projection",
+            &[2., 3.],
+            &[0.],
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+        )
+        .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidInput);
         assert_eq!(reader.disk_bytes_read(), 0);
         assert_eq!(scratch, [55.]);
@@ -167,9 +245,17 @@ mod tests {
         let mut scratch = [55.; 2];
         let mut output = [77.; 2];
         let err = f32_matvec_residual_cancellable(
-            &index, &mut reader, "not_present", &[2., 3.], &[0., 0.],
-            &mut scratch, &mut output, &AtomicBool::new(false), 4
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "not_present",
+            &[2., 3.],
+            &[0., 0.],
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+        )
+        .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::NotFound);
         assert_eq!(reader.disk_bytes_read(), 0);
         assert_eq!(scratch, [55.; 2]);
@@ -185,9 +271,17 @@ mod tests {
         let mut scratch = [55.; 2];
         let mut output = [77.; 2];
         let err = f32_matvec_residual_cancellable(
-            &index, &mut reader, "projection", &[f32::NAN, 3.], &[0., 0.],
-            &mut scratch, &mut output, &AtomicBool::new(false), 4,
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "projection",
+            &[f32::NAN, 3.],
+            &[0., 0.],
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+        )
+        .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidInput);
         assert_eq!(reader.disk_bytes_read(), 0);
         assert_eq!(scratch, [55.; 2]);
@@ -203,9 +297,17 @@ mod tests {
         let mut scratch = [55.; 2];
         let mut output = [77.; 2];
         let err = f32_matvec_residual_cancellable(
-            &index, &mut reader, "projection", &[2., 3.], &[0., 0.],
-            &mut scratch, &mut output, &AtomicBool::new(false), 4,
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "projection",
+            &[2., 3.],
+            &[0., 0.],
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+        )
+        .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidInput);
         assert_eq!(reader.disk_bytes_read(), 0);
         assert_eq!(scratch, [55.; 2]);
@@ -221,10 +323,17 @@ mod tests {
         let mut scratch = [0.; 2];
         let mut output = [77.; 2];
         let err = f32_matvec_residual_cancellable(
-            &index, &mut reader, "projection", &[f32::MAX, 1.],
-            &[f32::MAX, 0.], &mut scratch, &mut output,
-            &AtomicBool::new(false), 4
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "projection",
+            &[f32::MAX, 1.],
+            &[f32::MAX, 0.],
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(false),
+            4,
+        )
+        .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidData);
         assert_eq!(output, [77.; 2]);
         std::fs::remove_file(path).unwrap();
@@ -238,9 +347,17 @@ mod tests {
         let mut scratch = [0.; 2];
         let mut output = [77.; 2];
         let err = f32_matvec_residual_cancellable(
-            &index, &mut reader, "projection", &[2., 3.], &[0., 0.],
-            &mut scratch, &mut output, &AtomicBool::new(true), 4
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "projection",
+            &[2., 3.],
+            &[0., 0.],
+            &mut scratch,
+            &mut output,
+            &AtomicBool::new(true),
+            4,
+        )
+        .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::Interrupted);
         assert_eq!(reader.disk_bytes_read(), 0);
         assert_eq!(output, [77.; 2]);
