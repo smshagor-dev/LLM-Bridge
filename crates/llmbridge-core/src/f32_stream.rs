@@ -14,6 +14,7 @@ fn reject(kind: ErrorKind, message: &'static str) -> io::Error {
 ///
 /// Output is written incrementally and must be discarded on error/cancellation.
 /// Accumulation is in f32 and is not a claim of bitwise parity with ggml SIMD.
+#[allow(clippy::chunks_exact_to_as_chunks)] // as_chunks is newer than Rust 1.82 MSRV.
 pub fn f32_matvec_cancellable(
     index: &GgufTensorIndex,
     reader: &mut BoundedLocalReader,
@@ -137,6 +138,7 @@ pub fn f32_matvec_cancellable(
 /// The caller provides a distinct scratch buffer of the same length as output;
 /// scratch may contain partial results on failure, but output is never committed.
 /// This does not bound the caller's activation allocations or process RSS.
+#[allow(clippy::too_many_arguments)] // Existing public transactional buffer API.
 pub fn f32_matvec_atomic_cancellable(
     index: &GgufTensorIndex,
     reader: &mut BoundedLocalReader,
@@ -172,6 +174,7 @@ pub fn f32_matvec_atomic_cancellable(
 /// Compute y = W*x + bias with caller-owned scratch and atomic output commit.
 /// Bias is an activation-sized slice, not an indexed GGUF tensor. No full
 /// weight matrix is allocated; this is not a full native transformer graph.
+#[allow(clippy::too_many_arguments)] // Existing public bias/scratch API.
 pub fn f32_matvec_bias_cancellable(
     index: &GgufTensorIndex,
     reader: &mut BoundedLocalReader,
@@ -228,6 +231,7 @@ pub fn f32_matvec_bias_cancellable(
 }
 
 #[cfg(test)]
+#[allow(clippy::manual_is_multiple_of)] // Preserve Rust 1.82 test compatibility.
 mod tests {
     use super::*;
     use std::fs::File;
