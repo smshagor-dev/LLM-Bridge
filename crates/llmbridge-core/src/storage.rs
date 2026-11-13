@@ -170,14 +170,20 @@ impl BoundedLocalReader {
         Ok(format!("{:x}", hash.finalize()))
     }
 
-    pub fn verify_sha256(&mut self, expected: &str) -> io::Result<String> {
+    /// Verify the complete local model with cancellation between bounded reads.
+    /// A cancelled or mismatched pass never reports a verified digest.
+    pub fn verify_sha256_cancellable(
+        &mut self,
+        expected: &str,
+        cancelled: impl FnMut() -> bool,
+    ) -> io::Result<String> {
         if expected.len() != 64 || !expected.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "expected SHA-256 must be 64 hex digits",
             ));
         }
-        let actual = self.sha256()?;
+        let actual = self.sha256_cancellable(cancelled)?;
         if !actual.eq_ignore_ascii_case(expected) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -186,6 +192,11 @@ impl BoundedLocalReader {
         }
         Ok(actual)
     }
+
+    pub fn verify_sha256(&mut self, expected: &str) -> io::Result<String> {
+        self.verify_sha256_cancellable(expected, || false)
+    }
+
 }
 
 #[cfg(test)]
@@ -257,6 +268,26 @@ mod tests {
         assert_eq!(reader.disk_bytes_read(), 3);
         assert!(reader.verify_sha256(&"0".repeat(64)).is_err());
         assert!(reader.verify_sha256("missing").is_err());
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn cancellable_verification_never_accepts_partial_model() {
+        let path = fixture(b"abcdef");
+        let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
+        let full = "bef57ec7f53a6d40beb640a780a639c83bc29ac8a9816f1fc6c5c6dcd93c4721";
+        let mut checks = 0;
+        let err = reader.verify_sha256_cancellable(full, || {
+            checks += 1;
+            checks == 2
+        }).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(reader.disk_bytes_read(), 2);
+        assert_eq!(checks, 2);
+        assert_eq!(reader.verify_sha256_cancellable(full, || false).unwrap(), full);
+        assert_eq!(reader.disk_bytes_read(), 8);
+        assert_eq!(reader.verify_sha256_cancellable("bad", || true).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput);
         fs::remove_file(path).unwrap();
     }
 
