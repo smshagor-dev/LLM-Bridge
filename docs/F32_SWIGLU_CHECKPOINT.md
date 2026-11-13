@@ -34,3 +34,17 @@ transformer graph, is not an authenticated whole-model benchmark, is not
 bitwise ggml/logit parity, and does not enforce a process RSS ceiling. Caller
 activation-budget accounting does not reserve RAM, and the OS page cache is
 outside this per-operation staging budget.
+
+## Residual composition extension
+
+`f32_swiglu_residual_cancellable` computes
+`residual + down(SiLU(gate(input)) * up(input))` with an extra
+caller-provided output-sized `projection` buffer. It preflights residual
+values and total activation bytes, computes the three tensor projections,
+checks all residual additions for overflow, then commits output in one pass.
+Tests cover scalar-reference results, pre-I/O budget and NaN rejection, and
+late residual overflow with unchanged output. The residual and projection
+buffers are included in activation accounting; neither is silently allocated.
+
+**All newly added tests are unexecuted until CI or a local Rust toolchain
+runs them.** A successful CI result must be inspected before merging.
