@@ -3,6 +3,7 @@
 //! A changed source must receive a different identity or the caller must clear the cache.
 use std::collections::{HashMap, VecDeque};
 use std::io;
+use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ChunkKey {
@@ -60,6 +61,25 @@ impl TensorChunkCache {
         self.lru.retain(|item| item != key);
         self.lru.push_back(*key);
         self.entries.get(key).map(Vec::as_slice)
+    }
+
+    /// Authenticate the exact chunk bytes against an independently trusted SHA-256
+    /// before changing the cache. The model revision in ChunkKey must separately
+    /// identify a trusted source; this digest alone does not authenticate a model.
+    pub fn insert_verified(
+        &mut self,
+        key: ChunkKey,
+        bytes: &[u8],
+        expected_sha256: &[u8; 32],
+    ) -> io::Result<()> {
+        if key.length == 0 || key.length != bytes.len() {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "cache key length mismatch"));
+        }
+        let digest = Sha256::digest(bytes);
+        if digest.as_slice() != expected_sha256 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "tensor chunk SHA-256 mismatch"));
+        }
+        self.insert(key, bytes)
     }
 
     /// Caller must authenticate bytes before insertion; this cache does not verify hashes.
@@ -123,6 +143,36 @@ mod tests {
             file_offset: offset,
             length,
         }
+    }
+
+    #[test]
+    fn verified_insert_rejects_bad_hash_without_evicting_existing_chunks() {
+        let mut cache = TensorChunkCache::new(4);
+        cache.insert(key(1, 0, 4), b"safe").unwrap();
+        let correct: [u8; 32] = Sha256::digest(b"next").into();
+        let wrong = [0u8; 32];
+        assert_eq!(
+            cache.insert_verified(key(1, 4, 4), b"next", &wrong)
+                .unwrap_err().kind(), io::ErrorKind::InvalidData
+        );
+        assert_eq!(cache.get(&key(1, 0, 4)), Some(&b"safe"[..]));
+        assert_eq!(cache.used_bytes(), 4);
+        cache.insert_verified(key(1, 4, 4), b"next", &correct).unwrap();
+        assert_eq!(cache.get(&key(1, 4, 4)), Some(&b"next"[..]));
+        assert_eq!(cache.used_bytes(), 4);
+        assert!(cache.get(&key(1, 0, 4)).is_none());
+    }
+
+    #[test]
+    fn verified_replacement_mismatch_preserves_old_value() {
+        let mut cache = TensorChunkCache::new(4);
+        cache.insert(key(1, 0, 4), b"good").unwrap();
+        let digest: [u8; 32] = Sha256::digest(b"good").into();
+        assert_eq!(
+            cache.insert_verified(key(1, 0, 4), b"evil", &digest)
+                .unwrap_err().kind(), io::ErrorKind::InvalidData
+        );
+        assert_eq!(cache.get(&key(1, 0, 4)), Some(&b"good"[..]));
     }
 
     #[test]
