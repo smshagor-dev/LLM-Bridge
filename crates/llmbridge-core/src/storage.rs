@@ -139,11 +139,16 @@ impl BoundedLocalReader {
                 "range exceeds file or chunk budget",
             ));
         }
+        // Reject accounting overflow before touching the source. Saturating the
+        // counter would make an I/O audit appear valid after losing bytes.
+        let next_disk_bytes_read = self.disk_bytes_read
+            .checked_add(bytes as u64)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "tensor read accounting overflow"))?;
         self.assert_unchanged()?;
         self.file.seek(SeekFrom::Start(offset))?;
         self.file.read_exact(&mut self.buffer[..bytes])?;
         self.assert_unchanged()?;
-        self.disk_bytes_read = self.disk_bytes_read.saturating_add(bytes as u64);
+        self.disk_bytes_read = next_disk_bytes_read;
         Ok(&self.buffer[..bytes])
     }
 
@@ -235,6 +240,20 @@ mod tests {
         assert_eq!(checks, 2);
         let digest = reader.sha256_cancellable(|| false).unwrap();
         assert_eq!(digest.len(), 64);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn read_counter_overflow_fails_before_disk_io() {
+        let path = fixture(b"abcdef");
+        let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
+        reader.disk_bytes_read = u64::MAX - 1;
+        let err = reader.read_range(0, 2).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(reader.disk_bytes_read(), u64::MAX - 1);
+        // A rejected read must not disturb the counter or reader usability.
+        assert_eq!(reader.read_range(0, 1).unwrap(), b"a");
+        assert_eq!(reader.disk_bytes_read(), u64::MAX);
         fs::remove_file(path).unwrap();
     }
 
