@@ -66,6 +66,24 @@ impl TensorChunkCache {
         self.used = self.entries.values().map(Vec::len).sum();
     }
 
+    /// Reclaim only chunks for an unloaded model revision, preserving other
+    /// models' cache residency and relative LRU order. Returns reclaimed bytes.
+    /// The revision must be a trusted model identity supplied by the caller.
+    pub fn evict_revision(&mut self, revision: [u8; 32]) -> usize {
+        let mut reclaimed = 0usize;
+        self.entries.retain(|key, bytes| {
+            if key.source_revision == revision {
+                reclaimed += bytes.len();
+                false
+            } else {
+                true
+            }
+        });
+        self.lru.retain(|key| key.source_revision != revision);
+        self.used -= reclaimed;
+        reclaimed
+    }
+
     pub fn get(&mut self, key: &ChunkKey) -> Option<&[u8]> {
         if !self.entries.contains_key(key) {
             return None;
@@ -196,6 +214,40 @@ mod tests {
         assert!(cache.get(&key(1, 0, 4)).is_none());
         assert_eq!(cache.get(&key(1, 4, 4)), Some(&b"safe"[..]));
         assert_eq!(cache.get_verified(&key(1, 0, 4), &digest).unwrap(), None);
+    }
+
+    #[test]
+    fn unload_one_revision_preserves_other_models_and_lru_order() {
+        let mut cache = TensorChunkCache::new(9);
+        cache.insert(key(1, 0, 3), b"old").unwrap();
+        cache.insert(key(2, 0, 3), b"two").unwrap();
+        cache.insert(key(1, 3, 3), b"end").unwrap();
+        assert_eq!(cache.get(&key(1, 0, 3)), Some(&b"old"[..]));
+        assert_eq!(cache.evict_revision([1; 32]), 6);
+        assert_eq!(cache.used_bytes(), 3);
+        assert_eq!(cache.len(), 1);
+        assert!(cache.get(&key(1, 0, 3)).is_none());
+        assert_eq!(cache.get(&key(2, 0, 3)), Some(&b"two"[..]));
+        assert_eq!(cache.evict_revision([1; 32]), 0);
+        cache.insert(key(3, 0, 3), b"tri").unwrap();
+        cache.set_capacity(3);
+        assert!(cache.get(&key(2, 0, 3)).is_none());
+        assert_eq!(cache.get(&key(3, 0, 3)), Some(&b"tri"[..]));
+        assert_eq!(cache.used_bytes(), 3);
+    }
+
+    #[test]
+    fn unload_all_chunks_of_revision_does_not_evict_other_revision() {
+        let mut cache = TensorChunkCache::new(8);
+        cache.insert(key(1, 0, 2), b"aa").unwrap();
+        cache.insert(key(2, 0, 2), b"bb").unwrap();
+        cache.insert(key(1, 2, 2), b"cc").unwrap();
+        cache.insert(key(2, 2, 2), b"dd").unwrap();
+        assert_eq!(cache.evict_revision([1; 32]), 4);
+        assert_eq!(cache.used_bytes(), 4);
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.get(&key(2, 0, 2)), Some(&b"bb"[..]));
+        assert_eq!(cache.get(&key(2, 2, 2)), Some(&b"dd"[..]));
     }
 
     #[test]
