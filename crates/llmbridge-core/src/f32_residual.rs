@@ -124,7 +124,6 @@ pub fn f32_matvec_residual_cancellable(
 }
 
 #[cfg(test)]
-#[allow(clippy::manual_is_multiple_of)] // Keep test fixtures Rust 1.82-compatible.
 mod tests {
     use super::*;
     use std::io::Write;

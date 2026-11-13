@@ -20,24 +20,43 @@ impl MemoryBudget {
         if capacity == 0 {
             return Err("memory budget must be positive");
         }
-        Ok(Arc::new(Self { capacity, reserved: AtomicU64::new(0) }))
+        Ok(Arc::new(Self {
+            capacity,
+            reserved: AtomicU64::new(0),
+        }))
     }
 
-    pub fn capacity(&self) -> u64 { self.capacity }
+    pub fn capacity(&self) -> u64 {
+        self.capacity
+    }
 
-    pub fn reserved(&self) -> u64 { self.reserved.load(Ordering::Acquire) }
+    pub fn reserved(&self) -> u64 {
+        self.reserved.load(Ordering::Acquire)
+    }
 
     /// All concurrent callers compete for one limit. No optimistic overcommit.
     pub fn try_reserve(self: &Arc<Self>, bytes: u64) -> Result<Reservation, &'static str> {
-        if bytes == 0 { return Err("reservation must be positive"); }
+        if bytes == 0 {
+            return Err("reservation must be positive");
+        }
         let mut current = self.reserved.load(Ordering::Acquire);
         loop {
             let next = current.checked_add(bytes).ok_or("reservation overflow")?;
-            if next > self.capacity { return Err("insufficient unreserved budget"); }
+            if next > self.capacity {
+                return Err("insufficient unreserved budget");
+            }
             match self.reserved.compare_exchange_weak(
-                current, next, Ordering::AcqRel, Ordering::Acquire
+                current,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
             ) {
-                Ok(_) => return Ok(Reservation { budget: Arc::clone(self), bytes }),
+                Ok(_) => {
+                    return Ok(Reservation {
+                        budget: Arc::clone(self),
+                        bytes,
+                    })
+                }
                 Err(observed) => current = observed,
             }
         }
@@ -45,7 +64,9 @@ impl MemoryBudget {
 }
 
 impl Reservation {
-    pub fn bytes(&self) -> u64 { self.bytes }
+    pub fn bytes(&self) -> u64 {
+        self.bytes
+    }
 }
 
 impl Drop for Reservation {
@@ -97,7 +118,10 @@ mod tests {
             }));
         }
         barrier.wait();
-        let reservations: Vec<_> = handles.into_iter().filter_map(|h| h.join().unwrap()).collect();
+        let reservations: Vec<_> = handles
+            .into_iter()
+            .filter_map(|h| h.join().unwrap())
+            .collect();
         assert_eq!(reservations.len(), 1);
         assert_eq!(budget.reserved(), 60);
         drop(reservations);

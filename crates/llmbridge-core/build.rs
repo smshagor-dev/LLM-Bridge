@@ -20,10 +20,7 @@ fn main() {
         return;
     }
     let native = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../native");
-    println!(
-        "cargo:rerun-if-changed={}",
-        native.join("src/bridge.cpp").display()
-    );
+    println!("cargo:rerun-if-changed={}", native.join("src").display());
     println!(
         "cargo:rerun-if-changed={}",
         native.join("include/llmbridge.h").display()

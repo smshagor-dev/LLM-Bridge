@@ -562,5 +562,4 @@ mod tests {
         assert_eq!(output, [77.; 2]);
         fs::remove_file(path).unwrap();
     }
-
 }

@@ -96,6 +96,9 @@ fn limit_by_cgroup(
     cgroup_limit: Option<u64>,
     cgroup_current: Option<u64>,
 ) -> Option<u64> {
+    if cgroup_limit.is_some() && cgroup_current.is_none() {
+        return None;
+    }
     let headroom = cgroup_limit
         .zip(cgroup_current)
         .map(|(limit, used)| limit.saturating_sub(used));
@@ -161,6 +164,12 @@ mod tests {
         assert!(admit(Some(2_000), 1_500, 501).is_err());
         assert!(admit(Some(2_000), 1_500, 500).is_ok());
         assert!(admit(None, 0, 1).is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn known_cgroup_limit_without_usage_never_falls_back_to_host_ram() {
+        assert_eq!(limit_by_cgroup(Some(1000), Some(100), None), None);
     }
 
     #[cfg(target_os = "linux")]

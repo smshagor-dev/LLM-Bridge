@@ -5,9 +5,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.85.1
         with:
           components: rustfmt, clippy
+      - run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - run: cargo fmt --all -- --check
       - run: cargo test --workspace --no-default-features
       - run: cargo clippy --workspace --all-targets --no-default-features -- -D warnings
@@ -15,14 +16,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.85.1
       - run: cargo test --workspace --all-targets
+      - run: cargo clippy --workspace --all-targets -- -D warnings
   model-parity:
     runs-on: ubuntu-latest
     needs: native-cpu
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.85.1
       - name: Download and verify public tiny Q8 GGUF (model not committed)
         run: |
           mkdir -p models benchmarks/results
@@ -33,6 +35,7 @@ jobs:
       - name: Build pinned independent upstream reference example
         run: |
           git clone --depth 1 --branch v0.9.0 https://github.com/ggml-org/llama.cpp.git reference
+          python3 scripts/prepare_reference_logits.py reference/examples/simple/simple.cpp
           cmake -S reference -B reference-build -DGGML_OPENMP=OFF -DGGML_NATIVE=OFF -DLLAMA_BUILD_EXAMPLES=ON -DLLAMA_BUILD_SERVER=OFF -DLLAMA_BUILD_TESTS=OFF
           cmake --build reference-build --target llama-simple --parallel 2
       - name: Run real greedy generation and compare native token bytes
@@ -40,7 +43,7 @@ jobs:
           ./target/release/llmbridge models inspect models/stories15M-q8_0.gguf
           ./target/release/llmbridge chat models/stories15M-q8_0.gguf --prompt "The sky is" --max-tokens 16 --ctx 128 --threads 2 --stream > benchmarks/results/bridge.txt
           ./reference-build/bin/llama-simple -m models/stories15M-q8_0.gguf -n 16 -ngl 0 "The sky is" > benchmarks/results/reference.txt
-          python3 scripts/check_m1_parity.py --ours benchmarks/results/bridge.txt --reference benchmarks/results/reference.txt --output benchmarks/results/parity.json
+          python3 scripts/check_m1_parity.py --ours benchmarks/results/bridge.txt --reference benchmarks/results/reference.txt --reference-prefix "<s> The sky is" --output benchmarks/results/parity.json
 
       - name: Validate real GGUF tensor ranges and streaming SHA-256 against independent Python parser
         run: |
@@ -67,6 +70,12 @@ jobs:
         run: cargo run --release -p llmbridge-core --features native --example model_contract -- models/stories15M-q8_0.gguf
       - name: Record three real end-to-end CPU baseline trials with RSS metrics
         run: python3 benchmarks/run_cpu_baseline.py --binary ./target/release/llmbridge --model models/stories15M-q8_0.gguf --output benchmarks/results/cpu_baseline.json --repetitions 3
+      - name: Compare complete streamed decoder output and logits
+        run: python3 scripts/check_streamed_parity.py --binary ./target/release/llmbridge --reference ./reference-build/bin/llama-simple --model models/stories15M-q8_0.gguf --output benchmarks/results/streamed --max-address-space-mb 24
+
+      - name: Streamed decoder cancellation and refusal contracts
+        run: cargo run --release -p llmbridge-core --features native --example streamed_contract -- models/stories15M-q8_0.gguf
+
       - name: Save raw parity evidence
         if: always()
         uses: actions/upload-artifact@v4

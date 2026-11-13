@@ -99,7 +99,6 @@ pub fn f32_two_stage_cancellable(
 }
 
 #[cfg(test)]
-#[allow(clippy::manual_is_multiple_of)] // is_multiple_of requires newer Rust than MSRV.
 mod tests {
     use super::*;
     use std::io::Write;

@@ -385,13 +385,15 @@ mod tests {
         let replacement = fixture(b"abcd");
         let mut reader = BoundedLocalReader::open(&path, 2, 4).unwrap();
         let mut checks = 0usize;
-        let error = reader.sha256_cancellable(|| {
-            checks += 1;
-            if checks == 4 {
-                fs::rename(&replacement, &path).unwrap();
-            }
-            false
-        }).unwrap_err();
+        let error = reader
+            .sha256_cancellable(|| {
+                checks += 1;
+                if checks == 4 {
+                    fs::rename(&replacement, &path).unwrap();
+                }
+                false
+            })
+            .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         assert_eq!(reader.disk_bytes_read(), 4);
         fs::remove_file(path).unwrap();

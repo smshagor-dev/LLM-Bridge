@@ -18,7 +18,7 @@ FetchContent_Declare(
   GIT_SHALLOW FALSE
 )
 FetchContent_MakeAvailable(llama_cpp)
-add_library(llmbridge_native STATIC src/bridge.cpp)
+add_library(llmbridge_native STATIC src/bridge.cpp src/streamed.cpp)
 target_compile_features(llmbridge_native PRIVATE cxx_std_20)
 target_include_directories(llmbridge_native PUBLIC include)
 target_link_libraries(llmbridge_native PRIVATE llama ggml)

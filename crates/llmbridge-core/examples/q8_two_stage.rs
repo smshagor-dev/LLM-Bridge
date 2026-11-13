@@ -35,7 +35,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &AtomicBool::new(false),
         operator_budget,
         graph_budget,
-    ).map_err(std::io::Error::other)?;
+    )
+    .map_err(std::io::Error::other)?;
     eprintln!("tensor bytes read: {}", reader.disk_bytes_read());
     for value in result {
         println!("{value:.9}");

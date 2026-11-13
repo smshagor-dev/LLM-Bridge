@@ -311,9 +311,9 @@ extern "C" fn read_range_callback(
         // The bounded cancellable reader rejects that late cancellation before
         // any returned bytes become visible to native ggml.
         let bytes = match state.cancelled {
-            Some(flag) => state.reader.read_range_cancellable(file_offset, requested, || {
-                flag.load(Ordering::Acquire)
-            }),
+            Some(flag) => state
+                .reader
+                .read_range_cancellable(file_offset, requested, || flag.load(Ordering::Acquire)),
             None => state.reader.read_range(file_offset, requested),
         };
         match bytes {
@@ -502,6 +502,7 @@ pub fn q8_0_matvec_with_budget(
 /// conservative upper estimate of this operator's managed scratch, not an
 /// estimate of native runtime or graph-wide memory. This does NOT enforce a
 /// hard RSS ceiling: allocations can occur between measurements.
+#[allow(clippy::too_many_arguments)] // Preserve the existing public operator API.
 pub fn q8_0_matvec_with_memory_limits(
     index: &GgufTensorIndex,
     reader: &mut BoundedLocalReader,
@@ -533,6 +534,7 @@ pub fn q8_0_matvec_with_memory_limits(
 /// with cooperative RSS/cgroup admission around the entire verification and
 /// native execution path. The expected digest must come from a trusted source.
 /// This does not enforce a hard process memory cap or prevent source mutation.
+#[allow(clippy::too_many_arguments)] // Preserve the existing public operator API.
 pub fn q8_0_matvec_verified_with_memory_limits(
     index: &GgufTensorIndex,
     reader: &mut BoundedLocalReader,
@@ -914,7 +916,8 @@ mod tests {
     fn cancelled_native_range_callback_never_exposes_new_tensor_bytes() {
         use std::io::Write;
         let path = std::env::temp_dir().join(format!(
-            "llmbridge-native-cancel-range-{}", std::process::id()
+            "llmbridge-native-cancel-range-{}",
+            std::process::id()
         ));
         std::fs::File::create(&path)
             .unwrap()
