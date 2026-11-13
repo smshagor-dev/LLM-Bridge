@@ -95,6 +95,9 @@ pub fn f32_matvec_cancellable(
             let bytes = reader.read_range(offset, count)?;
             for (j, encoded) in bytes.chunks_exact(4).enumerate() {
                 let value = f32::from_le_bytes(encoded.try_into().expect("four bytes"));
+                if !value.is_finite() {
+                    return Err(reject(ErrorKind::InvalidData, "non-finite F32 tensor weight"));
+                }
                 let column = consumed / 4 + j;
                 sum += value * input[column];
             }
@@ -102,6 +105,9 @@ pub fn f32_matvec_cancellable(
         }
         if cancelled.load(Ordering::Acquire) {
             return Err(reject(ErrorKind::Interrupted, "matrix operation cancelled"));
+        }
+        if !sum.is_finite() {
+            return Err(reject(ErrorKind::InvalidData, "non-finite F32 matrix result"));
         }
         *destination = sum;
     }
@@ -115,6 +121,43 @@ mod tests {
     use std::io::Write;
     use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn nonfinite_weights_and_accumulation_fail_closed() {
+        fn check(values: [f32; 2], input: f32) {
+            let mut bytes = b"GGUF".to_vec();
+            bytes.extend_from_slice(&3u32.to_le_bytes());
+            bytes.extend_from_slice(&1u64.to_le_bytes());
+            bytes.extend_from_slice(&0u64.to_le_bytes());
+            bytes.extend_from_slice(&1u64.to_le_bytes());
+            bytes.push(b'w');
+            bytes.extend_from_slice(&2u32.to_le_bytes());
+            bytes.extend_from_slice(&2u64.to_le_bytes());
+            bytes.extend_from_slice(&1u64.to_le_bytes());
+            bytes.extend_from_slice(&0u32.to_le_bytes());
+            bytes.extend_from_slice(&0u64.to_le_bytes());
+            while bytes.len() % 32 != 0 { bytes.push(0); }
+            for value in values { bytes.extend_from_slice(&value.to_le_bytes()); }
+            let path = std::env::temp_dir().join(format!(
+                "llmbridge-f32-invalid-{}-{}", std::process::id(),
+                NEXT.fetch_add(1, AtomicOrdering::Relaxed)
+            ));
+            File::create(&path).unwrap().write_all(&bytes).unwrap();
+            let index = GgufTensorIndex::inspect(&path).unwrap();
+            let mut reader = BoundedLocalReader::open(&path, 8, 16).unwrap();
+            let mut output = [123.0f32];
+            let error = f32_matvec_cancellable(
+                &index, &mut reader, "w", &[input, input], &mut output,
+                &AtomicBool::new(false), 8,
+            ).unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::InvalidData);
+            assert_eq!(output, [123.0]);
+            std::fs::remove_file(path).unwrap();
+        }
+        check([f32::NAN, 1.0], 1.0);
+        check([f32::INFINITY, 1.0], 1.0);
+        check([f32::MAX, f32::MAX], f32::MAX);
+    }
 
     #[test]
     fn streamed_f32_matches_scalar_and_rejects_without_io() {
