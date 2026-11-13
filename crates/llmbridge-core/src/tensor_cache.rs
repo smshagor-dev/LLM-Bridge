@@ -39,6 +39,18 @@ impl TensorChunkCache {
         self.entries.len()
     }
 
+    /// Change the logical chunk-cache budget at runtime. Evict least-recently
+    /// used chunks immediately when shrinking; never retain bytes over budget.
+    /// This does not limit process RSS or the allocator's retained pages.
+    pub fn set_capacity(&mut self, capacity: usize) {
+        self.capacity = capacity;
+        while self.used > self.capacity {
+            let oldest = self.lru.pop_front().expect("nonempty cache has LRU entry");
+            let removed = self.entries.remove(&oldest).expect("LRU entry exists");
+            self.used -= removed.len();
+        }
+    }
+
     pub fn clear(&mut self) {
         self.entries.clear();
         self.lru.clear();
@@ -173,6 +185,38 @@ mod tests {
                 .unwrap_err().kind(), io::ErrorKind::InvalidData
         );
         assert_eq!(cache.get(&key(1, 0, 4)), Some(&b"good"[..]));
+    }
+
+    #[test]
+    fn shrinking_budget_evicts_lru_and_preserves_recent_chunks() {
+        let mut cache = TensorChunkCache::new(9);
+        cache.insert(key(1, 0, 3), b"old").unwrap();
+        cache.insert(key(1, 3, 3), b"mid").unwrap();
+        cache.insert(key(1, 6, 3), b"new").unwrap();
+        assert_eq!(cache.get(&key(1, 0, 3)), Some(&b"old"[..]));
+        cache.set_capacity(6);
+        assert_eq!(cache.used_bytes(), 6);
+        assert!(cache.get(&key(1, 3, 3)).is_none());
+        assert_eq!(cache.get(&key(1, 0, 3)), Some(&b"old"[..]));
+        assert_eq!(cache.get(&key(1, 6, 3)), Some(&b"new"[..]));
+        cache.set_capacity(0);
+        assert_eq!(cache.used_bytes(), 0);
+        assert_eq!(cache.len(), 0);
+        assert!(cache.insert(key(1, 9, 1), b"x").is_err());
+        cache.set_capacity(2);
+        cache.insert(key(1, 9, 2), b"ok").unwrap();
+        assert_eq!(cache.used_bytes(), 2);
+    }
+
+    #[test]
+    fn growing_budget_preserves_entries_and_accounting() {
+        let mut cache = TensorChunkCache::new(2);
+        cache.insert(key(1, 0, 2), b"ab").unwrap();
+        cache.set_capacity(4);
+        cache.insert(key(1, 2, 2), b"cd").unwrap();
+        assert_eq!(cache.used_bytes(), 4);
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.get(&key(1, 0, 2)), Some(&b"ab"[..]));
     }
 
     #[test]
