@@ -330,7 +330,7 @@ mod tests {
             },
             || {
                 invoked.set(true);
-                Err(io::Error::new(io::ErrorKind::Other, "native failed"))
+                Err(io::Error::other("native failed"))
             },
         );
         assert!(invoked.get());
