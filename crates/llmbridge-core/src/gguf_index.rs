@@ -229,7 +229,9 @@ fn assert_metadata_source_unchanged(
         || SourceIdentity::from_metadata(&current_path) != *expected
         || SourceIdentity::from_metadata(&file.metadata()?) != *expected
     {
-        return Err(invalid("GGUF file or path changed during tensor index construction"));
+        return Err(invalid(
+            "GGUF file or path changed during tensor index construction",
+        ));
     }
     Ok(())
 }
@@ -469,7 +471,9 @@ impl GgufTensorIndex {
         F: FnMut(&[u8]) -> io::Result<()>,
     {
         if reader.identity() != &self.source_identity {
-            return Err(invalid("indexed tensor source identity changed before streaming"));
+            return Err(invalid(
+                "indexed tensor source identity changed before streaming",
+            ));
         }
         let tensor = self.tensor(name).ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, "tensor not found in indexed GGUF")
@@ -483,7 +487,8 @@ impl GgufTensorIndex {
                 "tensor slice exceeds indexed region",
             ));
         }
-        let mut offset = tensor.file_offset
+        let mut offset = tensor
+            .file_offset
             .checked_add(relative_offset)
             .ok_or_else(|| invalid("tensor slice file offset overflow"))?;
         let end = offset
@@ -491,7 +496,10 @@ impl GgufTensorIndex {
             .ok_or_else(|| invalid("tensor slice file end overflow"))?;
         loop {
             if cancelled.load(Ordering::Acquire) {
-                return Err(io::Error::new(io::ErrorKind::Interrupted, "tensor stream cancelled"));
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "tensor stream cancelled",
+                ));
             }
             if offset == end {
                 return Ok(length);
@@ -519,7 +527,6 @@ impl GgufTensorIndex {
         })?;
         self.stream_tensor_slice_cancellable(reader, name, 0, tensor.byte_len, cancelled, consume)
     }
-
 }
 
 #[cfg(test)]
@@ -615,10 +622,12 @@ mod tests {
         let mut reader = BoundedLocalReader::open(&path, 3, 6).unwrap();
         let stop = AtomicBool::new(false);
         let mut output = Vec::new();
-        let read = index.stream_tensor_slice_cancellable(
-            &mut reader, "final.weight", 1, 2, &stop,
-            |chunk| { output.extend_from_slice(chunk); Ok(()) }
-        ).unwrap();
+        let read = index
+            .stream_tensor_slice_cancellable(&mut reader, "final.weight", 1, 2, &stop, |chunk| {
+                output.extend_from_slice(chunk);
+                Ok(())
+            })
+            .unwrap();
         assert_eq!(read, 2);
         assert_eq!(output, [0x34, 0x56]);
         assert_eq!(reader.disk_bytes_read(), 2);
@@ -632,9 +641,16 @@ mod tests {
         let mut reader = BoundedLocalReader::open(&path, 3, 6).unwrap();
         let stop = AtomicBool::new(false);
         for (offset, length) in [(3, 2), (u64::MAX, 2), (0, 5)] {
-            assert!(index.stream_tensor_slice_cancellable(
-                &mut reader, "final.weight", offset, length, &stop, |_| Ok(())
-            ).is_err());
+            assert!(index
+                .stream_tensor_slice_cancellable(
+                    &mut reader,
+                    "final.weight",
+                    offset,
+                    length,
+                    &stop,
+                    |_| Ok(())
+                )
+                .is_err());
         }
         assert_eq!(reader.disk_bytes_read(), 0);
         std::fs::remove_file(path).unwrap();
@@ -706,7 +722,10 @@ mod tests {
         assert_ne!(old_identity, SourceIdentity::from_metadata(&new_file));
         assert!(assert_metadata_source_unchanged(&path, &old_descriptor, &old_identity).is_err());
         let index = GgufTensorIndex::inspect(&path).unwrap();
-        assert_eq!(index.source_identity, SourceIdentity::from_metadata(&new_file));
+        assert_eq!(
+            index.source_identity,
+            SourceIdentity::from_metadata(&new_file)
+        );
         std::fs::remove_file(path).unwrap();
     }
 
