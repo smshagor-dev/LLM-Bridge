@@ -1,50 +1,54 @@
-# Bounded F32 SwiGLU checkpoint (experimental)
+# Bounded F32 SwiGLU and residual checkpoint (experimental)
 
-This branch introduces `f32_swiglu_cancellable`, a caller-buffered feed-forward
-composition using three rank-2 F32 matrices from one indexed GGUF source:
+The following library APIs operate on three rank-2 F32 GGUF tensors
+`gate`, `up`, and `down`, using the indexed local range provider:
 
-`down(SiLU(gate(input)) * up(input))`
+- `f32_swiglu_cancellable`: `down(SiLU(gate(input)) * up(input))`
+- `f32_swiglu_residual_cancellable`: `residual + down(SiLU(gate(input)) * up(input))`
 
-Each projection reads tensor rows through `BoundedLocalReader` and reuses one
-bounded file-chunk buffer. Gate, up, final scratch and output activation slices
-are supplied by the caller. The function validates all tensor shapes and
-requested staging/activation budgets before tensor I/O, rejects non-finite
-arithmetic, checks cancellation between operations, and only commits the
-caller-visible output after all stages succeed.
+These are genuinely executed three-tensor F32 computations, but are **not**
+connected to the full native llama.cpp transformer execution graph.
 
-## Validation protocol
+## Allocation and failure contract
+
+All projection weights are read in bounded ranges with one reusable file
+buffer. Input, gate, up, final scratch, residual (if supplied), and output
+are caller-owned. The requested activation budget charges every provided
+slice; output is only copied after all three projections, gating, residual
+addition and cancellation checks pass. A failed operation may mutate the
+intermediate or scratch slices, but does not mutate caller-visible output.
+
+Preflight validates the three indexed tensor shapes, input/residual values,
+GGUF reader identity, and declared budgets before performing projection reads.
+No whole-weight matrix is allocated by these functions. They do **not**
+reserve system RAM, bound unrelated allocations or OS page cache, enforce
+process RSS, or provide exact ggml SIMD numerical parity.
+
+## Validation commands
 
 ```sh
 cargo fmt --all -- --check
 cargo test -p llmbridge-core f32_swiglu
-cargo test --workspace
+cargo test --workspace --all-targets
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-The synthetic GGUF regression fixtures cover reference scalar SwiGLU values,
-exact tensor-read accounting, invalid metadata and budgets before I/O, failure
-of the final projection with unchanged output, and cancellation before I/O.
+The four initial core SwiGLU tests passed in native CI job
+[132064978097](https://github.com/smshagor-dev/LLM-Bridge/actions/runs/43477477928/job/132064978097).
+The overall job **failed** because four pre-existing tests in
+`f32_stream` and `tensor_batch` failed (102 passed, 4 failed). The fixture
+and formatting repairs are covered separately by draft PR #62.
+That CI run predates the residual implementation, which must be retested
+before this draft PR is ready for review.
 
-**Status at proposal:** These commands have **not** been executed in the
-current connector environment (Rust toolchain unavailable). PR remains draft.
+New residual-specific tests exercise independent scalar numerical values,
+overflow after all projections with unchanged final output, and invalid
+residual/budget admission before file reads.
 
-**Not proven:** The current full-model generation path still uses standard
-llama.cpp weight loading. This F32 operator is not integrated into the native
-transformer graph, is not an authenticated whole-model benchmark, is not
-bitwise ggml/logit parity, and does not enforce a process RSS ceiling. Caller
-activation-budget accounting does not reserve RAM, and the OS page cache is
-outside this per-operation staging budget.
+## Missing M2 acceptance evidence
 
-## Residual composition extension
-
-`f32_swiglu_residual_cancellable` computes
-`residual + down(SiLU(gate(input)) * up(input))` with an extra
-caller-provided output-sized `projection` buffer. It preflights residual
-values and total activation bytes, computes the three tensor projections,
-checks all residual additions for overflow, then commits output in one pass.
-Tests cover scalar-reference results, pre-I/O budget and NaN rejection, and
-late residual overflow with unchanged output. The residual and projection
-buffers are included in activation accounting; neither is silently allocated.
-
-**All newly added tests are unexecuted until CI or a local Rust toolchain
-runs them.** A successful CI result must be inspected before merging.
+Whole-model streamed weights connected to attention and decoder graph,
+native reference logit parity, enforceable memory ceiling, cancellation
+during complete generation, and reproducible constrained-hardware
+measurements remain **unverified**. No model-size or low-RAM support claims
+follow from this checkpoint.
