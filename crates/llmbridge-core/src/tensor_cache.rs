@@ -54,6 +54,21 @@ impl TensorChunkCache {
         if key.length == 0 || key.length != bytes.len() {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "cache key length mismatch"));
         }
+        // Reject overlapping ranges for one authenticated revision: otherwise
+        // distinct keys could return conflicting bytes for the same tensor region.
+        let end = key.file_offset.checked_add(key.length as u64).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "cache range offset overflow")
+        })?;
+        for existing in self.entries.keys() {
+            if existing.source_revision != key.source_revision || *existing == key {
+                continue;
+            }
+            let existing_end = existing.file_offset.checked_add(existing.length as u64)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid cached range"))?;
+            if key.file_offset < existing_end && existing.file_offset < end {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "overlapping cached tensor ranges"));
+            }
+        }
         if bytes.len() > self.capacity {
             return Err(io::Error::new(io::ErrorKind::Other, "chunk exceeds cache budget"));
         }
@@ -116,6 +131,34 @@ mod tests {
         cache.insert(key(1, 0, 2), b"ok").unwrap();
         assert!(cache.insert(key(1, 2, 3), b"bad").is_err());
         assert!(cache.insert(key(1, 2, 1), b"bad").is_err());
+        assert_eq!(cache.get(&key(1, 0, 2)), Some(&b"ok"[..]));
+        assert_eq!(cache.used_bytes(), 2);
+    }
+
+    #[test]
+    fn overlapping_ranges_are_rejected_without_evicting() {
+        let mut cache = TensorChunkCache::new(6);
+        cache.insert(key(1, 0, 3), b"abc").unwrap();
+        cache.insert(key(1, 3, 3), b"def").unwrap();
+        assert_eq!(
+            cache.insert(key(1, 2, 3), b"xyz").unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+        assert_eq!(cache.used_bytes(), 6);
+        assert_eq!(cache.get(&key(1, 0, 3)), Some(&b"abc"[..]));
+        assert_eq!(cache.get(&key(1, 3, 3)), Some(&b"def"[..]));
+        cache.insert(key(2, 0, 3), b"new").unwrap();
+        assert_eq!(cache.get(&key(2, 0, 3)), Some(&b"new"[..]));
+    }
+
+    #[test]
+    fn overflowing_file_ranges_fail_closed_and_preserve_cache() {
+        let mut cache = TensorChunkCache::new(4);
+        cache.insert(key(1, 0, 2), b"ok").unwrap();
+        assert_eq!(
+            cache.insert(key(1, u64::MAX, 2), b"no").unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
         assert_eq!(cache.get(&key(1, 0, 2)), Some(&b"ok"[..]));
         assert_eq!(cache.used_bytes(), 2);
     }
