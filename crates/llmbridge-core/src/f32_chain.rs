@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// Both activation workspaces are caller-owned and must not alias the output.
 /// The output is committed only if both stages succeed. The intermediate and
 /// final scratch may contain partial results after an error and must be discarded.
+#[allow(clippy::too_many_arguments)] // Stable caller-owned activation API; keep compatibility.
 pub fn f32_two_stage_cancellable(
     index: &GgufTensorIndex,
     reader: &mut BoundedLocalReader,
@@ -98,6 +99,7 @@ pub fn f32_two_stage_cancellable(
 }
 
 #[cfg(test)]
+#[allow(clippy::manual_is_multiple_of)] // is_multiple_of requires newer Rust than MSRV.
 mod tests {
     use super::*;
     use std::io::Write;
