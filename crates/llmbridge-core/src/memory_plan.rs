@@ -71,7 +71,10 @@ pub fn plan_cpu_adaptive_context(
     if min_context_tokens == 0 || min_context_tokens > request.context_tokens {
         return Err("minimum context must be nonzero and within requested context".into());
     }
-    let minimum = PlanRequest { context_tokens: min_context_tokens, ..request };
+    let minimum = PlanRequest {
+        context_tokens: min_context_tokens,
+        ..request
+    };
     let minimum_plan = plan_cpu(hardware, minimum)?;
     if let Ok(full_plan) = plan_cpu(hardware, request) {
         return Ok((full_plan, request.context_tokens));
@@ -83,7 +86,13 @@ pub fn plan_cpu_adaptive_context(
     let mut best = minimum_plan;
     while high - low > 1 {
         let mid = low + (high - low) / 2;
-        match plan_cpu(hardware, PlanRequest { context_tokens: mid, ..request }) {
+        match plan_cpu(
+            hardware,
+            PlanRequest {
+                context_tokens: mid,
+                ..request
+            },
+        ) {
             Ok(plan) => {
                 low = mid;
                 best = plan;
@@ -116,12 +125,22 @@ mod tests {
     }
     #[test]
     fn adaptive_context_selects_largest_admissible_token_count() {
-        let requested = PlanRequest { context_tokens: 30, ..req() };
+        let requested = PlanRequest {
+            context_tokens: 30,
+            ..req()
+        };
         let (plan, tokens) = plan_cpu_adaptive_context(&hw(Some(2500)), requested, 1).unwrap();
         assert_eq!(tokens, 18);
         assert_eq!(plan.estimated_peak_bytes, 1992);
         assert_eq!(plan.available_after_reserve_bytes, 2000);
-        assert!(plan_cpu(&hw(Some(2500)), PlanRequest { context_tokens: 19, ..requested }).is_err());
+        assert!(plan_cpu(
+            &hw(Some(2500)),
+            PlanRequest {
+                context_tokens: 19,
+                ..requested
+            }
+        )
+        .is_err());
         assert!(tokens <= requested.context_tokens);
     }
 
@@ -135,7 +154,10 @@ mod tests {
 
     #[test]
     fn adaptive_context_rejects_minimum_above_memory_limit() {
-        let request = PlanRequest { context_tokens: 30, ..req() };
+        let request = PlanRequest {
+            context_tokens: 30,
+            ..req()
+        };
         assert!(plan_cpu_adaptive_context(&hw(Some(2500)), request, 19).is_err());
     }
 
@@ -157,8 +179,11 @@ mod tests {
     #[test]
     fn adaptive_context_handles_large_bounds_without_midpoint_overflow() {
         let request = PlanRequest {
-            model_file_bytes: 1, context_tokens: u64::MAX,
-            kv_bytes_per_token: 1, scratch_bytes: 0, os_reserve_bytes: 0,
+            model_file_bytes: 1,
+            context_tokens: u64::MAX,
+            kv_bytes_per_token: 1,
+            scratch_bytes: 0,
+            os_reserve_bytes: 0,
             safety_margin_percent: 0,
         };
         let hardware = hw(Some(100));
