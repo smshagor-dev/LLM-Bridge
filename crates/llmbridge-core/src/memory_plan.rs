@@ -43,7 +43,7 @@ pub fn plan_cpu(hardware: &Hardware, request: PlanRequest) -> Result<MemoryPlan,
     let multiplier = 100u64 + u64::from(request.safety_margin_percent);
     // Widen the intermediate multiplication before rounding, then reject
     // estimates that cannot be represented as u64.
-    let rounded = (u128::from(base) * u128::from(multiplier) + 99) / 100;
+    let rounded = (u128::from(base) * u128::from(multiplier)).div_ceil(100);
     let estimated_peak_bytes =
         u64::try_from(rounded).map_err(|_| "memory safety margin overflow")?;
     let headroom = available.saturating_sub(request.os_reserve_bytes);
@@ -236,7 +236,7 @@ mod tests {
         request.scratch_bytes = 0;
         request.os_reserve_bytes = 0;
         request.safety_margin_percent = 20;
-        let expected = ((u128::from(request.model_file_bytes) * 120 + 99) / 100) as u64;
+        let expected = (u128::from(request.model_file_bytes) * 120).div_ceil(100) as u64;
         assert_eq!(
             plan_cpu(&hw(Some(u64::MAX)), request)
                 .unwrap()
