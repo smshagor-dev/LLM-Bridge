@@ -33,6 +33,7 @@ impl SourceIdentity {
 /// Bound applies to its explicit buffer only; OS page cache and process RSS are NOT capped.
 pub struct BoundedLocalReader {
     file: File,
+    source_path: std::path::PathBuf,
     file_len: u64,
     source_identity: SourceIdentity,
     buffer: Box<[u8]>,
@@ -86,6 +87,7 @@ impl BoundedLocalReader {
         }
         Ok(Self {
             file,
+            source_path: path.to_path_buf(),
             file_len: metadata.len(),
             source_identity: SourceIdentity::from_metadata(&metadata),
             buffer: vec![0u8; max_chunk_bytes].into_boxed_slice(),
@@ -111,7 +113,12 @@ impl BoundedLocalReader {
 
     fn assert_unchanged(&self) -> io::Result<()> {
         let current = self.file.metadata()?;
-        if SourceIdentity::from_metadata(&current) != self.source_identity {
+        // A descriptor can still read the old inode after its path is replaced.
+        // Reject a renamed, deleted or symlink-substituted model before returning bytes.
+        let path_metadata = fs::symlink_metadata(&self.source_path)?;
+        if !path_metadata.is_file() || path_metadata.file_type().is_symlink()
+            || SourceIdentity::from_metadata(&path_metadata) != self.source_identity
+            || SourceIdentity::from_metadata(&current) != self.source_identity {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "source changed while reading; reject stale or mixed tensor bytes",
@@ -283,4 +290,25 @@ mod tests {
         assert!(reader.read_range(0, 1).is_err());
         fs::remove_file(path).unwrap();
     }
+    #[test]
+    fn rejects_model_path_replacement_after_open() {
+        let path = fixture(b"original");
+        let replacement = fixture(b"replacement");
+        let mut reader = BoundedLocalReader::open(&path, 4, 8).unwrap();
+        fs::rename(&replacement, &path).unwrap();
+        let error = reader.read_range(0, 4).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(reader.disk_bytes_read(), 0);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn rejects_model_path_disappearance_after_open() {
+        let path = fixture(b"original");
+        let mut reader = BoundedLocalReader::open(&path, 4, 8).unwrap();
+        fs::remove_file(&path).unwrap();
+        assert!(reader.read_range(0, 4).is_err());
+        assert_eq!(reader.disk_bytes_read(), 0);
+    }
+
 }
