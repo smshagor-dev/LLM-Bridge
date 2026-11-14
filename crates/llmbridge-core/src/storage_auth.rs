@@ -14,6 +14,26 @@ impl SealedMetadata {
     pub fn path(&self) -> &Path {
         &self.path
     }
+    /// Read only the authenticated sealed metadata prefix, never sparse weight holes.
+    #[cfg(any(feature = "native", test))]
+    pub(crate) fn read_into(&self, offset: u64, output: &mut [u8]) -> io::Result<()> {
+        if offset
+            .checked_add(output.len() as u64)
+            .is_none_or(|end| end > self.prefix_bytes)
+        {
+            return Err(fail("metadata range exceeds authenticated sealed prefix"));
+        }
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::FileExt;
+            self._file.read_exact_at(output, offset)
+        }
+        #[cfg(not(target_os = "linux"))]
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "sealed metadata requires Linux",
+        ))
+    }
 }
 #[derive(Debug, Clone, Default)]
 pub struct AuthenticationMetrics {
@@ -32,6 +52,10 @@ fn fail(message: &'static str) -> io::Error {
 }
 
 impl BoundedLocalReader {
+    /// Constant-time session check without cloning digest/counter snapshots.
+    pub fn is_authenticated(&self) -> bool {
+        self.auth.is_some()
+    }
     pub fn authentication_metrics(&self) -> Option<AuthenticationMetrics> {
         self.auth.as_ref().map(|a| a.metrics.clone())
     }
@@ -293,6 +317,11 @@ mod tests {
             .read_to_end(&mut bytes)
             .unwrap();
         assert_eq!(&bytes[..10], b"abcdefghij");
+        let mut exact = [0u8; 2];
+        snapshot.read_into(8, &mut exact).unwrap();
+        assert_eq!(&exact, b"ij");
+        assert!(snapshot.read_into(9, &mut exact).is_err());
+        assert!(snapshot.read_into(u64::MAX, &mut exact).is_err());
         assert!(bytes[10..].iter().all(|x| *x == 0));
         assert!(std::fs::OpenOptions::new()
             .write(true)
@@ -349,6 +378,35 @@ mod tests {
             .to_string()
             .contains("block changed"));
     }
+    #[test]
+    fn same_block_is_rehashed_on_every_public_read_even_with_unchanged_identity() {
+        let file = Fixture::new();
+        let mut reader = file.reader();
+        let _sealed = reader
+            .authenticate_model(&file.digest(), 10, 128 * 1024, || false)
+            .unwrap();
+        assert!(reader.is_authenticated());
+        assert_eq!(reader.read_range(0, 2).unwrap(), b"ab");
+        let before = reader.disk_bytes_read();
+        assert_eq!(reader.read_range(1, 2).unwrap(), b"bc");
+        assert_eq!(reader.disk_bytes_read(), before + 8);
+        let modified = std::fs::metadata(&file.0).unwrap().modified().unwrap();
+        let mut writable = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&file.0)
+            .unwrap();
+        writable.write_all(b"X").unwrap();
+        writable
+            .set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        assert!(reader.validate_source().is_ok());
+        assert!(reader
+            .read_range(1, 2)
+            .unwrap_err()
+            .to_string()
+            .contains("block changed"));
+    }
+
     #[test]
     fn cancelled_authentication_never_publishes_a_session() {
         let file = Fixture::new();

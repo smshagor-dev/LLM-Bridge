@@ -178,6 +178,11 @@ jobs:
           if LLMBRIDGE_CPU_PROFILE=invalid-profile cargo check --release -p llmbridge-core --features native --locked --target-dir target/baseline > benchmarks/results/invalid-cpu-profile.log 2>&1; then exit 1; fi
           grep -F "LLMBRIDGE_CPU_PROFILE must be avx2 or baseline" benchmarks/results/invalid-cpu-profile.log
 
+      - name: Verify bounded multi-row reads against odd and small chunk geometry
+        run: |
+          cargo run --release -p llmbridge-core --features native --example row_batch_contract -- models/stories15M-q8_0.gguf
+          cargo run --release -p llmbridge-core --features native --example row_batch_contract -- models/stories15M-derived-q4_0.gguf b5cd77bb0d1a785a82d7a8a2bcb4170dfe6e43e881b9cbb0d1c8184a6dd99839
+
       - name: Validate allocation-free cache release and retained authentication
         run: cargo run --release -p llmbridge-core --features native --example cache_release_contract -- models/stories15M-q8_0.gguf
 

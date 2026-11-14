@@ -124,7 +124,7 @@ impl CachedLocalReader {
     ) -> io::Result<&[u8]> {
         // Authenticated sessions must not serve stale payload from this LRU.
         // The source re-verifies its SHA-256 block manifest on every range call.
-        if self.slots.is_empty() || self.source.authentication_metrics().is_some() {
+        if self.slots.is_empty() || self.source.is_authenticated() {
             increment(&mut self.metrics.source_read_calls)?;
             return self
                 .source
@@ -457,10 +457,16 @@ mod tests {
             .authenticate_model(&expected, 8, 128 * 1024, || false)
             .unwrap();
         let mut cached = CachedLocalReader::new(source, 256).unwrap();
-        assert_eq!(cached.read_range_cancellable(0, 2, || false).unwrap(), b"ab");
+        assert_eq!(
+            cached.read_range_cancellable(0, 2, || false).unwrap(),
+            b"ab"
+        );
         let before = cached.source_bytes_read();
         // A second read must rehash the authenticated block rather than use LRU.
-        assert_eq!(cached.read_range_cancellable(0, 2, || false).unwrap(), b"ab");
+        assert_eq!(
+            cached.read_range_cancellable(0, 2, || false).unwrap(),
+            b"ab"
+        );
         assert!(cached.source_bytes_read() > before);
         let mut writer = std::fs::OpenOptions::new()
             .write(true)
@@ -468,10 +474,15 @@ mod tests {
             .unwrap();
         writer.seek(SeekFrom::Start(0)).unwrap();
         writer.write_all(b"X").unwrap();
-        writer.set_times(std::fs::FileTimes::new().set_modified(modified)).unwrap();
+        writer
+            .set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
         assert!(cached.source.validate_source().is_ok());
         assert_eq!(
-            cached.read_range_cancellable(0, 2, || false).unwrap_err().kind(),
+            cached
+                .read_range_cancellable(0, 2, || false)
+                .unwrap_err()
+                .kind(),
             io::ErrorKind::InvalidData
         );
     }

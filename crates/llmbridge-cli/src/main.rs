@@ -620,8 +620,8 @@ fn chat(args: &[String]) -> Result<(), String> {
                     eprintln!("LLMBRIDGE_INTEGRITY verified=1 accounted_bytes={} blocks_verified={} sha256={}", authentication.accounted_bytes, authentication.blocks_verified, authentication.expected_sha256);
                 } else { eprintln!("LLMBRIDGE_INTEGRITY verified=0"); }
                 eprintln!(
-                    "LLMBRIDGE_STREAMED source_bytes_read={} reader_buffer_bytes={} source_read_calls={} cache_allocated_bytes={} cache_block_hits={} cache_block_misses={} cache_evictions={} cache_peak_allocated_bytes={} cache_released_bytes={} cache_release_events={}",
-                    metrics.source_bytes_read, metrics.reader_buffer_bytes, metrics.cache.source_read_calls, metrics.cache.allocated_bytes, metrics.cache.block_hits, metrics.cache.block_misses, metrics.cache.evictions, metrics.cache.peak_allocated_bytes, metrics.cache.released_bytes, metrics.cache.release_events
+                    "LLMBRIDGE_STREAMED range_read_calls={} range_bytes_requested={} weight_read_calls={} weight_bytes_requested={} max_range_read_bytes={} source_bytes_read={} reader_buffer_bytes={} source_read_calls={} cache_allocated_bytes={} cache_block_hits={} cache_block_misses={} cache_evictions={} cache_peak_allocated_bytes={} cache_released_bytes={} cache_release_events={}",
+                    metrics.range_read_calls, metrics.range_bytes_requested, metrics.weight_read_calls, metrics.weight_bytes_requested, metrics.max_range_read_bytes, metrics.source_bytes_read, metrics.reader_buffer_bytes, metrics.cache.source_read_calls, metrics.cache.allocated_bytes, metrics.cache.block_hits, metrics.cache.block_misses, metrics.cache.evictions, metrics.cache.peak_allocated_bytes, metrics.cache.released_bytes, metrics.cache.release_events
                 );
             }
         })

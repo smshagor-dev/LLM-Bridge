@@ -164,15 +164,25 @@ struct Decoder {
             activation_traits->from_float(input.data(), quantized.data(), t.columns);
             activation = quantized.data();
         }
-        for (size_t r = 0; r < t.rows; ++r) {
+        // Group whole consecutive rows in the existing bounded packed buffer.
+        // No row crosses a tensor boundary and the final batch is exact, without padding.
+        const size_t rows_per_read = chunk / t.row_bytes;
+        require(rows_per_read > 0, "streamed matrix row exceeds bounded buffer");
+        for (size_t first = 0; first < t.rows;) {
             alive();
-            require(reader(userdata, packed.data(), t.offset + r * t.row_bytes, t.row_bytes) == t.row_bytes,
-                    "streamed matrix row read failed");
-            alive();
-            float sum = 0;
-            traits->vec_dot(static_cast<int>(t.columns), &sum, 0, packed.data(), 0, activation, 0, 1);
-            require(std::isfinite(sum), "streamed matvec overflow/nonfinite weight");
-            result[r] = sum;
+            const size_t rows = std::min(rows_per_read, t.rows - first);
+            const size_t bytes = rows * t.row_bytes; // <= chunk, validated tensor geometry.
+            require(reader(userdata, packed.data(), t.offset + first * t.row_bytes, bytes) == bytes,
+                    "streamed matrix row batch read failed");
+            for (size_t local = 0; local < rows; ++local) {
+                alive(); // Cancellation remains observable before every dot product.
+                float sum = 0;
+                traits->vec_dot(static_cast<int>(t.columns), &sum, 0,
+                    packed.data() + local * t.row_bytes, 0, activation, 0, 1);
+                require(std::isfinite(sum), "streamed matvec overflow/nonfinite weight");
+                result[first + local] = sum;
+            }
+            first += rows;
         }
     }
 

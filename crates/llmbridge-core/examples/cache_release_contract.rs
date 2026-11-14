@@ -84,7 +84,18 @@ fn main() {
         reference.cache.allocated_bytes
     );
     assert_eq!(released.cache.release_events, 1);
-    assert!(released.cache.source_read_calls > reference.cache.source_read_calls);
+    // Authenticated sessions deliberately bypass the optional LRU: releasing its
+    // unused reservation must not change the freshly verified read schedule.
+    assert_eq!(released.cache.block_hits, 0);
+    assert_eq!(reference.cache.block_hits, 0);
+    assert_eq!(
+        released.cache.source_read_calls,
+        reference.cache.source_read_calls
+    );
+    assert_eq!(released.cache.source_read_calls, released.weight_read_calls);
+    assert!(
+        released.authentication.as_ref().unwrap().blocks_verified >= released.weight_read_calls
+    );
 
     let cancelled_control = CacheControl::default();
     let mut pieces = 0;

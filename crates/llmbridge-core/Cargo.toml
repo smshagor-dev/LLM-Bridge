@@ -43,3 +43,7 @@ required-features = ["native"]
 [[example]]
 name = "cache_release_contract"
 required-features = ["native"]
+
+[[example]]
+name = "row_batch_contract"
+required-features = ["native"]

@@ -85,6 +85,12 @@ Local checks: Python regression suite; workspace non-native tests; release nativ
 - Invalid observable measurements fail closed instead of becoming unlimited. Unlimited leaf usage is valid in additional-allocation admission; process metrics retain leaf semantics. Shared hardware profiling feeds context/cache planning and cache-pressure release.
 - Regression fixtures and production filesystem reads cover parent pressure, mount/path/error cases and exact planner/allocation boundaries. Hidden ancestors, v1, atomic snapshots and privileged enforcement/physical low-RAM validation remain outside this checkpoint. See `docs/CGROUP_MEMORY_ADMISSION.md`.
 
+## Fresh authenticated ranges and bounded row batching checkpoint
+
+- Rehash each requested authenticated block on every public range call and bypass the optional LRU; repeated-block/same-identity rewrites must be rejected. Constant-time session detection avoids cloning digest strings per read.
+- Group contiguous matrix rows within the existing packed buffer, preserving per-row dot order/cancellation and exact tensor boundaries. No extra weight buffer or asynchronous worker. Range metrics distinguish total/weight callback counts and bytes from source I/O. Authenticated metadata callbacks use bounded reads from the already sealed prefix, preventing repeated whole-block hashing for tiny GGUF fields.
+- Real-model chunk geometry, independent reference and cancellation/integrity contracts validate this change separately. Historical authenticated-cache speed/read-count evidence is not current-policy evidence. Configured authenticated cache reservations remain accounted until release/teardown. See `docs/BOUNDED_ROW_BATCHING.md`.
+
 ## M3–M11
 
 M3 now has native-derived CLI/context admission, not a complete adaptive scheduler. M4 remote providers, M5 MoE, M6 GPU, M7 API/SDK, M8 desktop, M9 full robustness/benchmarks, M10 format/plugin extensibility and M11 large-model feasibility remain incomplete. No 70B/550B or real 2GB-machine result is claimed.
