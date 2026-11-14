@@ -1,0 +1,100 @@
+{
+  "pass": true,
+  "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+  "binary_sha256": "0bcafe4fada759de4bbeb0c15b1207e89a46ab064326d858494a0d55d0cac6b3",
+  "source_revision": "342c6e9b3267bc1c9aece4572ed4e57680ca6779",
+  "address_space_limit_bytes": 25165824,
+  "cache_budget_bytes": 1048576,
+  "trials": [
+    {
+      "prompt": "The sky is",
+      "pass": true,
+      "logits_identical": true,
+      "uncached_source_read_calls": 581046,
+      "cached_source_read_calls": 2293,
+      "read_call_reduction_percent": 99.60536687284656,
+      "uncached_source_bytes": 149025157,
+      "cached_source_bytes": 150253984,
+      "cached_peak_rss_bytes": 15097856,
+      "cache_allocated_bytes": 983376,
+      "uncached_reference_logits_match": true,
+      "cached_reference_logits_match": true,
+      "logits_compared": 256000,
+      "cached_reference_max_abs_error": 0.0,
+      "raw_logits_sha256": "3e463b32868f5795be5211ffdf0703f6c02b64cfc5b56734329f31b377f564e8",
+      "cache_hits": 581003,
+      "cache_misses": 2293
+    },
+    {
+      "prompt": "Once upon a time",
+      "pass": true,
+      "logits_identical": true,
+      "uncached_source_read_calls": 598915,
+      "cached_source_read_calls": 2392,
+      "read_call_reduction_percent": 99.6006111050817,
+      "uncached_source_bytes": 155384503,
+      "cached_source_bytes": 156740224,
+      "cached_peak_rss_bytes": 14905344,
+      "cache_allocated_bytes": 983376,
+      "uncached_reference_logits_match": true,
+      "cached_reference_logits_match": true,
+      "logits_compared": 256000,
+      "cached_reference_max_abs_error": 0.0,
+      "raw_logits_sha256": "2e4b654b8395dd0b65ee43ca9ab483c268348ec8be5394d53afb47f7e396625a",
+      "cache_hits": 598869,
+      "cache_misses": 2392
+    },
+    {
+      "prompt": "A little dog",
+      "pass": true,
+      "logits_identical": true,
+      "uncached_source_read_calls": 581046,
+      "cached_source_read_calls": 2293,
+      "read_call_reduction_percent": 99.60536687284656,
+      "uncached_source_bytes": 149025157,
+      "cached_source_bytes": 150253984,
+      "cached_peak_rss_bytes": 14700544,
+      "cache_allocated_bytes": 983376,
+      "uncached_reference_logits_match": true,
+      "cached_reference_logits_match": true,
+      "logits_compared": 256000,
+      "cached_reference_max_abs_error": 0.0,
+      "raw_logits_sha256": "61e35b14962d31a65cbdf8473ea0faa0f1b620de1d246b6b834b09a9fd091c9d",
+      "cache_hits": 581003,
+      "cache_misses": 2293
+    }
+  ],
+  "note": "Source read calls/bytes are application file-range I/O, not physical device I/O. Cache includes bounded aligned read-ahead. This is not a speed or real-2GB-host claim.",
+  "source_tree_sha": "4781b6da5892a5c51456adb4581be6b06a48ac2d",
+  "host": "Linux-6.18.57-x86_64-with-glibc2.41",
+  "source_sha256": {
+    "native/src/streamed.cpp": "61fc99d5f246619397778dda5ac9aad6c9c40a53cf67ac7c5f294efdee2769bd",
+    "crates/llmbridge-core/src/streamed.rs": "80e6530c158c2b3a1b12190508a6d6ef705f44290b7fe5cfb7e2dd27f76cdf9f",
+    "crates/llmbridge-core/src/read_cache.rs": "3c9be05506c1b967c5dc1270b350f9be71ddb92e381d82947b4440a8ffef5167",
+    "crates/llmbridge-core/src/storage.rs": "76066d5c114eb812d9abdbdf970749974be636f5eb4163cb29a008a7a2ade116"
+  },
+  "reference_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+  "reference_binary_sha256": "8383941165a42225955b318d8773090e286bbe308d4af6c2f2b99314833e5147",
+  "working_tree_dirty": false,
+  "local_checks": {
+    "native_release_tests": 156,
+    "rust_1_82_non_native_tests": 136,
+    "python_tests": 6,
+    "fmt": "pass",
+    "native_clippy": "pass",
+    "non_native_clippy": "pass",
+    "real_cached_uncached_contracts": "pass"
+  },
+  "observed_larger_cache_failure": {
+    "cache_bytes": 2097152,
+    "limit_bytes": 25165824,
+    "binary_sha256": "0bcafe4fada759de4bbeb0c15b1207e89a46ab064326d858494a0d55d0cac6b3",
+    "trial_exit_codes": [
+      1,
+      1,
+      1
+    ],
+    "diagnostic": "std::bad_alloc before token/logit output",
+    "silent_fallback": false
+  }
+}

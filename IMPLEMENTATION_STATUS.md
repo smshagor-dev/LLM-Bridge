@@ -18,6 +18,12 @@ Rust/C++ CPU baseline exists. Full-generation byte comparison now strips only an
 
 Local checks: Python regression suite; workspace non-native tests; release native/all-target tests; fmt; native and non-native Clippy; real baseline output/tensor-range/Q8 numerical parity; streamed decoder output/logit parity and enforced address-space trials; real-model cancellation and refusal contracts. Detailed test counts and commands are in `docs/STREAMED_DECODER.md` and PR evidence. CI on the final branch must be confirmed separately.
 
+## Bounded cache integration checkpoint
+
+- Optional `--cache-mb` now connects a fixed-budget session-local block cache/read-ahead to the full streamed decoder. Zero remains the default. Cache hits revalidate source identity and cancellation; failed refills are invalidated.
+- Three prompts passed cached/uncached reference output and FP32-KV logits under the same 24 MiB Linux address-space cap with a 1 MiB cache budget. Source range-read calls dropped about 99.6%; source bytes rose about 0.8–0.9%. This is not a physical-disk or speed claim.
+- Cache budget includes payload/staging/slot arrays; portable worker limits, immutable authenticated sessions, asynchronous prefetch and adaptive scheduling remain pending. See `docs/STREAMED_CACHE.md`.
+
 ## M3–M11
 
 M3 has preliminary hardware/memory/context admission helpers, not a complete adaptive scheduler. M4 remote providers, M5 MoE, M6 GPU, M7 API/SDK, M8 desktop, M9 full robustness/benchmarks, M10 format/plugin extensibility and M11 large-model feasibility remain incomplete. No 70B/550B or real 2GB-machine result is claimed.

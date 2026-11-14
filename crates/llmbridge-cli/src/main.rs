@@ -16,7 +16,7 @@ fn main() {
     }
 }
 fn usage() -> &'static str {
-    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--address-space-mb 24] [--logits path.f32]"
+    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--address-space-mb 24] [--logits path.f32]"
 }
 fn json_number(value: Option<u64>) -> String {
     value.map_or_else(|| "null".to_string(), |x| x.to_string())
@@ -240,6 +240,7 @@ fn chat(args: &[String]) -> Result<(), String> {
     let mut show_metrics = false;
     let mut backend = String::from("resident");
     let mut workspace_mb = 8u64;
+    let mut cache_mb = 0usize;
     let mut address_space_mb: Option<u64> = None;
     let mut logits_path: Option<String> = None;
     let mut pos = 1usize;
@@ -260,6 +261,7 @@ fn chat(args: &[String]) -> Result<(), String> {
         match flag {
             "--prompt" => prompt = Some(value.clone()),
             "--backend" => backend = value.clone(),
+            "--cache-mb" => cache_mb = value.parse().map_err(|_| "invalid cache-mb")?,
             "--address-space-mb" => {
                 address_space_mb = Some(value.parse().map_err(|_| "invalid address-space-mb")?)
             }
@@ -287,6 +289,9 @@ fn chat(args: &[String]) -> Result<(), String> {
     if backend != "resident" && backend != "streamed" {
         return Err("backend must be resident or streamed".into());
     }
+    if cache_mb > 32 || (backend == "resident" && cache_mb != 0) {
+        return Err("cache-mb requires streamed backend and must be 0..32".into());
+    }
     if backend == "resident" && logits_path.is_some() {
         return Err("--logits requires streamed backend".into());
     }
@@ -311,7 +316,7 @@ fn chat(args: &[String]) -> Result<(), String> {
         let estimate = if backend == "streamed" {
             workspace_mb
                 .checked_mul(1024 * 1024)
-                .and_then(|n| n.checked_add(32 * 1024 * 1024))
+                .and_then(|n| n.checked_add((32 + cache_mb as u64) * 1024 * 1024))
                 .ok_or("workspace overflow")?
         } else {
             info.file_bytes.saturating_add(scratch_estimate)
@@ -337,6 +342,7 @@ fn chat(args: &[String]) -> Result<(), String> {
         let config = llmbridge_core::streamed::StreamedConfig {
             context_tokens: ctx,
             max_tokens,
+            cache_bytes: cache_mb * 1024 * 1024,
             workspace_bytes: workspace_mb
                 .checked_mul(1024 * 1024)
                 .ok_or("workspace overflow")?,
@@ -362,8 +368,8 @@ fn chat(args: &[String]) -> Result<(), String> {
         .map(|metrics| {
             if show_metrics {
                 eprintln!(
-                    "LLMBRIDGE_STREAMED source_bytes_read={} reader_buffer_bytes={}",
-                    metrics.source_bytes_read, metrics.reader_buffer_bytes
+                    "LLMBRIDGE_STREAMED source_bytes_read={} reader_buffer_bytes={} source_read_calls={} cache_allocated_bytes={} cache_block_hits={} cache_block_misses={} cache_evictions={}",
+                    metrics.source_bytes_read, metrics.reader_buffer_bytes, metrics.cache.source_read_calls, metrics.cache.allocated_bytes, metrics.cache.block_hits, metrics.cache.block_misses, metrics.cache.evictions
                 );
             }
         })

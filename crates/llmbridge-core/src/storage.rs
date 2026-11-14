@@ -111,6 +111,11 @@ impl BoundedLocalReader {
         self.disk_bytes_read
     }
 
+    /// Revalidate an open source before publishing bytes held in a session cache.
+    pub fn validate_source(&self) -> io::Result<()> {
+        self.assert_unchanged()
+    }
+
     fn assert_unchanged(&self) -> io::Result<()> {
         let current = self.file.metadata()?;
         // A descriptor can still read the old inode after its path is replaced.
