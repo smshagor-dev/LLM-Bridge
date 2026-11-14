@@ -32,3 +32,6 @@ pub mod streamed_plan;
 pub mod session_performance;
 
 pub mod native_cpu;
+
+#[cfg(target_os = "linux")]
+mod cgroup_memory;

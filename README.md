@@ -194,3 +194,5 @@ The dense Llama streamed path also accepts Q4_0 tensors through bounded row read
 ### Optional cache pressure handling
 
 `chat --backend streamed --cache-mb 1 --cache-pressure-mb 512 --metrics` can release optional cache allocations when effective available RAM drops below the floor. KV/context and authentication remain intact. The library also exposes a cooperative per-session release signal; no cache regrowth or RSS guarantee is implied. [Semantics and forced-signal validation](docs/RUNTIME_CACHE_PRESSURE.md).
+
+Linux memory admission includes headroom from every visible cgroup-v2 ancestor, including sibling usage. [Discovery, regression coverage and namespace limits](docs/CGROUP_MEMORY_ADMISSION.md).

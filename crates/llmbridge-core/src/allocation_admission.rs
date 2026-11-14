@@ -26,10 +26,12 @@ pub fn admit_additional_allocation(
         .ok_or("available memory unknown; refusing allocation")?;
     let effective = match (process.cgroup_limit_bytes, process.cgroup_current_bytes) {
         (Some(limit), Some(current)) => available.min(limit.saturating_sub(current)),
-        (Some(_), None) | (None, Some(_)) => {
+        (Some(_), None) => {
             return Err("incomplete cgroup memory measurement".into());
         }
-        (None, None) => available,
+        // A numeric leaf usage with an unlimited leaf cap is valid.
+        // Ancestor headroom is already included in the hardware profile.
+        (None, _) => available,
     };
     let headroom = effective.saturating_sub(reserve_bytes);
     if requested_bytes > headroom {
@@ -79,6 +81,17 @@ mod tests {
             ..ProcessMemory::default()
         };
         assert!(admit_additional_allocation(&hardware(Some(100)), &incomplete, 1, 0).is_err());
+    }
+
+    #[test]
+    fn unlimited_leaf_usage_is_not_an_incomplete_measurement() {
+        let process = ProcessMemory {
+            cgroup_current_bytes: Some(900),
+            ..ProcessMemory::default()
+        };
+        let plan = admit_additional_allocation(&hardware(Some(100)), &process, 90, 10).unwrap();
+        assert_eq!(plan.remaining_after_request_bytes, 0);
+        assert!(admit_additional_allocation(&hardware(Some(100)), &process, 91, 10).is_err());
     }
 
     #[test]

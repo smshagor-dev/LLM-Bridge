@@ -79,6 +79,12 @@ Local checks: Python regression suite; workspace non-native tests; release nativ
 - Existing generation entry-point signatures/default behavior remain unchanged; the advanced controlled session API explicitly carries optional trusted SHA and cache control. CLI opt-in `--cache-pressure-mb` samples effective available RAM until one release, with conservative handling of unknown samples. It does not bypass initial admission or impose a hard RSS limit.
 - Real-model output/logit parity, cancellation and same-identity late mutation are checked after release. Golden trials force the signal with an oversized floor and preserve the original Q8 24 MiB proof. This is not physical RAM-pressure/RSS-reclamation or real 2GB-host validation. See `docs/RUNTIME_CACHE_PRESSURE.md`.
 
+## Hierarchical cgroup-v2 admission checkpoint
+
+- Linux hardware availability now intersects every visible ancestor's own hard-limit/usage headroom, including sibling consumption; total RAM uses the minimum visible hard limit. Resolve actual cgroup2 mount roots/escaped paths and bound traversal/file reads.
+- Invalid observable measurements fail closed instead of becoming unlimited. Unlimited leaf usage is valid in additional-allocation admission; process metrics retain leaf semantics. Shared hardware profiling feeds context/cache planning and cache-pressure release.
+- Regression fixtures and production filesystem reads cover parent pressure, mount/path/error cases and exact planner/allocation boundaries. Hidden ancestors, v1, atomic snapshots and privileged enforcement/physical low-RAM validation remain outside this checkpoint. See `docs/CGROUP_MEMORY_ADMISSION.md`.
+
 ## M3–M11
 
 M3 now has native-derived CLI/context admission, not a complete adaptive scheduler. M4 remote providers, M5 MoE, M6 GPU, M7 API/SDK, M8 desktop, M9 full robustness/benchmarks, M10 format/plugin extensibility and M11 large-model feasibility remain incomplete. No 70B/550B or real 2GB-machine result is claimed.
