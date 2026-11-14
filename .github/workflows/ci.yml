@@ -128,8 +128,8 @@ jobs:
       - name: Compare authenticated cached Q4_0 against the same reference
         run: python3 scripts/check_streamed_parity.py --binary ./target/release/llmbridge --reference ./reference-build/bin/llama-simple --model models/stories15M-derived-q4_0.gguf --checkpoint stories15M-derived-q4_0 --reference-no-repack --verify --cache-mb 1 --output benchmarks/results/q4-cached
 
-      - name: Require cache-transparent Q4_0 logits and measured range-read reduction
-        run: python3 scripts/compare_cache_results.py --uncached benchmarks/results/q4-uncached/streamed_parity.json --cached benchmarks/results/q4-cached/streamed_parity.json --output benchmarks/results/q4-cache-comparison.json
+      - name: Require exact Q4_0 logits and fresh authenticated source reads
+        run: python3 scripts/compare_cache_results.py --uncached benchmarks/results/q4-uncached/streamed_parity.json --cached benchmarks/results/q4-cached/streamed_parity.json --output benchmarks/results/q4-cache-comparison.json --expect-authenticated-bypass
 
       - name: Reject unsupported Q4_1 and validate real Q4_0 tensor inventory
         run: python3 scripts/check_q4_contract.py --binary ./target/release/llmbridge --model models/stories15M-derived-q4_0.gguf --unsupported-model models/stories15M-derived-q4_1.gguf --output benchmarks/results/q4-contract.json
