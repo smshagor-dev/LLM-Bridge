@@ -226,9 +226,9 @@ struct Decoder {
 };
 } // namespace
 
-extern "C" int32_t llmbridge_generate_streamed_cpu(
+extern "C" int32_t llmbridge_generate_streamed_cpu_v2(
     const char *path, const char *prompt, uint32_t context, uint32_t max_tokens,
-    uint64_t file_bytes, size_t max_chunk, uint64_t workspace_budget,
+    uint64_t file_bytes, size_t max_chunk, uint64_t workspace_budget, uint64_t tokenizer_prefix,
     llmbridge_range_callback reader, llmbridge_token_callback emit,
     llmbridge_logits_callback emit_logits, llmbridge_cancel_poll poll, void *userdata,
     char *error, size_t capacity) {
@@ -244,6 +244,7 @@ extern "C" int32_t llmbridge_generate_streamed_cpu(
         std::unique_ptr<gguf_context, decltype(&gguf_free)> metadata(
             gguf_init_from_callback(reader, userdata, max_chunk, file_bytes, gp), gguf_free);
         require(static_cast<bool>(metadata), "streamed GGUF parse failed");
+        if (tokenizer_prefix) require(gguf_get_data_offset(metadata.get()) == tokenizer_prefix, "authenticated tokenizer metadata prefix mismatch");
         if (!poll(userdata)) return 2;
         auto mp = llama_model_default_params(); mp.vocab_only = true; mp.n_gpu_layers = 0;
         std::unique_ptr<llama_model, decltype(&llama_model_free)> vocabulary(llama_model_load_from_file(path, mp), llama_model_free);
@@ -274,4 +275,15 @@ extern "C" int32_t llmbridge_generate_streamed_cpu(
     } catch (const Cancelled &) { return 2;
     } catch (const std::exception &e) { if (error && capacity) std::snprintf(error, capacity, "%s", e.what()); return -1;
     } catch (...) { if (error && capacity) std::snprintf(error, capacity, "unknown streamed native exception"); return -1; }
+}
+
+// Preserve additive ABI-v1 callers; v2 optionally binds a sealed vocabulary prefix.
+extern "C" int32_t llmbridge_generate_streamed_cpu(
+    const char *path, const char *prompt, uint32_t context, uint32_t max_tokens,
+    uint64_t file_bytes, size_t max_chunk, uint64_t workspace_budget,
+    llmbridge_range_callback reader, llmbridge_token_callback emit,
+    llmbridge_logits_callback logits, llmbridge_cancel_poll poll, void *userdata,
+    char *error, size_t capacity) {
+    return llmbridge_generate_streamed_cpu_v2(path, prompt, context, max_tokens, file_bytes,
+        max_chunk, workspace_budget, 0, reader, emit, logits, poll, userdata, error, capacity);
 }

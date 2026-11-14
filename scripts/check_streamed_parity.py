@@ -21,6 +21,7 @@ def main():
     p.add_argument('--reference', type=Path, required=True)
     p.add_argument('--model', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
+    p.add_argument('--verify', action='store_true')
     p.add_argument('--cache-mb', type=int, default=0)
     p.add_argument('--max-address-space-mb', type=int, default=0, help='Linux child RLIMIT_AS; 0 disables')
     args = p.parse_args()
@@ -48,6 +49,7 @@ def main():
         streamed_logits.unlink(missing_ok=True)
         base = [str(args.binary.resolve()), 'chat', str(args.model.resolve()), '--prompt', prompt,
                 '--max-tokens', '8', '--ctx', '128', '--metrics', '--cache-mb', str(args.cache_mb)]
+        if args.verify: base += ['--sha256', digest]
         started = time.monotonic()
         actual = subprocess.run(base + ['--backend', 'streamed', '--workspace-mb', '8',
                                        '--logits', str(streamed_logits)], capture_output=True, timeout=240,
@@ -62,6 +64,9 @@ def main():
                   'streamed_stderr': actual.stderr.decode(errors='replace'),
                   'reference_stderr': expected.stderr.decode(errors='replace')}
         cache_metrics = re.search(r'^LLMBRIDGE_STREAMED (.*)$', result['streamed_stderr'], re.MULTILINE)
+        integrity = re.search(r'^LLMBRIDGE_INTEGRITY (.*)$', result['streamed_stderr'], re.MULTILINE)
+        result['integrity_metrics'] = dict(re.findall(r'(\w+)=(\w+)', integrity.group(1))) if integrity else {}
+        result['integrity_pass'] = not args.verify or (result['integrity_metrics'].get('verified') == '1' and result['integrity_metrics'].get('sha256') == digest and int(result['integrity_metrics'].get('blocks_verified', '0')) > 0)
         result['reader_metrics'] = {key: int(value) for key, value in re.findall(r'(\w+)=(\d+)', cache_metrics.group(1))} if cache_metrics else {}
         result['wall_seconds_including_load'] = wall_seconds
         memory = re.search(r'^LLMBRIDGE_MEMORY (\{.*\})$', result['streamed_stderr'], re.MULTILINE)
@@ -81,13 +86,14 @@ def main():
         result['logits_rmse'] = math.sqrt(sum(e*e for e in errors)/len(errors)) if errors else None
         result['logits_match'] = bool(a) and len(a) == len(b) and all(
             math.isfinite(x) and math.isfinite(y) and abs(x-y) <= 0.01 + 0.001*abs(y) for x,y in zip(a,b))
-        result['pass'] = result['tokens_match'] and result['logits_match'] and result['memory_cap_pass']
+        result['pass'] = result['tokens_match'] and result['logits_match'] and result['memory_cap_pass'] and result['integrity_pass']
         trials.append(result)
     report = {'pass': all(t['pass'] for t in trials), 'model_sha256': digest, 'model_file_bytes': args.model.stat().st_size,
               'binary_sha256': binary_digest, 'reference_binary_sha256': reference_digest,
               'reference_revision': 'cd959bae99ff4bed22bef2604f45241c09bbb8c8',
               'working_tree_dirty': bool(subprocess.run(['git', 'status', '--porcelain'], capture_output=True, text=True, check=True).stdout.strip()),
-              'source_sha256': {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in [Path('native/src/streamed.cpp'), Path('crates/llmbridge-core/src/streamed.rs'), Path('crates/llmbridge-core/src/read_cache.rs'), Path('crates/llmbridge-core/src/storage.rs')]},
+              'source_sha256': {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in [Path('native/src/streamed.cpp'), Path('crates/llmbridge-core/src/streamed.rs'), Path('crates/llmbridge-core/src/read_cache.rs'), Path('crates/llmbridge-core/src/storage.rs'), Path('crates/llmbridge-core/src/storage_auth.rs')]},
+              'verified_session_requested': args.verify,
               'cache_budget_bytes': args.cache_mb * 1024 * 1024,
               'address_space_limit_bytes': limit_bytes or None, 'host': platform.platform(),
               'git_sha': subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True, check=True).stdout.strip(),

@@ -145,6 +145,7 @@ name = "llmbridge-core"
 version = "0.1.0"
 dependencies = [
  "cmake",
+ "libc",
  "sha2",
 ]
 

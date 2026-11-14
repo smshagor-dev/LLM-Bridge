@@ -16,7 +16,7 @@ fn main() {
     }
 }
 fn usage() -> &'static str {
-    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--address-space-mb 24] [--logits path.f32]"
+    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--sha256 trusted-digest] [--verification-mb 8] [--address-space-mb 24] [--logits path.f32]"
 }
 fn json_number(value: Option<u64>) -> String {
     value.map_or_else(|| "null".to_string(), |x| x.to_string())
@@ -241,6 +241,8 @@ fn chat(args: &[String]) -> Result<(), String> {
     let mut backend = String::from("resident");
     let mut workspace_mb = 8u64;
     let mut cache_mb = 0usize;
+    let mut verification_mb = 8usize;
+    let mut expected_hash: Option<String> = None;
     let mut address_space_mb: Option<u64> = None;
     let mut logits_path: Option<String> = None;
     let mut pos = 1usize;
@@ -261,6 +263,10 @@ fn chat(args: &[String]) -> Result<(), String> {
         match flag {
             "--prompt" => prompt = Some(value.clone()),
             "--backend" => backend = value.clone(),
+            "--sha256" => expected_hash = Some(value.clone()),
+            "--verification-mb" => {
+                verification_mb = value.parse().map_err(|_| "invalid verification-mb")?
+            }
             "--cache-mb" => cache_mb = value.parse().map_err(|_| "invalid cache-mb")?,
             "--address-space-mb" => {
                 address_space_mb = Some(value.parse().map_err(|_| "invalid address-space-mb")?)
@@ -289,6 +295,18 @@ fn chat(args: &[String]) -> Result<(), String> {
     if backend != "resident" && backend != "streamed" {
         return Err("backend must be resident or streamed".into());
     }
+    if verification_mb == 0
+        || verification_mb > 64
+        || (backend == "resident" && expected_hash.is_some())
+    {
+        return Err("verification requires streamed backend with verification-mb in 1..64".into());
+    }
+    if expected_hash
+        .as_ref()
+        .is_some_and(|hash| hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()))
+    {
+        return Err("expected SHA-256 must be 64 hex digits".into());
+    }
     if cache_mb > 32 || (backend == "resident" && cache_mb != 0) {
         return Err("cache-mb requires streamed backend and must be 0..32".into());
     }
@@ -316,7 +334,18 @@ fn chat(args: &[String]) -> Result<(), String> {
         let estimate = if backend == "streamed" {
             workspace_mb
                 .checked_mul(1024 * 1024)
-                .and_then(|n| n.checked_add((32 + cache_mb as u64) * 1024 * 1024))
+                .and_then(|n| {
+                    n.checked_add(
+                        (32 + cache_mb as u64
+                            + if expected_hash.is_some() {
+                                verification_mb as u64
+                            } else {
+                                0
+                            })
+                            * 1024
+                            * 1024,
+                    )
+                })
                 .ok_or("workspace overflow")?
         } else {
             info.file_bytes.saturating_add(scratch_estimate)
@@ -343,30 +372,38 @@ fn chat(args: &[String]) -> Result<(), String> {
             context_tokens: ctx,
             max_tokens,
             cache_bytes: cache_mb * 1024 * 1024,
+            authentication_budget_bytes: verification_mb * 1024 * 1024,
             workspace_bytes: workspace_mb
                 .checked_mul(1024 * 1024)
                 .ok_or("workspace overflow")?,
             ..Default::default()
         };
-        llmbridge_core::streamed::generate_streamed(
-            model_path,
-            &prompt,
-            config,
-            &cancelled,
-            |bytes| handle.write_all(bytes).and_then(|_| handle.flush()).is_ok(),
-            |values| {
-                if let Some(file) = logits_file.as_mut() {
-                    for value in values {
-                        if file.write_all(&value.to_le_bytes()).is_err() {
-                            return false;
-                        }
+        let emit = |bytes: &[u8]| handle.write_all(bytes).and_then(|_| handle.flush()).is_ok();
+        let logits = |values: &[f32]| {
+            if let Some(file) = logits_file.as_mut() {
+                for value in values {
+                    if file.write_all(&value.to_le_bytes()).is_err() {
+                        return false;
                     }
                 }
-                true
-            },
-        )
+            }
+            true
+        };
+        let execution = if let Some(hash) = expected_hash.as_ref() {
+            llmbridge_core::streamed::generate_streamed_verified(
+                model_path, &prompt, config, &cancelled, hash, emit, logits,
+            )
+        } else {
+            llmbridge_core::streamed::generate_streamed(
+                model_path, &prompt, config, &cancelled, emit, logits,
+            )
+        };
+        execution
         .map(|metrics| {
             if show_metrics {
+                if let Some(authentication) = metrics.authentication.as_ref() {
+                    eprintln!("LLMBRIDGE_INTEGRITY verified=1 accounted_bytes={} blocks_verified={} sha256={}", authentication.accounted_bytes, authentication.blocks_verified, authentication.expected_sha256);
+                } else { eprintln!("LLMBRIDGE_INTEGRITY verified=0"); }
                 eprintln!(
                     "LLMBRIDGE_STREAMED source_bytes_read={} reader_buffer_bytes={} source_read_calls={} cache_allocated_bytes={} cache_block_hits={} cache_block_misses={} cache_evictions={}",
                     metrics.source_bytes_read, metrics.reader_buffer_bytes, metrics.cache.source_read_calls, metrics.cache.allocated_bytes, metrics.cache.block_hits, metrics.cache.block_misses, metrics.cache.evictions

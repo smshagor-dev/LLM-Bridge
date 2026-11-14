@@ -52,7 +52,7 @@ On 13 November 2026 the 26,671,328-byte checkpoint completed all three eight-tok
 
 ## Remaining work
 
-Integrate verified immutable model sessions, cache/prefetch and graph-wide scheduling; expand independent prompts/context and error injection; add numerical/quality and cold/warm I/O benchmarks; validate additional models/hardware; implement portable worker limits and native fuzz/sanitizer coverage. Production API, desktop, remote storage, MoE and GPU adapters remain pending. M2 is an experimental end-to-end checkpoint rather than a declaration that the whole milestone/product is finished.
+Extend Linux verified sessions and session caches to portable workers, asynchronous prefetch and graph-wide scheduling; expand independent prompts/context and error injection; add numerical/quality and cold/warm I/O benchmarks; validate additional models/hardware; implement portable worker limits and native fuzz/sanitizer coverage. Production API, desktop, remote storage, MoE and GPU adapters remain pending. M2 is an experimental end-to-end checkpoint rather than a declaration that the whole milestone/product is finished.
 
 ## Local checks on this implementation
 
