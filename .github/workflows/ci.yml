@@ -83,6 +83,9 @@ jobs:
       - name: Streamed decoder cancellation and refusal contracts
         run: cargo run --release -p llmbridge-core --features native --example streamed_contract -- models/stories15M-q8_0.gguf
 
+      - name: Validate planned CPU concurrency with overlapping real streamed sessions
+        run: cargo run --release -p llmbridge-core --features native --example streamed_executor_contract -- models/stories15M-q8_0.gguf
+
       - name: Validate real streamed inference under FIFO reservations
         run: cargo run --release -p llmbridge-core --features native --example queued_streamed_contract -- models/stories15M-q8_0.gguf
 
