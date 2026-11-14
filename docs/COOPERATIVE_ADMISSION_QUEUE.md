@@ -19,3 +19,5 @@ invalid requests and competing admission polls. No physical hardware
 performance or 2 GB viability is asserted.
 
 Tickets include queue identity; passing a ticket to another queue cannot cancel or admit its request. Use `request()` for an owned pending handle that cleans up on drop. Low-level `enqueue()` retains explicit cancellation semantics.
+
+Admission can be explicitly paused/resumed while FIFO, cancellation and active reservations retain their semantics. See [paused admission](PAUSED_ADMISSION.md) for linearization, controller ownership and real-model validation.

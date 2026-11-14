@@ -69,6 +69,9 @@ jobs:
 
       - name: Verify real-model cancellation and oversized-prompt refusal
         run: cargo run --release -p llmbridge-core --features native --example model_contract -- models/stories15M-q8_0.gguf
+      - name: Validate pause and resume around real queued inference
+        run: cargo run --release -p llmbridge-core --features native --example paused_admission_contract -- models/stories15M-q8_0.gguf
+
       - name: Record three real end-to-end CPU baseline trials with RSS metrics
         run: python3 benchmarks/run_cpu_baseline.py --binary ./target/release/llmbridge --model models/stories15M-q8_0.gguf --output benchmarks/results/cpu_baseline.json --repetitions 3
       - name: Compare complete streamed decoder output and logits
