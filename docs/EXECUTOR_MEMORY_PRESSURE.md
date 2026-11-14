@@ -17,3 +17,5 @@ Unit regressions cover exact thresholds, initial hysteresis state, unknown measu
 The same contract exercises the production OS/cgroup sampler with an intentionally unattainable recovery threshold. A missing-model request stays pending without model opening, cancels cleanly, and leaves zero pending/reserved charge. This proves the sampling/admission/cancellation path, not actual physical memory-pressure responsiveness. Run `cargo run --release -p llmbridge-core --features native --example executor_pressure_contract -- models/stories15M-q8_0.gguf`.
 
 No physical low-RAM load, RSS reclamation, throughput, race detector, hidden-cgroup visibility, 2 GB hardware or large-model viability is established. Model authentication, CPU compatibility, numerical paths, process limits and manual budget controls retain their existing semantics. CLI/server integration remains separate.
+
+Opt-in [admission waiting timeouts](ADMISSION_WAIT_TIMEOUT.md) clean up expired requests while preserving active reservations and policy controls.

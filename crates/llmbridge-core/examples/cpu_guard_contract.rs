@@ -95,6 +95,18 @@ fn main() {
     ));
     assert_eq!(queue.pending(), 0);
     assert_eq!(budget.reserved(), 0);
+    rejected(
+        llmbridge_core::queued_streamed::generate_streamed_queued_with_timeout(
+            &queue,
+            llmbridge_core::queued_streamed::QueuedStreamedRequest::new(model, "fixture"),
+            &cancelled,
+            std::time::Duration::from_secs(1),
+            |_| panic!("output"),
+            |_| panic!("logits"),
+        ),
+    );
+    assert_eq!(queue.pending(), 0);
+    assert_eq!(budget.reserved(), 0);
     let hardware = llmbridge_core::hardware::Hardware {
         logical_cpus: 1,
         total_ram_bytes: Some(1024),
@@ -113,6 +125,15 @@ fn main() {
     rejected(executor.generate(
         llmbridge_core::queued_streamed::QueuedStreamedRequest::new(model, "fixture"),
         &cancelled,
+        |_| panic!("output"),
+        |_| panic!("logits"),
+    ));
+    assert_eq!(executor.pending_sessions(), 0);
+    assert_eq!(executor.reserved_bytes(), 0);
+    rejected(executor.generate_with_timeout(
+        llmbridge_core::queued_streamed::QueuedStreamedRequest::new(model, "fixture"),
+        &cancelled,
+        std::time::Duration::from_secs(1),
         |_| panic!("output"),
         |_| panic!("logits"),
     ));
@@ -158,5 +179,5 @@ fn main() {
     drop(file);
     std::fs::remove_file(path).unwrap();
     println!("LLMBRIDGE_CPU_GUARD {}", cpu.to_json());
-    println!("fourteen Rust native execution/probe paths rejected before FFI: PASS");
+    println!("sixteen Rust native execution/probe paths rejected before FFI: PASS");
 }
