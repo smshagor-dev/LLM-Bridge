@@ -23,6 +23,9 @@ pub mod tensor_cache;
 pub mod tensor_layout;
 
 #[cfg(feature = "native")]
+pub mod queued_streamed;
+
+#[cfg(feature = "native")]
 pub mod streamed;
 
 pub mod read_cache;
@@ -36,6 +39,3 @@ pub mod native_cpu;
 
 #[cfg(target_os = "linux")]
 mod cgroup_memory;
-
-#[cfg(feature = "native")]
-pub mod queued_streamed;

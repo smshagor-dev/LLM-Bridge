@@ -85,12 +85,12 @@ Local checks: Python regression suite; workspace non-native tests; release nativ
 - Invalid observable measurements fail closed instead of becoming unlimited. Unlimited leaf usage is valid in additional-allocation admission; process metrics retain leaf semantics. Shared hardware profiling feeds context/cache planning and cache-pressure release.
 - Regression fixtures and production filesystem reads cover parent pressure, mount/path/error cases and exact planner/allocation boundaries. Hidden ancestors, v1, atomic snapshots and privileged enforcement/physical low-RAM validation remain outside this checkpoint. See `docs/CGROUP_MEMORY_ADMISSION.md`.
 
+## M3–M11
+
+M3 now has native-derived CLI/context admission, not a complete adaptive scheduler. M4 remote providers, M5 MoE, M6 GPU, M7 API/SDK, M8 desktop, M9 full robustness/benchmarks, M10 format/plugin extensibility and M11 large-model feasibility remain incomplete. No 70B/550B or real 2GB-machine result is claimed.
+
 ## Queued native streamed execution checkpoint
 
 - FIFO admission now wraps actual controlled streamed generation, carrying trusted-hash/cache control and holding an atomic reservation through native execution and consumer callbacks. Waiting performs no model I/O; pending-ticket and running-reservation cleanup use RAII.
 - Charge arithmetic includes workspace/source/cache/authentication ceilings plus an explicit caller metadata/runtime allowance. This is cooperative accounted admission, not whole-process RSS enforcement or an automatic CLI scheduler.
 - Queue-scoped ticket identities prevent cross-queue cancellation/admission collisions. Regression and real-model protocols cover cleanup, cancellation, capacity and complete-output/all-logit equality. See `docs/QUEUED_STREAMED_INFERENCE.md`.
-
-## M3–M11
-
-M3 now has native-derived CLI/context admission, not a complete adaptive scheduler. M4 remote providers, M5 MoE, M6 GPU, M7 API/SDK, M8 desktop, M9 full robustness/benchmarks, M10 format/plugin extensibility and M11 large-model feasibility remain incomplete. No 70B/550B or real 2GB-machine result is claimed.
