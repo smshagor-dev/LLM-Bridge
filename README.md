@@ -172,3 +172,7 @@ For architecture questions, prefer concrete proposals specifying tensor flow, bu
 - **Upstream:** The baseline C++ backend is pinned to [llama.cpp v0.9.0](https://github.com/ggml-org/llama.cpp/releases/tag/v0.9.0), commit `cd959bae99ff4bed22bef2604f45241c09bbb8c8`, behind a versioned Rust/C ABI.
 
 **Status of this README:** Describes the repository's direction and confirmed checkpoints, not a claim that all roadmap capabilities are available on `main`.
+
+### Streamed session timing
+
+`chat --backend streamed --metrics` reports first-logits/piece readiness, actual sampling/decode intervals and range/consumer callback wall time. Collection is opt-in in the library and uses constant space. Run `python3 scripts/benchmark_streamed.py --binary target/release/llmbridge --model model.gguf --output /tmp/session-performance.json` for repeated real sessions, byte-complete output comparison against uninstrumented execution and optional measured-workload targets. These are page-cache-affected observations, with no physical-storage or larger-model claim. See [measurement semantics](docs/STREAMED_PERFORMANCE.md).

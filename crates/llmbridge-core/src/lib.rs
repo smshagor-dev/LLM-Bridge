@@ -27,3 +27,6 @@ pub mod streamed;
 pub mod read_cache;
 
 pub mod streamed_plan;
+
+#[cfg(feature = "native")]
+pub mod session_performance;

@@ -1,4 +1,4 @@
-# LLM Bridge implementation status — 2026-11-13
+# LLM Bridge implementation status — 2026-11-14
 
 ## M0 / M1
 
@@ -37,6 +37,13 @@ Local checks: Python regression suite; workspace non-native tests; release nativ
 - `chat --auto-context` explicitly selects and reports a reduced feasible context; no prompt truncation. Optional incremental admission budgets share cache/verification/runtime/OS reserves. Native execution still rechecks its own workspace requirement.
 - Planning budgets are estimates of additional allocations, not total RSS. Linux address-space enforcement remains separate; auto-planning under a cap intersects current remaining virtual headroom. Verified auto-planning authenticates before native metadata inspection.
 - Exact native budget boundary and real-model CLI protocols are included. Full hardware/model scheduling, real 2GB-host validation, SIMD/thread adaptation and I/O/compute feasibility remain incomplete. See `docs/STREAMED_MEMORY_PLANNING.md`.
+
+## M3 — measured session performance checkpoint
+
+- Opt-in constant-space session clocks now measure first logits/piece readiness, sampling/emit counts, inter-logits decode rate, range callback and consumer callback wall time. No clock-per-read collection when disabled; no per-token timeline allocation.
+- `chat --metrics` exposes successful streamed-session JSON; failures/cancellation do not claim successful timing. EOS/empty-piece and N−1 interval semantics are explicit.
+- A real child-process benchmark compares complete instrumented/uninstrumented output hashes, validates counters and optionally gates every trial against requested decode/readiness targets. Reports retain all failures and no raw prompt/response text. CI measures uncached and authenticated cached runs under the existing 24 MiB Linux address-space cap.
+- Filesystem page caches are uncontrolled. These measurements are not physical storage bandwidth, isolated CPU compute, a cold-start test or a universal speed guarantee. Full adaptive scheduling remains incomplete. See `docs/STREAMED_PERFORMANCE.md`.
 
 ## M3–M11
 
