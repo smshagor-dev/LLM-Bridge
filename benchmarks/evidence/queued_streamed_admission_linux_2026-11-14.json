@@ -1,0 +1,153 @@
+{
+  "source_commit": "a90bb6cc61cbc78357dd9071cbd0bae14b7bc234",
+  "source_tree": "b27ec8eb956481dbb8944797003c62e62f099351",
+  "scope": "Real tiny-model FIFO reservation integration and cleanup, not a physical2GB/RSS/large-model/throughput proof. Queue accounting includes configured ceilings plus an explicit estimated allowance. This PR uses current main engine; independent authenticated-read correction #83 is not included.",
+  "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+  "binary_sha256": "7743c140842968791ee707b1896eeb6e9c46ebefd8839b3daa0aa2e8e594cddc",
+  "contract_binary_sha256": "84ee992e8de5570048d8d6e06d5d878379010fbfe5ac1630e71ad17abf4c84ac",
+  "model_contract": {
+    "pass": true,
+    "log_sha256": "4f76d567e5c0d670f706598f5f5680f10eb00ed2480d8b1b2640a5a88badf163",
+    "result_lines": [
+      "queued native inference: exact bytes/logits, held reservation, waiting cancellation, failure cleanup and insufficient capacity: PASS",
+      "reservation_bytes=50397184 queue_wait_ns=1472"
+    ]
+  },
+  "local_validation": {
+    "native-final": {
+      "pass": true,
+      "passed_tests": 205,
+      "log_sha256": "415d8e52e748b439c89f9d37daf3f798c0b8faf560940ac507635ce01f5501fd"
+    },
+    "msrv": {
+      "pass": true,
+      "passed_tests": 175,
+      "log_sha256": "1686756684b5cd30e02a2c18eff521223d0d78a775648495dbf9401f95499cc1"
+    },
+    "python": {
+      "pass": true,
+      "passed_tests": 17,
+      "log_sha256": "401c9527bd98f4fb0ba9b7f054a54f8c016845241830b56fb9c16d86b2efa6f6"
+    },
+    "clippy-final": {
+      "pass": true,
+      "passed_tests": 0,
+      "log_sha256": "b62aba5ddbd78394789e2e5b50394bfabd0c9766e258e0ed77691fb560d3b401"
+    },
+    "nonnative-clippy": {
+      "pass": true,
+      "passed_tests": 0,
+      "log_sha256": "ffb6035f54212cc755dfa4ece1718a6def62a8cb0a7ea99a5224fe2d9ae79756"
+    }
+  },
+  "native_cpu_admission": {
+    "pass": true,
+    "source": {
+      "commit": "479ccc9fd9260e82249a91b056c06c9711c02c9b",
+      "tree": "3bb72874abcd1c9135a80e9c8d2ecedd7123342f",
+      "working_tree_dirty": false
+    },
+    "guest_cpu": "core2duo",
+    "cases": {
+      "doctor": {
+        "exit_code": 0,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "dd7284357dbdbd4e9390612d9235e781e29fc68874d7e30b6989add6ed667954",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "runtime_profile_cannot_override_build": {
+        "exit_code": 0,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "f08a50b4eeae1133178f00575cf84d0d436907223eeb38cd84a1787854769d8e",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "avx_without_os_state": {
+        "exit_code": 0,
+        "guest_cpu": "Haswell,-xsave",
+        "stdout_sha256": "f349a4c53397649b5d729980b470448f43dbb7f28946194262c9d4dc3d59fb62",
+        "stderr_sha256": "1b975121e9fa414c908dd7e1053b54750eddd55b37ab9586fc738c16db2b4543"
+      },
+      "resident": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "streamed": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "verified_streamed": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "plan": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "library_entry_paths": {
+        "exit_code": 0,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "589f5fde02c5e2d408fd8acaf270a19f1fae1d5ba33a9304d8c97fe93b04c9ed",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "note": "QEMU user-mode negative admission test; no inference speed, old physical CPU or 2GB-hardware claim.",
+    "binary_sha256": "1bae14426466090630ba02f761562df721d1852c065a348e665027310403ff83",
+    "contract_sha256": "39ddb47c8cafdbc7a3ec9a99259c703e239248fe105a2c7ab008388015ffb415",
+    "emulator_sha256": "36d35ffe5363bd49bfa9c2b6a048e9fb2e798fea38285a5a45f52d34f9869089",
+    "emulator_version": "qemu-x86_64 version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)",
+    "emulated_cpu": {
+      "native_profile": "x86-avx2",
+      "architecture": "x86_64",
+      "native_compatible": false,
+      "capabilities": {
+        "sse2": true,
+        "sse42": false,
+        "avx": false,
+        "avx2": false,
+        "fma": false,
+        "f16c": false,
+        "bmi2": false
+      },
+      "missing_cpu_os_capabilities": [
+        "sse4.2",
+        "avx",
+        "avx2",
+        "fma",
+        "f16c",
+        "bmi2"
+      ],
+      "scalar_fallback_validated": false
+    },
+    "avx_without_os_state_cpu": {
+      "native_profile": "x86-avx2",
+      "architecture": "x86_64",
+      "native_compatible": false,
+      "capabilities": {
+        "sse2": true,
+        "sse42": true,
+        "avx": false,
+        "avx2": false,
+        "fma": false,
+        "f16c": true,
+        "bmi2": false
+      },
+      "missing_cpu_os_capabilities": [
+        "avx",
+        "avx2",
+        "fma",
+        "bmi2"
+      ],
+      "scalar_fallback_validated": false
+    },
+    "library_paths_checked": 13
+  },
+  "sibling_merge_checks": "Read-only git merge-tree of source head with current #83 and #80 branches returned clean trees; no branches merged or retargeted intermediate bases. PR target is main after #78 merge."
+}
