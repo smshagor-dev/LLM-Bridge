@@ -25,3 +25,5 @@ pub mod tensor_layout;
 pub mod streamed;
 
 pub mod read_cache;
+
+pub mod streamed_plan;

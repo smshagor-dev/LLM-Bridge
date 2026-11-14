@@ -8,6 +8,8 @@ pub struct Hardware {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProcessMemory {
+    /// Current virtual address size (Linux VmSize), distinct from RSS.
+    pub virtual_bytes: Option<u64>,
     /// Sampled current VmRSS; taken after the inference call.
     pub rss_bytes: Option<u64>,
     /// Linux VmHWM high-water RSS from process lifetime.
@@ -67,6 +69,7 @@ pub fn process_memory() -> ProcessMemory {
         let rollup = std::fs::read_to_string("/proc/self/smaps_rollup").unwrap_or_default();
         let (cg_limit, cg_current) = read_cgroup_v2();
         ProcessMemory {
+            virtual_bytes: parse_meminfo(&status, "VmSize:"),
             rss_bytes: parse_meminfo(&status, "VmRSS:"),
             peak_rss_bytes: parse_meminfo(&status, "VmHWM:"),
             pss_bytes: parse_meminfo(&rollup, "Pss:"),

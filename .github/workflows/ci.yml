@@ -36,7 +36,7 @@ jobs:
         run: |
           git clone --depth 1 --branch v0.9.0 https://github.com/ggml-org/llama.cpp.git reference
           python3 scripts/prepare_reference_logits.py reference/examples/simple/simple.cpp
-          cmake -S reference -B reference-build -DGGML_OPENMP=OFF -DGGML_NATIVE=OFF -DLLAMA_BUILD_EXAMPLES=ON -DLLAMA_BUILD_SERVER=OFF -DLLAMA_BUILD_TESTS=OFF
+          cmake -S reference -B reference-build -DGGML_OPENMP=OFF -DGGML_NATIVE=OFF -DGGML_SSE42=ON -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_BMI2=ON -DLLAMA_BUILD_EXAMPLES=ON -DLLAMA_BUILD_SERVER=OFF -DLLAMA_BUILD_TESTS=OFF
           cmake --build reference-build --target llama-simple --parallel 2
       - name: Run real greedy generation and compare native token bytes
         run: |
@@ -90,6 +90,12 @@ jobs:
 
       - name: Reject same-identity mutation after model verification
         run: cargo run --release -p llmbridge-core --features native --example verified_contract -- models/stories15M-q8_0.gguf
+
+      - name: Validate native plan and decoder at exact workspace boundary
+        run: cargo run --release -p llmbridge-core --features native --example streamed_plan_contract -- models/stories15M-q8_0.gguf
+
+      - name: Validate planning CLI and explicit adaptive-context generation
+        run: python3 scripts/check_streamed_plan.py --binary ./target/release/llmbridge --model models/stories15M-q8_0.gguf --output benchmarks/results/streamed_plan.json
 
       - name: Save raw parity evidence
         if: always()
