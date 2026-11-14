@@ -111,3 +111,7 @@ M3 now has native-derived CLI/context admission, not a complete adaptive schedul
 ## Shared executor admission controls checkpoint
 
 - The executor now exposes explicit pause/resume, live capacity resizing and a consistent budget snapshot. Increases cannot exceed its construction-time CPU/RAM plan. Shrinking retains active slots and pending cancellation, while zero capacity refuses new enqueue work; growth and resume are independent. No automatic pressure sampling, worker-plan expansion, forced reclamation or RSS guarantee is implied. See `docs/STREAMED_EXECUTOR.md`.
+
+## Sampled executor memory-pressure checkpoint
+
+- An opt-in OS/cgroup-aware admission gate samples before and during queued generation polls, fails closed on unknown headroom and uses separate low/high thresholds for recovery hysteresis. Pressure recovery cannot clear manual pause; active reservations remain valid. Sampling is shared/throttled, with no background monitor or worker replanning. This is cooperative sampled admission, not a physical memory/RSS guarantee. See `docs/EXECUTOR_MEMORY_PRESSURE.md`.

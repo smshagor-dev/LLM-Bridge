@@ -13,6 +13,7 @@ pub mod f32_swiglu;
 pub mod io_schedule;
 pub mod memory_budget;
 pub mod memory_plan;
+pub mod memory_pressure;
 #[cfg(feature = "native")]
 pub mod q8_batch;
 #[cfg(feature = "native")]
