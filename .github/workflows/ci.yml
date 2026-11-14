@@ -101,6 +101,9 @@ jobs:
       - name: Validate planning CLI and explicit adaptive-context generation
         run: python3 scripts/check_streamed_plan.py --binary ./target/release/llmbridge --model models/stories15M-q8_0.gguf --output benchmarks/results/streamed_plan.json
 
+      - name: Validate live budget shrink and growth around real queued inference
+        run: cargo run --release -p llmbridge-core --features native --example resized_budget_contract -- models/stories15M-q8_0.gguf
+
       - name: Measure streamed session timing and compare uninstrumented output
         run: python3 scripts/benchmark_streamed.py --binary ./target/release/llmbridge --model models/stories15M-q8_0.gguf --output benchmarks/results/streamed_performance.json --repetitions 3 --address-space-mb 24
 

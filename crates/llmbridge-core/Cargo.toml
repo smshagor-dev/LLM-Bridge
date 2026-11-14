@@ -51,3 +51,7 @@ required-features = ["native"]
 [[example]]
 name = "row_batch_contract"
 required-features = ["native"]
+
+[[example]]
+name = "resized_budget_contract"
+required-features = ["native"]

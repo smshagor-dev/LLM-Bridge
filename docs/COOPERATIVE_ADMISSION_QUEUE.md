@@ -19,3 +19,5 @@ invalid requests and competing admission polls. No physical hardware
 performance or 2 GB viability is asserted.
 
 Tickets include queue identity; passing a ticket to another queue cannot cancel or admit its request. Use `request()` for an owned pending handle that cleans up on drop. Low-level `enqueue()` retains explicit cancellation semantics.
+
+The shared budget can now [resize live capacity](DYNAMIC_MEMORY_BUDGET.md). Shrinking retains running charges and FIFO tickets, while new over-capacity enqueue requests are rejected.
