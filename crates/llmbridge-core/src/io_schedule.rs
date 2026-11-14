@@ -42,7 +42,8 @@ pub fn plan_io_window(request: IoWindowRequest) -> io::Result<IoWindowPlan> {
     if request.remaining_bytes % request.block_bytes as u64 != 0 {
         return Err(invalid("tensor range is not block aligned"));
     }
-    let maximum = request.source_chunk_bytes
+    let maximum = request
+        .source_chunk_bytes
         .min(request.staging_budget_bytes)
         .min(usize::try_from(request.remaining_bytes).unwrap_or(usize::MAX));
     let chunk = maximum - maximum % request.block_bytes;
@@ -51,14 +52,17 @@ pub fn plan_io_window(request: IoWindowRequest) -> io::Result<IoWindowPlan> {
     }
     let possible = request.staging_budget_bytes / chunk;
     let by_range = request.remaining_bytes / chunk as u64;
-    let slots = possible.min(request.max_in_flight)
+    let slots = possible
+        .min(request.max_in_flight)
         .min(usize::try_from(by_range).unwrap_or(usize::MAX));
     if slots == 0 {
         return Err(invalid("no complete I/O window fits"));
     }
-    let charge = chunk.checked_mul(slots)
+    let charge = chunk
+        .checked_mul(slots)
         .ok_or_else(|| invalid("staging charge overflow"))?;
-    let covered = (chunk as u64).checked_mul(slots as u64)
+    let covered = (chunk as u64)
+        .checked_mul(slots as u64)
         .ok_or_else(|| invalid("window range overflow"))?;
     if charge > request.staging_budget_bytes || covered > request.remaining_bytes {
         return Err(invalid("I/O window exceeds admitted bounds"));
@@ -88,34 +92,63 @@ mod tests {
     #[test]
     fn charges_every_concurrent_staging_buffer() {
         let p = plan_io_window(request()).unwrap();
-        assert_eq!((p.chunk_bytes, p.in_flight, p.staging_charge_bytes, p.covered_bytes),
-                   (256, 2, 512, 512));
+        assert_eq!(
+            (
+                p.chunk_bytes,
+                p.in_flight,
+                p.staging_charge_bytes,
+                p.covered_bytes
+            ),
+            (256, 2, 512, 512)
+        );
     }
 
     #[test]
     fn pressure_reduces_window_without_overcommitting() {
         let p = plan_io_window(IoWindowRequest {
-            staging_budget_bytes: 80, ..request()
-        }).unwrap();
-        assert_eq!((p.chunk_bytes, p.in_flight, p.staging_charge_bytes), (64, 1, 64));
+            staging_budget_bytes: 80,
+            ..request()
+        })
+        .unwrap();
+        assert_eq!(
+            (p.chunk_bytes, p.in_flight, p.staging_charge_bytes),
+            (64, 1, 64)
+        );
     }
 
     #[test]
     fn tiny_tail_is_not_rounded_beyond_tensor_end() {
         let p = plan_io_window(IoWindowRequest {
-            remaining_bytes: 32, ..request()
-        }).unwrap();
+            remaining_bytes: 32,
+            ..request()
+        })
+        .unwrap();
         assert_eq!((p.chunk_bytes, p.in_flight, p.covered_bytes), (32, 1, 32));
     }
 
     #[test]
     fn rejects_misaligned_range_and_unserviceable_budget() {
         for r in [
-            IoWindowRequest { remaining_bytes: 33, ..request() },
-            IoWindowRequest { staging_budget_bytes: 31, ..request() },
-            IoWindowRequest { block_bytes: 0, ..request() },
-            IoWindowRequest { max_in_flight: 0, ..request() },
-            IoWindowRequest { remaining_bytes: 0, ..request() },
+            IoWindowRequest {
+                remaining_bytes: 33,
+                ..request()
+            },
+            IoWindowRequest {
+                staging_budget_bytes: 31,
+                ..request()
+            },
+            IoWindowRequest {
+                block_bytes: 0,
+                ..request()
+            },
+            IoWindowRequest {
+                max_in_flight: 0,
+                ..request()
+            },
+            IoWindowRequest {
+                remaining_bytes: 0,
+                ..request()
+            },
         ] {
             assert!(plan_io_window(r).is_err());
         }
@@ -129,10 +162,15 @@ mod tests {
             block_bytes: 64,
             staging_budget_bytes: usize::MAX,
             max_in_flight: usize::MAX,
-        }).unwrap();
+        })
+        .unwrap();
         assert_eq!(p.chunk_bytes, 1024);
         assert!(p.covered_bytes <= u64::MAX - 63);
-        assert!(p.staging_charge_bytes <= usize::MAX);
+        let range_slots = usize::try_from((u64::MAX - 63) / 1024).unwrap_or(usize::MAX);
+        let expected_slots = (usize::MAX / 1024).min(range_slots);
+        assert_eq!(p.in_flight, expected_slots);
+        assert_eq!(p.staging_charge_bytes, expected_slots * 1024);
+        assert_eq!(p.covered_bytes, expected_slots as u64 * 1024);
     }
 
     #[test]
@@ -141,7 +179,11 @@ mod tests {
             source_chunk_bytes: 70,
             max_in_flight: 1,
             ..request()
-        }).unwrap();
-        assert_eq!((p.chunk_bytes, p.in_flight, p.staging_charge_bytes), (64, 1, 64));
+        })
+        .unwrap();
+        assert_eq!(
+            (p.chunk_bytes, p.in_flight, p.staging_charge_bytes),
+            (64, 1, 64)
+        );
     }
 }
