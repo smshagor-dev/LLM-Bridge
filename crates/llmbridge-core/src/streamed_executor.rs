@@ -3,7 +3,7 @@
 use crate::{
     admission_queue::AdmissionQueue,
     hardware::Hardware,
-    memory_budget::MemoryBudget,
+    memory_budget::{BudgetSnapshot, MemoryBudget},
     queued_streamed::{generate_streamed_queued, QueuedStreamedMetrics, QueuedStreamedRequest},
     worker_plan::{plan_workers, WorkerPlan, WorkerRequest},
 };
@@ -69,6 +69,32 @@ impl StreamedExecutor {
     }
     pub fn worker_count(&self) -> usize {
         self.plan.workers
+    }
+    /// Immutable construction-time CPU/RAM ceiling, independent of live controls.
+    pub fn max_capacity_bytes(&self) -> u64 {
+        self.plan.workers as u64 * self.slot_bytes
+    }
+    /// Resize cooperative admission within the original worker-plan ceiling.
+    /// Existing sessions retain their slots; zero rejects new enqueues while
+    /// existing tickets wait for growth. This does not reclaim native memory.
+    /// Returns the old capacity; an invalid increase leaves state unchanged.
+    pub fn set_capacity_bytes(&self, bytes: u64) -> Result<u64, &'static str> {
+        if bytes > self.max_capacity_bytes() {
+            return Err("executor capacity exceeds construction-time worker plan");
+        }
+        Ok(self.budget.set_capacity(bytes))
+    }
+    /// A consistent budget observation, not a snapshot of pending/paused state.
+    pub fn budget_snapshot(&self) -> BudgetSnapshot {
+        self.budget.snapshot()
+    }
+    /// Pause future admission while accepting bounded queued requests that fit
+    /// current capacity. Already-admitted sessions continue. Returns old state.
+    pub fn set_paused(&self, paused: bool) -> bool {
+        self.queue.set_paused(paused)
+    }
+    pub fn is_paused(&self) -> bool {
+        self.queue.is_paused()
     }
     pub fn slot_bytes(&self) -> u64 {
         self.slot_bytes
@@ -175,5 +201,63 @@ mod tests {
         ] {
             assert!(StreamedExecutor::new(&hardware(8, Some(1000)), c).is_err());
         }
+    }
+
+    #[test]
+    fn live_controls_retain_slots_and_preserve_plan_ceiling() {
+        let executor = StreamedExecutor::new(&hardware(2, Some(1000)), config()).unwrap();
+        let mut first = executor.queue.request(100).unwrap();
+        let held = first.try_admit().unwrap().unwrap();
+        assert!(!executor.set_paused(true));
+        let mut second = executor.queue.request(100).unwrap();
+        assert!(second.try_admit().unwrap().is_none());
+        assert_eq!(executor.set_capacity_bytes(50), Ok(200));
+        let snapshot = executor.budget_snapshot();
+        assert_eq!(
+            (snapshot.capacity_bytes, snapshot.reserved_bytes),
+            (50, 100)
+        );
+        assert_eq!(snapshot.over_capacity_bytes, 50);
+        assert_eq!(executor.active_sessions(), 1);
+        assert_eq!(executor.worker_count(), 2);
+        assert_eq!(executor.max_capacity_bytes(), 200);
+        assert!(executor.set_capacity_bytes(201).is_err());
+        assert!(executor.set_capacity_bytes(u64::MAX).is_err());
+        assert_eq!(executor.budget_snapshot(), snapshot);
+        assert!(executor.set_paused(false));
+        assert!(second.try_admit().unwrap().is_none());
+        drop(held);
+        assert!(second.try_admit().unwrap().is_none());
+        assert_eq!(executor.set_capacity_bytes(100), Ok(50));
+        let held_second = second.try_admit().unwrap().unwrap();
+        assert_eq!(held_second.bytes(), 100);
+        assert_eq!(executor.set_capacity_bytes(0), Ok(100));
+        assert_eq!(executor.budget_snapshot().over_capacity_bytes, 100);
+        assert!(executor.queue.request(100).is_err());
+        drop(held_second);
+        assert_eq!(executor.budget_snapshot().reserved_bytes, 0);
+        assert_eq!(executor.set_capacity_bytes(200), Ok(0));
+    }
+
+    #[test]
+    fn paused_executor_bounds_pending_and_cancelled_handles_clean_up() {
+        let executor = StreamedExecutor::new(&hardware(2, Some(1000)), config()).unwrap();
+        executor.set_paused(true);
+        let mut pending: Vec<_> = (0..4)
+            .map(|_| executor.queue.request(100).unwrap())
+            .collect();
+        assert!(executor.queue.request(100).is_err());
+        assert_eq!(executor.pending_sessions(), 4);
+        assert!(pending[0].try_admit().unwrap().is_none());
+        executor.set_capacity_bytes(0).unwrap();
+        drop(pending);
+        assert_eq!(executor.pending_sessions(), 0);
+        assert_eq!(executor.reserved_bytes(), 0);
+        assert!(executor.is_paused());
+        executor.set_capacity_bytes(200).unwrap();
+        assert!(executor.is_paused());
+        executor.set_paused(false);
+        let mut pending = executor.queue.request(100).unwrap();
+        assert!(pending.try_admit().unwrap().is_some());
     }
 }
