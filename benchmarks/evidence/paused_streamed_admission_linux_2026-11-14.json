@@ -1,0 +1,58 @@
+{
+  "source_commit": "f98c7b45fb2443f139c97a5f7f8cdfe13b657fa0",
+  "source_tree": "d1e0a8aca7843fa6e5af817b5dc77390544c34ec",
+  "scope": "Explicit admission gating over current main queued generation, not automatic pressure control or an execution freeze. Already-admitted reservations remain live. Two fresh-process tiny Q8 correctness runs; not throughput, OS RSS, physical2GB, large-model or race-detector evidence.",
+  "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+  "contract_binary_sha256": "38814e760c2ab4beee4edce8636687cda69d4ce534c4b6048eccb2fb9f57ad4c",
+  "local_validation": {
+    "native": {
+      "pass": true,
+      "passed_tests": 230,
+      "log_sha256": "207ef10ac421e888c232e5e5bad8297a4233f27c7a30603a79d8b1ced455484e"
+    },
+    "msrv": {
+      "pass": true,
+      "passed_tests": 199,
+      "log_sha256": "e553668fdedcbbc1357db8d4a4235affaba8febd027054771f1f29562138fd5d"
+    },
+    "python": {
+      "pass": true,
+      "passed_tests": 23,
+      "log_sha256": "e825638ee784dc6bdba68f4db348a8d76127f832b31d45099ed85679776e1f33"
+    },
+    "native-clippy": {
+      "pass": true,
+      "passed_tests": 0,
+      "log_sha256": "d2d2e2714d064107d67e03136590451d27f68abdbf2665c191918d9e6738d360"
+    },
+    "nonnative-clippy": {
+      "pass": true,
+      "passed_tests": 0,
+      "log_sha256": "daab6fc1c0c8babf2fbe3a8719c516b7a2b76a06260331e1ba95ab1350b93d64"
+    }
+  },
+  "real_model_runs": [
+    {
+      "pass": true,
+      "log_sha256": "7803f2e659c02b9bd16493a0f97a93247d0b8cb0b15ce0e36bcde938f4723e69",
+      "results": [
+        "paused admission: bounded waiting without model open, FIFO resume, running native completion, exact bytes/logits and cancelled-ticket cleanup: PASS",
+        "reservation_bytes=50397184 output_sha256=76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89 logits_sha256=f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb"
+      ]
+    },
+    {
+      "pass": true,
+      "log_sha256": "7803f2e659c02b9bd16493a0f97a93247d0b8cb0b15ce0e36bcde938f4723e69",
+      "results": [
+        "paused admission: bounded waiting without model open, FIFO resume, running native completion, exact bytes/logits and cancelled-ticket cleanup: PASS",
+        "reservation_bytes=50397184 output_sha256=76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89 logits_sha256=f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb"
+      ]
+    }
+  ],
+  "sibling_merge_check": {
+    "head": "7e5b440bb80c6f057d0d8299dbbc0d7260b1a26b",
+    "read_only_git_merge_tree_pass": true,
+    "tree": "288411a937601edee30c07b9a7d146ee78c00996",
+    "note": "No branch was merged; checked compatibility with #84."
+  }
+}
