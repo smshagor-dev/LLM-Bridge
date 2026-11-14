@@ -15,6 +15,8 @@ recheck changing cgroup pressure, and honor cancellation. This helper does not
 enforce RSS, reclaim allocator pages, or demonstrate inference parity, older
 CPU support, 2 GB machines or large-model feasibility.
 
-Validation pending on the new branch: `cargo test -p llmbridge-core worker_plan`,
+Regression commands: `cargo test -p llmbridge-core worker_plan`,
 `cargo fmt --all -- --check`, and workspace Clippy. Seven deterministic
 unit tests cover limits, zero scratch, unknown RAM and overflows.
+
+The [streamed executor](STREAMED_EXECUTOR.md) now uses this planner for real concurrent sessions and atomically charges full fixed slots. Generic within-layer parallelism and live pressure replanning remain separate.

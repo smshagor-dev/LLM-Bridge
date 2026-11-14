@@ -30,6 +30,9 @@ pub mod queued_streamed;
 #[cfg(feature = "native")]
 pub mod streamed;
 
+#[cfg(feature = "native")]
+pub mod streamed_executor;
+
 pub mod read_cache;
 
 pub mod streamed_plan;

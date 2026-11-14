@@ -100,3 +100,9 @@ M3 now has native-derived CLI/context admission, not a complete adaptive schedul
 - FIFO admission now wraps actual controlled streamed generation, carrying trusted-hash/cache control and holding an atomic reservation through native execution and consumer callbacks. Waiting performs no model I/O; pending-ticket and running-reservation cleanup use RAII.
 - Charge arithmetic includes workspace/source/cache/authentication ceilings plus an explicit caller metadata/runtime allowance. This is cooperative accounted admission, not whole-process RSS enforcement or an automatic CLI scheduler.
 - Queue-scoped ticket identities prevent cross-queue cancellation/admission collisions. Regression and real-model protocols cover cleanup, cancellation, capacity and complete-output/all-logit equality. See `docs/QUEUED_STREAMED_INFERENCE.md`.
+
+## Planned concurrent streamed sessions checkpoint
+
+- A shared `StreamedExecutor` now applies CPU/RAM worker planning to actual queued generation. Full fixed session slots enforce both accounted capacity and simultaneous-session count even for smaller requests; oversized charges fail before enqueue/model I/O.
+- Existing FIFO/cancellation/authentication and reservation cleanup are forwarded without new native numerical code or ABI. Callers own threads and output handling; construction uses a point-in-time memory snapshot and estimates, not a process RSS limit or live pressure scheduler.
+- Real cold-start overlapping sessions, direct full-output/all-logit comparison, smaller-request waiting/cancellation and zero-final-charge protocols are required. See `docs/STREAMED_EXECUTOR.md`.
