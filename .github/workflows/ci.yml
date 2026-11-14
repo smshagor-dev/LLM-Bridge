@@ -91,6 +91,12 @@ jobs:
       - name: Reject same-identity mutation after model verification
         run: cargo run --release -p llmbridge-core --features native --example verified_contract -- models/stories15M-q8_0.gguf
 
+      - name: Validate native plan and decoder at exact workspace boundary
+        run: cargo run --release -p llmbridge-core --features native --example streamed_plan_contract -- models/stories15M-q8_0.gguf
+
+      - name: Validate planning CLI and explicit adaptive-context generation
+        run: python3 scripts/check_streamed_plan.py --binary ./target/release/llmbridge --model models/stories15M-q8_0.gguf --output benchmarks/results/streamed_plan.json
+
       - name: Save raw parity evidence
         if: always()
         uses: actions/upload-artifact@v4

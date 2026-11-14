@@ -104,6 +104,14 @@ The current `chat` command performs **raw prompt continuation**, not chat-templa
 
 No model weights are bundled. For a known small GGUF model, its pinned hash, source, and reproducible test procedure, consult [M1 test protocol](docs/M1_TEST_PROTOCOL.md). Respect each model's license.
 
+### Inspect a streamed memory plan
+
+```sh
+cargo run --release -p llmbridge -- plan /models/model.gguf --ctx 128 --max-ram-mb 64 --json
+```
+
+This budget is an incremental admission estimate, not a process-RSS cap. Context reduction requires `--auto-context`; generation prints its chosen plan. [Planning protocol and limits](docs/STREAMED_MEMORY_PLANNING.md).
+
 ### Experimental streamed generation
 
 ```sh

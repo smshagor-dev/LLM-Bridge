@@ -50,6 +50,7 @@ struct Decoder {
     void *userdata;
     size_t dim, hidden, heads, kvheads, head_dim, kvdim, layers, context;
     float epsilon, rope_base;
+    size_t workspace_required, kv_bytes;
     Tensor embedding, final_norm, output;
     std::vector<Layer> blocks;
     std::vector<uint8_t> packed;
@@ -77,7 +78,7 @@ struct Decoder {
     }
     Decoder(const gguf_context *metadata, uint64_t size, size_t max_chunk,
             llmbridge_range_callback source, llmbridge_cancel_poll cancel, void *state,
-            size_t ctx, size_t vocab, uint64_t budget)
+            size_t ctx, size_t vocab, uint64_t budget, bool allocate_state = true)
         : g(metadata), file_bytes(size), chunk(max_chunk), reader(source), poll(cancel), userdata(state), context(ctx) {
         auto architecture = gguf_find_key(g, "general.architecture");
         require(architecture >= 0 && gguf_get_kv_type(g, architecture) == GGUF_TYPE_STRING &&
@@ -107,12 +108,15 @@ struct Decoder {
         auto floats = checked_mul(kvcount, 2) + checked_mul(dim, 7) + checked_mul(kvdim, 2) +
                       checked_mul(hidden, 2) + vocab + context + 2 * std::max(dim, hidden);
         auto bytes = checked_mul(floats, sizeof(float));
+        kv_bytes = checked_mul(kvcount, 2 * sizeof(float));
+        workspace_required = bytes + chunk + checked_mul(layers, sizeof(Layer));
         require(bytes <= budget && chunk <= budget - bytes && checked_mul(layers, sizeof(Layer)) <= budget - bytes - chunk,
                 "streamed KV/activation workspace exceeds budget");
         embedding = tensor("token_embd.weight", dim, vocab);
         final_norm = tensor("output_norm.weight", dim, 1);
         auto out_id = gguf_find_tensor(g, "output.weight");
         output = out_id < 0 ? embedding : tensor("output.weight", dim, vocab);
+        blocks.reserve(layers);
         for (size_t l = 0; l < layers; ++l) {
             std::string p = "blk." + std::to_string(l) + ".";
             blocks.push_back({tensor(p+"attn_norm.weight", dim, 1), tensor(p+"attn_q.weight", dim, dim),
@@ -124,6 +128,7 @@ struct Decoder {
         // Refuse unrecognized tensors (biases, special RoPE, adapters, etc.).
         require(gguf_get_n_tensors(g) == static_cast<int64_t>(layers * 9 + (out_id < 0 ? 2 : 3)),
                 "unsupported extra tensors in streamed model");
+        if (!allocate_state) return;
         packed.resize(chunk); row.resize(std::max(dim, hidden)); quantized.resize(std::max(dim, hidden));
         x.resize(dim); norm.resize(dim); q.resize(dim); k.resize(kvdim); v.resize(kvdim);
         att.resize(dim); projected.resize(dim); gate.resize(hidden); up.resize(hidden);
@@ -286,4 +291,40 @@ extern "C" int32_t llmbridge_generate_streamed_cpu(
     char *error, size_t capacity) {
     return llmbridge_generate_streamed_cpu_v2(path, prompt, context, max_tokens, file_bytes,
         max_chunk, workspace_budget, 0, reader, emit, logits, poll, userdata, error, capacity);
+}
+
+extern "C" int32_t llmbridge_inspect_streamed_plan_v1(
+    uint64_t file_bytes, size_t chunk, llmbridge_range_callback reader,
+    llmbridge_cancel_poll poll, void *userdata, llmbridge_streamed_shape_v1 *out,
+    char *error, size_t capacity) {
+    if (error && capacity) error[0] = '\0';
+    if (out) *out = {};
+    try {
+        require(reader && poll && userdata && out && file_bytes >= 24 && chunk >= 34 && chunk <= 1024*1024,
+                "invalid streamed plan probe arguments");
+        if (!poll(userdata)) return 2;
+        gguf_init_params gp{}; gp.no_alloc = true;
+        std::unique_ptr<gguf_context, decltype(&gguf_free)> metadata(
+            gguf_init_from_callback(reader, userdata, chunk, file_bytes, gp), gguf_free);
+        require(static_cast<bool>(metadata), "streamed plan GGUF parse failed");
+        auto g = metadata.get();
+        auto tokenizer = gguf_find_key(g, "tokenizer.ggml.tokens");
+        require(tokenizer >= 0 && gguf_get_kv_type(g, tokenizer) == GGUF_TYPE_ARRAY &&
+                gguf_get_arr_type(g, tokenizer) == GGUF_TYPE_STRING, "missing/invalid tokenizer token inventory");
+        auto vocab = gguf_get_arr_n(g, tokenizer);
+        Decoder d(g, file_bytes, chunk, reader, poll, userdata, 64, vocab, UINT64_MAX, false);
+        if (!poll(userdata)) return 2;
+        uint64_t payload = 0;
+        for (int64_t i = 0; i < gguf_get_n_tensors(g); ++i) {
+            auto size = gguf_get_tensor_size(g, i);
+            require(size <= UINT64_MAX - payload, "planned tensor payload overflow"); payload += size;
+        }
+        uint64_t kv_per_token = d.kv_bytes / 64;
+        uint64_t workspace_per_token = kv_per_token + sizeof(float);
+        *out = {d.workspace_required - 64*workspace_per_token, workspace_per_token, kv_per_token,
+            file_bytes, payload, gguf_get_data_offset(g), number(g, "llama.context_length"),
+            d.dim, d.heads, d.kvheads, d.layers, d.hidden, vocab, chunk};
+        return 0;
+    } catch (const std::exception &e) { if (error && capacity) std::snprintf(error, capacity, "%s", e.what()); return -1;
+    } catch (...) { if (error && capacity) std::snprintf(error, capacity, "unknown plan probe exception"); return -1; }
 }

@@ -31,6 +31,13 @@ Local checks: Python regression suite; workspace non-native tests; release nativ
 - Three pinned tiny-model prompt trials passed reference output/logits under 24 MiB RLIMIT_AS. Accounted verification overhead was 807,712 bytes. Same-identity late weight mutation is rejected in a real-model regression. This is content integrity, not a signature/provenance or host-sandbox claim.
 - Cryptographic immutable-session integration now has a concrete Linux path; portable sealed metadata/worker isolation, fuzzing, richer model coverage and provider provenance remain pending. See `docs/VERIFIED_MODEL_SESSIONS.md`.
 
+## M3 — native-derived planning checkpoint
+
+- `plan --json` reuses native graph validation to derive workspace/KV coefficients without loading weights or allocating activation/KV arenas. Metadata-only reads are bounded to the GGUF metadata prefix.
+- `chat --auto-context` explicitly selects and reports a reduced feasible context; no prompt truncation. Optional incremental admission budgets share cache/verification/runtime/OS reserves. Native execution still rechecks its own workspace requirement.
+- Planning budgets are estimates of additional allocations, not total RSS. Linux address-space enforcement remains separate; auto-planning under a cap intersects current remaining virtual headroom. Verified auto-planning authenticates before native metadata inspection.
+- Exact native budget boundary and real-model CLI protocols are included. Full hardware/model scheduling, real 2GB-host validation, SIMD/thread adaptation and I/O/compute feasibility remain incomplete. See `docs/STREAMED_MEMORY_PLANNING.md`.
+
 ## M3–M11
 
-M3 has preliminary hardware/memory/context admission helpers, not a complete adaptive scheduler. M4 remote providers, M5 MoE, M6 GPU, M7 API/SDK, M8 desktop, M9 full robustness/benchmarks, M10 format/plugin extensibility and M11 large-model feasibility remain incomplete. No 70B/550B or real 2GB-machine result is claimed.
+M3 now has native-derived CLI/context admission, not a complete adaptive scheduler. M4 remote providers, M5 MoE, M6 GPU, M7 API/SDK, M8 desktop, M9 full robustness/benchmarks, M10 format/plugin extensibility and M11 large-model feasibility remain incomplete. No 70B/550B or real 2GB-machine result is claimed.

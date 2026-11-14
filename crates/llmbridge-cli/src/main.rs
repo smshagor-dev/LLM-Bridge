@@ -16,7 +16,7 @@ fn main() {
     }
 }
 fn usage() -> &'static str {
-    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--sha256 trusted-digest] [--verification-mb 8] [--address-space-mb 24] [--logits path.f32]"
+    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge plan <path.gguf> [--ctx 128] [--workspace-mb 8] [--max-ram-mb 64] [--auto-context] [--json]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--sha256 trusted-digest] [--verification-mb 8] [--address-space-mb 24] [--auto-context] [--max-ram-mb 64] [--logits path.f32]\n  Planning max-ram-mb is an incremental estimate budget; address-space-mb enforces a separate Linux process limit."
 }
 fn json_number(value: Option<u64>) -> String {
     value.map_or_else(|| "null".to_string(), |x| x.to_string())
@@ -178,8 +178,74 @@ fn run(args: Vec<String>) -> Result<(), String> {
             Ok(())
         }
         Some("chat") => chat(&args[1..]),
+        Some("plan") => plan(&args[1..]),
         _ => Err(usage().to_string()),
     }
+}
+
+#[cfg(feature = "native")]
+fn plan(args: &[String]) -> Result<(), String> {
+    use llmbridge_core::streamed_plan::{
+        inspect_streamed_shape, plan_streamed_shape, StreamedPlanRequest,
+    };
+    let model = args.first().ok_or("plan requires a GGUF path")?;
+    let mut request = StreamedPlanRequest::default();
+    let mut verification_mb = 8u64;
+    let mut reserve_verification = false;
+    let mut pos = 1;
+    while pos < args.len() {
+        match args[pos].as_str() {
+            "--auto-context" => {
+                request.allow_context_reduction = true;
+                pos += 1;
+                continue;
+            }
+            "--reserve-verification" => {
+                reserve_verification = true;
+                pos += 1;
+                continue;
+            }
+            "--json" => {
+                pos += 1;
+                continue;
+            }
+            _ => {}
+        }
+        let value = args.get(pos + 1).ok_or("missing plan option value")?;
+        let mb = |text: &str| -> Result<u64, String> {
+            text.parse::<u64>()
+                .map_err(|_| "invalid MiB value".into())
+                .and_then(|n| n.checked_mul(1024 * 1024).ok_or("MiB overflow".into()))
+        };
+        match args[pos].as_str() {
+            "--ctx" => request.context_tokens = value.parse().map_err(|_| "invalid ctx")?,
+            "--workspace-mb" => request.workspace_budget_bytes = mb(value)?,
+            "--cache-mb" => request.cache_budget_bytes = mb(value)?,
+            "--max-ram-mb" => request.max_additional_bytes = Some(mb(value)?),
+            "--os-reserve-mb" => request.os_reserve_bytes = mb(value)?,
+            "--runtime-reserve-mb" => request.runtime_reserve_bytes = mb(value)?,
+            "--verification-mb" => {
+                verification_mb = value.parse().map_err(|_| "invalid verification-mb")?
+            }
+            "--backend" if value == "cpu" || value == "streamed" => {}
+            _ => return Err("unknown/unsupported plan option".into()),
+        }
+        pos += 2;
+    }
+    if reserve_verification {
+        if !(1..=64).contains(&verification_mb) {
+            return Err("verification-mb must be 1..64".into());
+        }
+        request.verification_budget_bytes = verification_mb * 1024 * 1024;
+    }
+    let shape = inspect_streamed_shape(Path::new(model), 64 * 1024, &AtomicBool::new(false))?;
+    let plan = plan_streamed_shape(shape, &hardware::profile(), request)?;
+    println!("{}", plan.to_json(&shape, &request));
+    Ok(())
+}
+#[cfg(not(feature = "native"))]
+fn plan(_args: &[String]) -> Result<(), String> {
+    Err("plan requires native streamed backend".into())
 }
 
 #[cfg(feature = "native")]
@@ -242,11 +308,18 @@ fn chat(args: &[String]) -> Result<(), String> {
     let mut workspace_mb = 8u64;
     let mut cache_mb = 0usize;
     let mut verification_mb = 8usize;
+    let mut auto_context = false;
+    let mut max_admission_mb: Option<u64> = None;
     let mut expected_hash: Option<String> = None;
     let mut address_space_mb: Option<u64> = None;
     let mut logits_path: Option<String> = None;
     let mut pos = 1usize;
     while pos < args.len() {
+        if args[pos] == "--auto-context" {
+            auto_context = true;
+            pos += 1;
+            continue;
+        }
         if args[pos] == "--metrics" {
             show_metrics = true;
             pos += 1;
@@ -263,6 +336,9 @@ fn chat(args: &[String]) -> Result<(), String> {
         match flag {
             "--prompt" => prompt = Some(value.clone()),
             "--backend" => backend = value.clone(),
+            "--max-ram-mb" => {
+                max_admission_mb = Some(value.parse().map_err(|_| "invalid max-ram-mb")?)
+            }
             "--sha256" => expected_hash = Some(value.clone()),
             "--verification-mb" => {
                 verification_mb = value.parse().map_err(|_| "invalid verification-mb")?
@@ -294,6 +370,9 @@ fn chat(args: &[String]) -> Result<(), String> {
     }
     if backend != "resident" && backend != "streamed" {
         return Err("backend must be resident or streamed".into());
+    }
+    if backend != "streamed" && (auto_context || max_admission_mb.is_some()) {
+        return Err("auto-context/admission budgeting requires streamed backend".into());
     }
     if verification_mb == 0
         || verification_mb > 64
@@ -361,6 +440,59 @@ fn chat(args: &[String]) -> Result<(), String> {
     let stop = Arc::clone(&cancelled);
     ctrlc::set_handler(move || stop.store(true, Ordering::SeqCst))
         .map_err(|e| format!("unable to install cancellation handler: {e}"))?;
+    if backend == "streamed" && (auto_context || max_admission_mb.is_some()) {
+        use llmbridge_core::streamed_plan::{
+            inspect_streamed_shape, inspect_streamed_shape_verified, plan_streamed_shape,
+            StreamedPlanRequest,
+        };
+        let shape = if let Some(hash) = expected_hash.as_deref() {
+            inspect_streamed_shape_verified(
+                model_path,
+                64 * 1024,
+                &cancelled,
+                hash,
+                verification_mb * 1024 * 1024,
+            )?
+        } else {
+            inspect_streamed_shape(model_path, 64 * 1024, &cancelled)?
+        };
+        let process_headroom = address_space_mb
+            .map(|mb| -> Result<u64, String> {
+                let limit = mb
+                    .checked_mul(1024 * 1024)
+                    .ok_or("address-space MiB overflow")?;
+                let current = hardware::process_memory()
+                    .virtual_bytes
+                    .ok_or("virtual memory unknown; cannot plan within address-space cap")?;
+                Ok(limit.saturating_sub(current))
+            })
+            .transpose()?;
+        let requested_budget = max_admission_mb
+            .map(|mb| mb.checked_mul(1024 * 1024).ok_or("admission MiB overflow"))
+            .transpose()?;
+        let max_additional = match (requested_budget, process_headroom) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        let request = StreamedPlanRequest {
+            context_tokens: ctx,
+            workspace_budget_bytes: workspace_mb
+                .checked_mul(1024 * 1024)
+                .ok_or("workspace overflow")?,
+            max_additional_bytes: max_additional,
+            cache_budget_bytes: (cache_mb as u64) * 1024 * 1024,
+            verification_budget_bytes: if expected_hash.is_some() {
+                (verification_mb as u64) * 1024 * 1024
+            } else {
+                0
+            },
+            allow_context_reduction: auto_context,
+            ..Default::default()
+        };
+        let plan = plan_streamed_shape(shape, &hardware::profile(), request)?;
+        eprintln!("LLMBRIDGE_PLAN {}", plan.to_json(&shape, &request));
+        ctx = plan.selected_context;
+    }
     let stdout = io::stdout();
     let mut handle = stdout.lock();
     let mut logits_file = logits_path

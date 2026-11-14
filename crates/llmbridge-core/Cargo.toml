@@ -31,3 +31,7 @@ libc = "=0.2.191"
 [[example]]
 name = "verified_contract"
 required-features = ["native"]
+
+[[example]]
+name = "streamed_plan_contract"
+required-features = ["native"]
