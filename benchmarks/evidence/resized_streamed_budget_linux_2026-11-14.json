@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "date_utc": "2026-11-14",
+  "scope": "Real tiny-model live cooperative budget resize correctness and admission accounting; no physical RSS or large-model feasibility claim",
+  "source_commit": "dd434d5fa2ef465fd50d01540c15e69a98644f04",
+  "source_tree": "a8cfee901a81332ae9c3619c2001b15be03f0b12",
+  "source_worktree_clean": true,
+  "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+  "contract_binary_sha256": "a6bdad8bf2d8676afb287d0359cfe7501f1ff32aea1f07efd1baa1a1e6310f4c",
+  "validation": {
+    "native_rust_tests": 231,
+    "non_native_rust_msrv_1_82_tests": 200,
+    "python_tests": 23,
+    "release_clippy_native_and_non_native": "passed with -D warnings",
+    "format_and_diff_check": "passed",
+    "fresh_process_real_contract_runs": 3
+  },
+  "read_only_merge_tree": {
+    "pr_84": {
+      "head": "7e5b440bb80c6f057d0d8299dbbc0d7260b1a26b",
+      "result_tree": "6b553b5e9fc838aa3c8c9641cb910a3d53804d9d",
+      "conflicts": false
+    },
+    "pr_85": {
+      "head": "a25ce32e1333295d8f695664d55310171d6f16eb",
+      "result_tree": "a0161a29411edc9e3ff7175103012049ceda6556",
+      "conflicts": false
+    },
+    "branches_merged": false
+  },
+  "logs": {
+    "llmbridge-resize-native.log": {
+      "sha256": "0f4215a6ef22f2d9cf11db31220da5baba417a6a0aa24accc8614e7dda632837",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 16.39s",
+        "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 218 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    "llmbridge-resize-msrv.log": {
+      "sha256": "2ae687484fc355042f09114afa623a150002fc2beee2daa35a0d049e6a1295bd",
+      "result_lines": [
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 189 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    "llmbridge-resize-python.log": {
+      "sha256": "6a864b68808c83feb83431b63533810b6b82d0cd8ded00fab8960e8fcf96be22",
+      "result_lines": [
+        "Ran 23 tests in 0.225s"
+      ]
+    },
+    "llmbridge-resize-native-clippy.log": {
+      "sha256": "4a7ace3715a49bba373205fec86d1e15712bf9b694f5543ecc71dd71355007c3",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 3.61s"
+      ]
+    },
+    "llmbridge-resize-nonnative-clippy.log": {
+      "sha256": "f62bdaa0a6c90bf60ec17abc0f29f71464049ffd18f7aa142ba859e2a3cbb5d1",
+      "result_lines": []
+    },
+    "llmbridge-resize-clean-1.log": {
+      "sha256": "010ad7e582a39595889be19bc65c9ad57d8087f4bbde4cc8d5df74a9fa1ab8cf",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 5.91s",
+        "live budget resize: retained native charge, zero-capacity waiting/refusal, growth resume, cancellation and exact bytes/logits: PASS",
+        "charge_bytes=50397184 output_sha256=76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89 logits_sha256=f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb"
+      ],
+      "source_commit": "367461aaed3a31d37a1ead5ea8e49ded88123320"
+    },
+    "llmbridge-resize-clean-2.log": {
+      "sha256": "9e48453901089ff0a91ac7aefca3657a29fa950c315720a63cf27b3939577f78",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 0.01s",
+        "live budget resize: retained native charge, zero-capacity waiting/refusal, growth resume, cancellation and exact bytes/logits: PASS",
+        "charge_bytes=50397184 output_sha256=76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89 logits_sha256=f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb"
+      ],
+      "source_commit": "367461aaed3a31d37a1ead5ea8e49ded88123320"
+    },
+    "llmbridge-resize-clean-3.log": {
+      "sha256": "9e48453901089ff0a91ac7aefca3657a29fa950c315720a63cf27b3939577f78",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 0.01s",
+        "live budget resize: retained native charge, zero-capacity waiting/refusal, growth resume, cancellation and exact bytes/logits: PASS",
+        "charge_bytes=50397184 output_sha256=76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89 logits_sha256=f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb"
+      ],
+      "source_commit": "dd434d5fa2ef465fd50d01540c15e69a98644f04"
+    }
+  },
+  "limitations": [
+    "No automatic OS pressure controller",
+    "No forced reclamation or active-session interruption",
+    "No worker-pool resize",
+    "No throughput, physical 2GB, or 550B validation"
+  ],
+  "source_revision_note": "The final source revision only relocates and corrects queue documentation; runtime code is identical for all three real-contract runs."
+}

@@ -36,6 +36,7 @@ Local checks: Python regression suite; workspace non-native tests; release nativ
 - `plan --json` reuses native graph validation to derive workspace/KV coefficients without loading weights or allocating activation/KV arenas. Metadata-only reads are bounded to the GGUF metadata prefix.
 - `chat --auto-context` explicitly selects and reports a reduced feasible context; no prompt truncation. Optional incremental admission budgets share cache/verification/runtime/OS reserves. Native execution still rechecks its own workspace requirement.
 - Planning budgets are estimates of additional allocations, not total RSS. Linux address-space enforcement remains separate; auto-planning under a cap intersects current remaining virtual headroom. Verified auto-planning authenticates before native metadata inspection.
+- Cooperative MemoryBudget capacity can now shrink/grow while retaining admitted charges. A synchronized snapshot reports headroom/debt; queued native calls wait/resume or cancel against the current capacity. No automatic pressure sampling or OS reclamation is implied. See `docs/DYNAMIC_MEMORY_BUDGET.md`.
 - Exact native budget boundary and real-model CLI protocols are included. Full hardware/model scheduling, real 2GB-host validation, SIMD/thread adaptation and I/O/compute feasibility remain incomplete. See `docs/STREAMED_MEMORY_PLANNING.md`.
 
 ## M3 — measured session performance checkpoint
