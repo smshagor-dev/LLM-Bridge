@@ -1,0 +1,169 @@
+{
+  "source_commit": "a09910c6fa092b4e7a2e2084c2f864509dba9aa6",
+  "source_tree": "ddb5896286045fa6e26921ffa00729983f456386",
+  "scope": "Real overlapping tiny Q8 sessions on caller threads under a shared fixed-slot executor, compared to subsequent direct execution. Three fresh-process correctness repetitions, not a statistical speed/physical-storage/2GB/large-model or race-detector result. Hardware admission is a snapshot and per-session allowances remain estimates; no OS RSS/affinity enforcement.",
+  "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+  "contract_binary_sha256": "b1b457525290635aa66db5a150f3dae01c31c54a4772549b8b8d2c5fb3f83e24",
+  "local_validation": {
+    "native": {
+      "pass": true,
+      "passed_tests": 229,
+      "log_sha256": "2e6bba3eaf129c85678c4aab2e34061ecf76e38b4b401b908b40d9aae8870812"
+    },
+    "msrv": {
+      "pass": true,
+      "passed_tests": 196,
+      "log_sha256": "1b3850ff643b55fa50ecbbf825c004e626903538180c00f4a686a044f147be86"
+    },
+    "python": {
+      "pass": true,
+      "passed_tests": 23,
+      "log_sha256": "dc451fed15098cb92b20e07b73c9d160592ae97effc58f799e533317a633e8f6"
+    },
+    "native-clippy": {
+      "pass": true,
+      "passed_tests": 0,
+      "log_sha256": "1052147ff2e65e75a71eabd3c84b2e15db131050828ef06189203d736f1480f8"
+    },
+    "nonnative-clippy": {
+      "pass": true,
+      "passed_tests": 0,
+      "log_sha256": "6eb3c285287774886741b7bebc8d23a20a9b2ea059179618b7d9fb9f5b5ffda6"
+    }
+  },
+  "real_model_runs": [
+    {
+      "pass": true,
+      "log_sha256": "8de3f2043dd24bbea22a40b01d634237c66c7edc631d3cbc8807249959e99081",
+      "results": [
+        "streamed executor: two overlapping real sessions match direct bytes/logits; fixed-slot CPU cap, queued cancellation and zero final reservation: PASS",
+        "workers=2 slot_bytes=67108864 output_sha256=76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89 logits_sha256=f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb"
+      ]
+    },
+    {
+      "pass": true,
+      "log_sha256": "8de3f2043dd24bbea22a40b01d634237c66c7edc631d3cbc8807249959e99081",
+      "results": [
+        "streamed executor: two overlapping real sessions match direct bytes/logits; fixed-slot CPU cap, queued cancellation and zero final reservation: PASS",
+        "workers=2 slot_bytes=67108864 output_sha256=76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89 logits_sha256=f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb"
+      ]
+    },
+    {
+      "pass": true,
+      "log_sha256": "8de3f2043dd24bbea22a40b01d634237c66c7edc631d3cbc8807249959e99081",
+      "results": [
+        "streamed executor: two overlapping real sessions match direct bytes/logits; fixed-slot CPU cap, queued cancellation and zero final reservation: PASS",
+        "workers=2 slot_bytes=67108864 output_sha256=76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89 logits_sha256=f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb"
+      ]
+    }
+  ],
+  "native_cpu_admission": {
+    "pass": true,
+    "source": {
+      "commit": "a09910c6fa092b4e7a2e2084c2f864509dba9aa6",
+      "tree": "ddb5896286045fa6e26921ffa00729983f456386",
+      "working_tree_dirty": false
+    },
+    "guest_cpu": "core2duo",
+    "cases": {
+      "doctor": {
+        "exit_code": 0,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "289ada27d6ed97f5f6d842fc31d99d816680bc6f869008b847d7785dae702f91",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "runtime_profile_cannot_override_build": {
+        "exit_code": 0,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "38f53fb6b0831698773be38ceea3121df3b15212a144417509f4c77d05b42a50",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "avx_without_os_state": {
+        "exit_code": 0,
+        "guest_cpu": "Haswell,-xsave",
+        "stdout_sha256": "ed6cc027a6e1ddf1b3e45cdd4015e287e09f25279d27a3ca0bf94075a7972ebc",
+        "stderr_sha256": "1b975121e9fa414c908dd7e1053b54750eddd55b37ab9586fc738c16db2b4543"
+      },
+      "resident": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "streamed": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "verified_streamed": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "plan": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "library_entry_paths": {
+        "exit_code": 0,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "c901e541a31f1f592261ce9dea3d98d04441f9bf354afc20807cc2bec70a9a22",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "note": "QEMU user-mode negative admission test; no inference speed, old physical CPU or 2GB-hardware claim.",
+    "binary_sha256": "7321d57913aa1ca64b182596d481e6abfed6b9477a963206b90136ceadb4098b",
+    "contract_sha256": "6689ed21067a6ac69b915a26bb0e2229e572755d0cece5d91e86abbdd2bea77f",
+    "emulator_sha256": "36d35ffe5363bd49bfa9c2b6a048e9fb2e798fea38285a5a45f52d34f9869089",
+    "emulator_version": "qemu-x86_64 version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)",
+    "emulated_cpu": {
+      "native_profile": "x86-avx2",
+      "architecture": "x86_64",
+      "native_compatible": false,
+      "capabilities": {
+        "sse2": true,
+        "sse42": false,
+        "avx": false,
+        "avx2": false,
+        "fma": false,
+        "f16c": false,
+        "bmi2": false
+      },
+      "missing_cpu_os_capabilities": [
+        "sse4.2",
+        "avx",
+        "avx2",
+        "fma",
+        "f16c",
+        "bmi2"
+      ],
+      "scalar_fallback_validated": false
+    },
+    "avx_without_os_state_cpu": {
+      "native_profile": "x86-avx2",
+      "architecture": "x86_64",
+      "native_compatible": false,
+      "capabilities": {
+        "sse2": true,
+        "sse42": true,
+        "avx": false,
+        "avx2": false,
+        "fma": false,
+        "f16c": true,
+        "bmi2": false
+      },
+      "missing_cpu_os_capabilities": [
+        "avx",
+        "avx2",
+        "fma",
+        "bmi2"
+      ],
+      "scalar_fallback_validated": false
+    },
+    "library_paths_checked": 14
+  }
+}
