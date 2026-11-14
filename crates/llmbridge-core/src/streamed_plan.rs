@@ -36,6 +36,8 @@ pub struct StreamedPlanRequest {
     pub os_reserve_bytes: u64,
     pub runtime_reserve_bytes: u64,
     pub allow_context_reduction: bool,
+    /// Treat cache budget as a ceiling and preserve context before optional cache.
+    pub adapt_cache: bool,
 }
 impl Default for StreamedPlanRequest {
     fn default() -> Self {
@@ -48,11 +50,13 @@ impl Default for StreamedPlanRequest {
             os_reserve_bytes: 512 * 1024 * 1024,
             runtime_reserve_bytes: 32 * 1024 * 1024,
             allow_context_reduction: false,
+            adapt_cache: false,
         }
     }
 }
 #[derive(Debug, Clone, Copy)]
 pub struct StreamedPlan {
+    pub cache_budget_bytes: u64,
     pub requested_context: u32,
     pub selected_context: u32,
     pub native_workspace_bytes: u64,
@@ -96,9 +100,18 @@ pub fn plan_streamed_shape(
         .metadata_prefix_bytes
         .checked_mul(2)
         .ok_or("metadata reserve overflow")?;
+    let manual_cache = if request.adapt_cache {
+        0
+    } else {
+        request.cache_budget_bytes
+    };
+    // Reject a manual allocation that execution could never instantiate.
+    let chunk = usize::try_from(shape.chunk_bytes).map_err(|_| "cache chunk overflow")?;
+    crate::read_cache::cache_allocated_bytes(chunk, manual_cache as usize)
+        .map_err(|e| e.to_string())?;
     let extra = metadata_reserve
         .checked_add(shape.chunk_bytes)
-        .and_then(|n| n.checked_add(request.cache_budget_bytes))
+        .and_then(|n| n.checked_add(manual_cache))
         .and_then(|n| n.checked_add(request.verification_budget_bytes))
         .and_then(|n| n.checked_add(request.runtime_reserve_bytes))
         .ok_or("streamed reserve overflow")?;
@@ -120,7 +133,24 @@ pub fn plan_streamed_shape(
         return Err(format!("requested context does not fit model/budget; at most {selected} tokens fit (explicit auto-context required)"));
     }
     let native_workspace_bytes = shape.workspace_for_context(selected)?;
+    let cache_budget_bytes = if request.adapt_cache {
+        let remaining = budget
+            .checked_sub(native_workspace_bytes)
+            .and_then(|n| n.checked_sub(extra))
+            .ok_or("cache headroom overflow")?;
+        let ceiling = remaining.min(request.cache_budget_bytes) as usize;
+        // Less than a complete staging/block pair means no optional cache.
+        crate::read_cache::cache_allocated_bytes(chunk, ceiling).unwrap_or(0) as u64
+    } else {
+        manual_cache
+    };
+    let adaptive_extra = if request.adapt_cache {
+        cache_budget_bytes
+    } else {
+        0
+    };
     Ok(StreamedPlan {
+        cache_budget_bytes,
         requested_context: request.context_tokens,
         selected_context: selected as u32,
         native_workspace_bytes,
@@ -130,6 +160,7 @@ pub fn plan_streamed_shape(
             .ok_or("KV overflow")?,
         estimated_additional_bytes: native_workspace_bytes
             .checked_add(extra)
+            .and_then(|n| n.checked_add(adaptive_extra))
             .ok_or("total admission overflow")?,
         available_after_os_reserve_bytes: headroom,
         effective_additional_budget_bytes: budget,
@@ -142,13 +173,13 @@ impl StreamedPlan {
         format!(concat!("{{\"backend\":\"streamed_cpu\",\"native_inspection_metadata_only\":true,\"model_integrity\":\"not_verified_by_plan\",",
             "\"requested_context\":{},\"selected_context\":{},\"context_reduced\":{},\"training_context\":{},",
             "\"native_workspace_bytes\":{},\"workspace_fixed_bytes\":{},\"workspace_per_token_bytes\":{},\"workspace_budget_bytes\":{},",
-            "\"kv_bytes\":{},\"kv_bytes_per_token\":{},\"cache_budget_bytes\":{},\"verification_budget_bytes\":{},",
+            "\"kv_bytes\":{},\"kv_bytes_per_token\":{},\"cache_budget_bytes\":{},\"cache_ceiling_bytes\":{},\"cache_adaptive\":{},\"verification_budget_bytes\":{},",
             "\"runtime_reserve_bytes\":{},\"metadata_reserve_bytes\":{},\"reader_buffer_bytes\":{},\"estimated_additional_bytes\":{},",
             "\"effective_additional_budget_bytes\":{},\"available_after_os_reserve_bytes\":{},\"file_bytes\":{},\"tensor_payload_bytes\":{},",
             "\"layers\":{},\"embedding\":{},\"query_heads\":{},\"kv_heads\":{},\"feed_forward\":{},\"vocabulary\":{},\"logical_cpus\":{},\"selected_threads\":1,\"process_limit_enforced_by_plan\":false}}"),
             self.requested_context, self.selected_context, self.selected_context != self.requested_context, shape.training_context,
             self.native_workspace_bytes, shape.workspace_fixed_bytes, shape.workspace_per_token_bytes, request.workspace_budget_bytes,
-            self.kv_bytes, shape.kv_bytes_per_token, request.cache_budget_bytes, request.verification_budget_bytes,
+            self.kv_bytes, shape.kv_bytes_per_token, self.cache_budget_bytes, request.cache_budget_bytes, request.adapt_cache, request.verification_budget_bytes,
             request.runtime_reserve_bytes, self.metadata_reserve_bytes, shape.chunk_bytes, self.estimated_additional_bytes,
             self.effective_additional_budget_bytes, self.available_after_os_reserve_bytes, shape.file_bytes, shape.tensor_payload_bytes, shape.layers, shape.embedding, shape.heads, shape.kv_heads, shape.feed_forward, shape.vocabulary, self.logical_cpus)
     }
@@ -497,5 +528,79 @@ mod tests {
         s = shape();
         s.workspace_fixed_bytes = u64::MAX;
         assert!(plan_streamed_shape(s, &hw(Some(u64::MAX)), req()).is_err());
+    }
+    #[test]
+    fn adaptive_cache_preserves_context_and_uses_only_remaining_budget() {
+        let request = StreamedPlanRequest {
+            cache_budget_bytes: 1000,
+            adapt_cache: true,
+            ..req()
+        };
+        let base = plan_streamed_shape(shape(), &hw(Some(5000)), req()).unwrap();
+        let minimum = crate::read_cache::cache_allocated_bytes(8, 40).unwrap() as u64;
+        let budget = base.estimated_additional_bytes + minimum;
+        let plan = plan_streamed_shape(shape(), &hw(Some(budget)), request).unwrap();
+        assert_eq!(plan.selected_context, base.selected_context);
+        assert_eq!(plan.cache_budget_bytes, minimum);
+        assert_eq!(plan.estimated_additional_bytes, budget);
+        let small = plan_streamed_shape(shape(), &hw(Some(budget - 1)), request).unwrap();
+        assert_eq!(small.cache_budget_bytes, 0);
+        assert_eq!(small.selected_context, base.selected_context);
+    }
+    #[test]
+    fn cache_does_not_force_reduction_and_cannot_bypass_reserves() {
+        let request = StreamedPlanRequest {
+            cache_budget_bytes: 1000,
+            adapt_cache: true,
+            ..req()
+        };
+        let base = plan_streamed_shape(shape(), &hw(Some(5000)), req()).unwrap();
+        assert!(plan_streamed_shape(
+            shape(),
+            &hw(Some(base.estimated_additional_bytes - 1)),
+            request
+        )
+        .is_err());
+        let reduced = plan_streamed_shape(
+            shape(),
+            &hw(Some(base.estimated_additional_bytes - 1)),
+            StreamedPlanRequest {
+                allow_context_reduction: true,
+                ..request
+            },
+        )
+        .unwrap();
+        assert_eq!(reduced.selected_context, base.selected_context - 1);
+        assert_eq!(reduced.cache_budget_bytes, 0);
+    }
+    #[test]
+    fn adaptive_cache_is_capped_and_zero_ceiling_is_respected() {
+        for ceiling in [0, 1, 39, 40, 100, 1000] {
+            let request = StreamedPlanRequest {
+                cache_budget_bytes: ceiling,
+                adapt_cache: true,
+                ..req()
+            };
+            let plan = plan_streamed_shape(shape(), &hw(Some(5000)), request).unwrap();
+            assert!(plan.cache_budget_bytes <= ceiling);
+            assert!(plan.estimated_additional_bytes <= 5000);
+            assert_eq!(
+                crate::read_cache::cache_allocated_bytes(8, plan.cache_budget_bytes as usize)
+                    .unwrap() as u64,
+                plan.cache_budget_bytes
+            );
+        }
+    }
+    #[test]
+    fn manual_cache_that_cannot_hold_one_block_is_rejected() {
+        assert!(plan_streamed_shape(
+            shape(),
+            &hw(Some(5000)),
+            StreamedPlanRequest {
+                cache_budget_bytes: 1,
+                ..req()
+            }
+        )
+        .is_err());
     }
 }

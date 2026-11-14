@@ -63,6 +63,52 @@ fn main() {
         |_| panic!("logits beyond workspace budget"),
     );
     assert!(rejected.unwrap_err().contains("workspace exceeds budget"));
+    let base_request = StreamedPlanRequest::default();
+    let uncached = plan_streamed_shape(shape, &hardware, base_request).unwrap();
+    let minimum_cache =
+        llmbridge_core::read_cache::cache_allocated_bytes(65536, 131200).unwrap() as u64;
+    for extra in [minimum_cache - 1, minimum_cache, 1024 * 1024] {
+        let request = StreamedPlanRequest {
+            max_additional_bytes: Some(uncached.estimated_additional_bytes + extra),
+            cache_budget_bytes: 1024 * 1024,
+            adapt_cache: true,
+            ..base_request
+        };
+        let selected = plan_streamed_shape(shape, &hardware, request).unwrap();
+        assert_eq!(selected.selected_context, 128);
+        let expected = if extra < minimum_cache {
+            0
+        } else {
+            llmbridge_core::read_cache::cache_allocated_bytes(65536, extra as usize).unwrap() as u64
+        };
+        assert_eq!(selected.cache_budget_bytes, expected);
+        assert!(selected.estimated_additional_bytes <= request.max_additional_bytes.unwrap());
+        let mut actual = Vec::new();
+        let metrics = generate_streamed(
+            model,
+            "The sky is",
+            StreamedConfig {
+                cache_bytes: selected.cache_budget_bytes as usize,
+                workspace_bytes: selected.native_workspace_bytes,
+                context_tokens: 128,
+                ..config
+            },
+            &cancelled,
+            |b| {
+                actual.extend_from_slice(b);
+                true
+            },
+            |_| true,
+        )
+        .unwrap();
+        assert_eq!(actual, output);
+        assert_eq!(metrics.cache.allocated_bytes as u64, expected);
+        println!(
+            "LLMBRIDGE_AUTO_CACHE_CONTRACT {}",
+            selected.to_json(&shape, &request)
+        );
+    }
     println!("{}", plan.to_json(&shape, &request));
     println!("exact native workspace boundary generation/refusal: PASS");
+    println!("adaptive cache boundary, context preservation and execution allocation: PASS");
 }

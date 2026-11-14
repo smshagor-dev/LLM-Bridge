@@ -176,3 +176,5 @@ For architecture questions, prefer concrete proposals specifying tensor flow, bu
 ### Streamed session timing
 
 `chat --backend streamed --metrics` reports first-logits/piece readiness, actual sampling/decode intervals and range/consumer callback wall time. Collection is opt-in in the library and uses constant space. Run `python3 scripts/benchmark_streamed.py --binary target/release/llmbridge --model model.gguf --output /tmp/session-performance.json` for repeated real sessions, byte-complete output comparison against uninstrumented execution and optional measured-workload targets. These are page-cache-affected observations, with no physical-storage or larger-model claim. See [measurement semantics](docs/STREAMED_PERFORMANCE.md).
+
+`--auto-cache` optionally selects a cache that fits after context and required reserves. Its default ceiling is 1 MiB; `--cache-mb N` changes the ceiling. It can select zero without reducing context. Plans report the exact selected byte budget used by execution. See [adaptive cache admission](docs/STREAMED_MEMORY_PLANNING.md#adaptive-cache-admission).
