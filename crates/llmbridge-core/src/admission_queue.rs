@@ -33,6 +33,7 @@ struct Pending {
 
 #[derive(Debug, Default)]
 struct QueueState {
+    paused: bool,
     next: u64,
     pending: VecDeque<Pending>,
 }
@@ -99,12 +100,27 @@ impl AdmissionQueue {
         })
     }
 
+    /// Pause/resume new admissions under the same lock as reservation acquisition.
+    /// Returns the previous state. Already-admitted reservations remain live.
+    pub fn set_paused(&self, paused: bool) -> bool {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        std::mem::replace(&mut state.paused, paused)
+    }
+
+    /// Snapshot of admission state; enqueue/cancellation remain available while paused.
+    pub fn is_paused(&self) -> bool {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).paused
+    }
+
     /// Nonblocking poll. Only the oldest live ticket can acquire a reservation.
     /// None means wait/retry; an unknown or cancelled ticket is an error.
     /// Reservation acquisition and head removal occur under the same lock.
     pub fn try_admit(&self, ticket: Ticket) -> Result<Option<Reservation>, AdmissionError> {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if state.pending.front().is_some_and(|p| p.ticket == ticket) {
+            if state.paused {
+                return Ok(None);
+            }
             let bytes = state.pending.front().expect("front checked").bytes;
             match self.budget.try_reserve(bytes) {
                 Ok(reservation) => {
@@ -169,6 +185,74 @@ impl Drop for PendingAdmission<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paused_queue_stays_bounded_and_resume_preserves_fifo() {
+        let budget = MemoryBudget::new(100).unwrap();
+        let queue = AdmissionQueue::new(Arc::clone(&budget), 2).unwrap();
+        assert!(!queue.is_paused());
+        assert!(!queue.set_paused(true));
+        assert!(queue.set_paused(true));
+        let head = queue.enqueue(80).unwrap();
+        let tail = queue.enqueue(10).unwrap();
+        assert_eq!(queue.enqueue(1).unwrap_err(), AdmissionError::QueueFull);
+        assert!(queue.try_admit(head).unwrap().is_none());
+        assert!(queue.try_admit(tail).unwrap().is_none());
+        assert_eq!(budget.reserved(), 0);
+        assert_eq!(queue.pending(), 2);
+        assert!(queue.set_paused(false));
+        assert!(!queue.set_paused(false));
+        assert!(queue.try_admit(tail).unwrap().is_none());
+        let first = queue.try_admit(head).unwrap().unwrap();
+        let second = queue.try_admit(tail).unwrap().unwrap();
+        assert_eq!(budget.reserved(), 90);
+        drop((first, second));
+        assert_eq!(budget.reserved(), 0);
+    }
+    #[test]
+    fn pause_keeps_admitted_memory_and_pending_cleanup_live() {
+        let budget = MemoryBudget::new(100).unwrap();
+        let queue = AdmissionQueue::new(Arc::clone(&budget), 2).unwrap();
+        let active = queue.request(40).unwrap().try_admit().unwrap().unwrap();
+        queue.set_paused(true);
+        let mut waiting = queue.request(60).unwrap();
+        assert!(waiting.try_admit().unwrap().is_none());
+        drop(waiting);
+        assert_eq!(queue.pending(), 0);
+        assert!(queue.is_paused());
+        assert_eq!(budget.reserved(), 40);
+        drop(active);
+        let mut waiting = queue.request(100).unwrap();
+        assert!(waiting.try_admit().unwrap().is_none());
+        assert_eq!(budget.reserved(), 0);
+        queue.set_paused(false);
+        let admitted = waiting.try_admit().unwrap().unwrap();
+        assert_eq!(budget.reserved(), 100);
+        drop(admitted);
+        assert_eq!(budget.reserved(), 0);
+    }
+    #[test]
+    fn invalid_and_cancelled_tickets_are_still_errors_while_paused() {
+        let budget = MemoryBudget::new(100).unwrap();
+        let queue = AdmissionQueue::new(Arc::clone(&budget), 2).unwrap();
+        let other = AdmissionQueue::new(Arc::clone(&budget), 1).unwrap();
+        let foreign = other.enqueue(1).unwrap();
+        queue.set_paused(true);
+        assert_eq!(
+            queue.try_admit(foreign).unwrap_err(),
+            AdmissionError::UnknownTicket
+        );
+        assert!(!queue.cancel(foreign));
+        let local = queue.enqueue(1).unwrap();
+        assert!(queue.cancel(local));
+        assert_eq!(
+            queue.try_admit(local).unwrap_err(),
+            AdmissionError::UnknownTicket
+        );
+        assert!(queue.is_paused());
+        assert_eq!(queue.pending(), 0);
+        assert_eq!(budget.reserved(), 0);
+    }
 
     #[test]
     fn tickets_from_another_queue_cannot_admit_or_cancel_local_requests() {

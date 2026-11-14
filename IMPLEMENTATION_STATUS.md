@@ -97,6 +97,6 @@ M3 now has native-derived CLI/context admission, not a complete adaptive schedul
 
 ## Queued native streamed execution checkpoint
 
-- FIFO admission now wraps actual controlled streamed generation, carrying trusted-hash/cache control and holding an atomic reservation through native execution and consumer callbacks. Waiting performs no model I/O; pending-ticket and running-reservation cleanup use RAII.
+- FIFO admission now wraps actual controlled streamed generation, carrying trusted-hash/cache control and holding an atomic reservation through native execution and consumer callbacks. Waiting performs no model I/O; pending-ticket and running-reservation cleanup use RAII. Explicit queue pause/resume now gates new reservations under the same lock, while pending cancellation and already-admitted work remain live; see `docs/PAUSED_ADMISSION.md`.
 - Charge arithmetic includes workspace/source/cache/authentication ceilings plus an explicit caller metadata/runtime allowance. This is cooperative accounted admission, not whole-process RSS enforcement or an automatic CLI scheduler.
 - Queue-scoped ticket identities prevent cross-queue cancellation/admission collisions. Regression and real-model protocols cover cleanup, cancellation, capacity and complete-output/all-logit equality. See `docs/QUEUED_STREAMED_INFERENCE.md`.
