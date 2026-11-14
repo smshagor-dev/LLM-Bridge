@@ -67,6 +67,12 @@ Local checks: Python regression suite; workspace non-native tests; release nativ
 - Prior #72–#77 merges targeted intermediate branches; main still contained only #71 when inspected. The next integration PR targets main directly and includes these already-reviewed cache/authentication/planning/performance/CPU-admission milestones.
 - Other Q4 models, K-quant formats, larger-model/physical-2GB validation and complete adaptive scheduling remain pending. See `docs/STREAMED_Q4_VALIDATION.md`.
 
+## Explicit baseline CPU build checkpoint
+
+- `LLMBRIDGE_CPU_PROFILE=baseline` selects a separate x86-64/SSE2 artifact; `avx2` remains default. Cargo tracks changes, wrapper and ggml profiles match, and unknown values fail the build. Runtime environment changes cannot override the embedded profile.
+- Profile-specific CPU/OS admission accepts SSE2 baseline CPUs without AVX. No automatic ISA dispatch or scalar fallback is introduced; other architectures remain unvalidated.
+- Matching independent baseline reference protocols exercise authenticated cached Q8/Q4 on the host and under Core 2 Duo emulation. Native Q8 process-cap validation is separate; emulation cannot be labeled as a memory-cap proof. Real old-CPU/2GB hardware and larger-model validation remain pending. See `docs/BASELINE_CPU_BUILD.md`.
+
 ## M3–M11
 
 M3 now has native-derived CLI/context admission, not a complete adaptive scheduler. M4 remote providers, M5 MoE, M6 GPU, M7 API/SDK, M8 desktop, M9 full robustness/benchmarks, M10 format/plugin extensibility and M11 large-model feasibility remain incomplete. No 70B/550B or real 2GB-machine result is claimed.

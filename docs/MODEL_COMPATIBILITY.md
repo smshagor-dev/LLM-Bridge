@@ -15,3 +15,5 @@ Pinned checkpoint SHA-256: `2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d
 Raw prompt continuation only. Linux RLIMIT_AS validation is a constrained process test, not physical 2GB hardware, a general RSS API or evidence for large models. Unknown Llama metadata options and extra tensors fail closed in the streamed path.
 
 Q4_0 derivation, numerical profile and limits: [Q4 protocol](STREAMED_Q4_VALIDATION.md). Q4_1/K-quants remain unsupported by the streamed decoder. Q4 file-size reduction is not a process-memory or language-quality claim.
+
+The explicit `baseline` build is separately tested with the pinned Q8/Q4 checkpoints on the native host and under Core 2 Duo CPU emulation. It is not an automatic fallback or a physical old-CPU/2GB-hardware result. See [baseline CPU builds](BASELINE_CPU_BUILD.md).

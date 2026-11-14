@@ -2,7 +2,7 @@
 
 The dense Llama streamed decoder accepts F32, Q8_0 and Q4_0 tensors. Q4_0 uses the pinned ggml packed-row geometry (18 bytes per 32 weights), its dequantizer for embedding rows and its CPU dot/activation-quantization traits for projections. Weights continue through bounded Rust range reads; no resident weight loader or full dequantized matrix is introduced. Q4_1 and K-quant formats are still rejected by this decoder.
 
-RMS normalization follows the pinned upstream CPU arithmetic: square each activation in FP32, then accumulate those rounded squares in double precision. Squaring directly in double is a different rounding path and can cross later activation-quantization thresholds. The wrapper uses the same explicit AVX2/FMA profile as the pinned CPU kernels. Normal RoPE uses incremental FP32 angles; FP32 attention uses pinned dot/softmax primitives with padded score/value scratch; SwiGLU uses the pinned CPU primitive. Both Q8_0 and Q4_0 need reference regression coverage.
+RMS normalization follows the pinned upstream CPU arithmetic: square each activation in FP32, then accumulate those rounded squares in double precision. Squaring directly in double is a different rounding path and can cross later activation-quantization thresholds. The wrapper uses the same explicit ISA profile as the pinned CPU kernels: AVX2/FMA by default, or SSE2 in the explicit baseline build. Normal RoPE uses incremental FP32 angles; FP32 attention uses pinned dot/softmax primitives with padded score/value scratch; SwiGLU uses the pinned CPU primitive. Both Q8_0 and Q4_0 need reference regression coverage.
 
 ## Reproducible checkpoint
 

@@ -2,6 +2,7 @@
 //! Direct C ABI consumers must perform their own compatible CPU/OS admission.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CpuCapabilities {
+    pub sse2: bool,
     pub sse42: bool,
     pub avx: bool,
     pub avx2: bool,
@@ -10,8 +11,9 @@ pub struct CpuCapabilities {
     pub bmi2: bool,
 }
 impl CpuCapabilities {
-    fn requirements(self) -> [(&'static str, bool); 6] {
+    fn requirements(self) -> [(&'static str, bool); 7] {
         [
+            ("sse2", self.sse2),
             ("sse4.2", self.sse42),
             ("avx", self.avx),
             ("avx2", self.avx2),
@@ -29,40 +31,49 @@ pub struct NativeCpuCompatibility {
 }
 impl NativeCpuCompatibility {
     pub fn compatible(&self) -> bool {
-        self.profile == "x86-avx2"
-            && matches!(self.architecture, "x86" | "x86_64")
-            && self
-                .capabilities
-                .requirements()
-                .iter()
-                .all(|(_, supported)| *supported)
+        match self.profile {
+            "x86-baseline" => self.architecture == "x86_64" && self.capabilities.sse2,
+            "x86-avx2" => {
+                matches!(self.architecture, "x86" | "x86_64")
+                    && self
+                        .capabilities
+                        .requirements()
+                        .iter()
+                        .all(|(_, present)| *present)
+            }
+            _ => false,
+        }
+    }
+    fn required_features(&self) -> impl Iterator<Item = (&'static str, bool)> {
+        let baseline = self.profile == "x86-baseline";
+        self.capabilities
+            .requirements()
+            .into_iter()
+            .filter(move |(name, _)| !baseline || *name == "sse2")
     }
     pub fn ensure(&self) -> Result<(), String> {
         if self.compatible() {
             return Ok(());
         }
         let missing = self
-            .capabilities
-            .requirements()
-            .into_iter()
+            .required_features()
             .filter_map(|(name, present)| (!present).then_some(name))
             .collect::<Vec<_>>()
             .join(", ");
-        Err(format!("native CPU incompatible: build profile {}; architecture {}; missing CPU/OS capabilities [{}]. No scalar fallback is validated for this build",
+        Err(format!("native CPU incompatible: build profile {}; architecture {}; missing CPU/OS capabilities [{}]. Select a compatible explicit build profile; automatic ISA fallback is disabled",
                     self.profile, self.architecture, missing))
     }
     pub fn to_json(&self) -> String {
         let c = self.capabilities;
-        let missing = c
-            .requirements()
-            .into_iter()
+        let missing = self
+            .required_features()
             .filter_map(|(name, present)| (!present).then(|| format!("\"{name}\"")))
             .collect::<Vec<_>>()
             .join(",");
         format!(concat!("{{\"native_profile\":\"{}\",\"architecture\":\"{}\",\"native_compatible\":{},",
-            "\"capabilities\":{{\"sse42\":{},\"avx\":{},\"avx2\":{},\"fma\":{},\"f16c\":{},\"bmi2\":{}}},",
+            "\"capabilities\":{{\"sse2\":{},\"sse42\":{},\"avx\":{},\"avx2\":{},\"fma\":{},\"f16c\":{},\"bmi2\":{}}},",
             "\"missing_cpu_os_capabilities\":[{}],\"scalar_fallback_validated\":false}}"),
-            self.profile, self.architecture, self.compatible(), c.sse42, c.avx, c.avx2, c.fma, c.f16c, c.bmi2, missing)
+            self.profile, self.architecture, self.compatible(), c.sse2, c.sse42, c.avx, c.avx2, c.fma, c.f16c, c.bmi2, missing)
     }
 }
 
@@ -71,6 +82,7 @@ impl NativeCpuCompatibility {
 pub fn compatibility() -> NativeCpuCompatibility {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     let capabilities = CpuCapabilities {
+        sse2: std::is_x86_feature_detected!("sse2"),
         sse42: std::is_x86_feature_detected!("sse4.2"),
         avx: std::is_x86_feature_detected!("avx"),
         avx2: std::is_x86_feature_detected!("avx2"),
@@ -98,6 +110,7 @@ mod tests {
             profile: "x86-avx2",
             architecture: "x86_64",
             capabilities: CpuCapabilities {
+                sse2: true,
                 sse42: true,
                 avx: true,
                 avx2: true,
@@ -110,9 +123,10 @@ mod tests {
     #[test]
     fn every_required_cpu_os_feature_must_be_present() {
         assert!(capable().ensure().is_ok());
-        for index in 0..6 {
+        for index in 0..7 {
             let mut cpu = capable();
             let flags = [
+                &mut cpu.capabilities.sse2,
                 &mut cpu.capabilities.sse42,
                 &mut cpu.capabilities.avx,
                 &mut cpu.capabilities.avx2,
@@ -157,5 +171,48 @@ mod tests {
         assert!(json.contains("\"native_compatible\":false"));
         assert!(json.contains("\"missing_cpu_os_capabilities\":[\"f16c\"]"));
         assert!(json.contains("\"scalar_fallback_validated\":false"));
+    }
+    #[test]
+    fn baseline_admits_sse2_without_avx_but_avx2_build_does_not() {
+        let cpu = NativeCpuCompatibility {
+            profile: "x86-baseline",
+            architecture: "x86_64",
+            capabilities: CpuCapabilities {
+                sse2: true,
+                ..Default::default()
+            },
+        };
+        assert!(cpu.ensure().is_ok());
+        assert!(cpu.to_json().contains("\"missing_cpu_os_capabilities\":[]"));
+        assert!(NativeCpuCompatibility {
+            profile: "x86-avx2",
+            ..cpu
+        }
+        .ensure()
+        .is_err());
+    }
+    #[test]
+    fn baseline_requires_sse2_and_a_validated_architecture() {
+        let cpu = NativeCpuCompatibility {
+            profile: "x86-baseline",
+            ..capable()
+        };
+        assert!(NativeCpuCompatibility {
+            capabilities: CpuCapabilities {
+                sse2: false,
+                ..cpu.capabilities
+            },
+            ..cpu
+        }
+        .ensure()
+        .is_err());
+        for architecture in ["x86", "aarch64", "riscv64"] {
+            assert!(NativeCpuCompatibility {
+                architecture,
+                ..cpu
+            }
+            .ensure()
+            .is_err());
+        }
     }
 }

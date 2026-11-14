@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 
@@ -38,9 +39,9 @@ def main():
             report['emulator_sha256'] = sha256(args.emulator)
             report['emulator_version'] = subprocess.run([emulator, '--version'], capture_output=True,
                 text=True, check=True, timeout=30).stdout.splitlines()[0]
-            def run(name, executable, arguments, guest_cpu='core2duo'):
+            def run(name, executable, arguments, guest_cpu='core2duo', environment=None):
                 result = subprocess.run([emulator, '-cpu', guest_cpu, executable, *arguments],
-                                        capture_output=True, check=False, timeout=30)
+                                        capture_output=True, check=False, timeout=30, env=environment)
                 report['cases'][name] = {'exit_code': result.returncode, 'guest_cpu': guest_cpu,
                     'stdout_sha256': hashlib.sha256(result.stdout).hexdigest(),
                     'stderr_sha256': hashlib.sha256(result.stderr).hexdigest()}
@@ -50,6 +51,11 @@ def main():
             report['emulated_cpu'] = cpu
             assert doctor.returncode == 0 and cpu['native_profile'] == 'x86-avx2'
             assert not cpu['native_compatible'] and 'avx2' in cpu['missing_cpu_os_capabilities']
+            spoofed = run('runtime_profile_cannot_override_build', binary, ['doctor', '--json'],
+                          environment={**os.environ, 'LLMBRIDGE_CPU_PROFILE': 'baseline'})
+            spoofed_cpu = json.loads(spoofed.stdout)['cpu']
+            assert spoofed.returncode == 0 and spoofed_cpu['native_profile'] == 'x86-avx2'
+            assert not spoofed_cpu['native_compatible']
             no_xsave = run('avx_without_os_state', binary, ['doctor', '--json'], 'Haswell,-xsave')
             no_xsave_cpu = json.loads(no_xsave.stdout)['cpu']
             report['avx_without_os_state_cpu'] = no_xsave_cpu

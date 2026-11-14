@@ -16,6 +16,11 @@ class CheckpointGateTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_checkpoint(name, digest)
 
+    def test_emulation_is_never_a_guest_memory_cap_proof(self):
+        with self.assertRaises(ValueError):
+            validate_proof_cap(24, 26671328, 'linux', emulated=True)
+        validate_proof_cap(0, 26671328, 'linux', emulated=True)
+
     def test_smaller_q4_file_cannot_be_claimed_as_the_24_mib_proof(self):
         validate_proof_cap(24, 26671328, 'linux')
         validate_proof_cap(0, 14469344, 'linux')
