@@ -9,8 +9,8 @@ pub mod f32_chain;
 pub mod f32_residual;
 pub mod f32_stream;
 pub mod f32_swiglu;
-pub mod memory_plan;
 pub mod memory_budget;
+pub mod memory_plan;
 #[cfg(feature = "native")]
 pub mod q8_batch;
 #[cfg(feature = "native")]
@@ -20,3 +20,6 @@ pub mod storage;
 pub mod tensor_batch;
 pub mod tensor_cache;
 pub mod tensor_layout;
+
+#[cfg(feature = "native")]
+pub mod streamed;

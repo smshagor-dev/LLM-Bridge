@@ -4,7 +4,7 @@
 
 LLM Bridge is an open engineering effort to make **local AI inference more accessible on machines with constrained RAM, CPU capacity, and optional or no GPU**. It is not tied to OpenMindAI, a cloud service, a specific GPU vendor, or a particular model provider.
 
-> **Current reality:** The repository has a working CPU/GGUF baseline and several bounded tensor-access and operator prototypes. It **does not yet provide a complete out-of-core transformer runtime, a hard process-RSS guarantee, or evidence that a 550B model can run on a 2 GB computer**. See [implementation status](IMPLEMENTATION_STATUS.md) and [model compatibility](docs/MODEL_COMPATIBILITY.md).
+> **Current reality:** Real CPU/GGUF generation and an **experimental complete streamed dense-Llama decoder** are implemented. The pinned 15M Q8 checkpoint completed reference-matched generation under a Linux 24 MiB address-space cap smaller than its model file. This is a tiny-model result; larger models, real 2 GB hardware, portable per-request limits, remote storage, API and desktop remain incomplete. See [streamed decoder validation](docs/STREAMED_DECODER.md).
 
 ## The problem we are solving
 
@@ -49,14 +49,15 @@ These are **engineering targets**, not a list of completed features. See [AGENTS
                   tokens / logits / metrics
 ```
 
-**Important:** The diagram describes the **target integration**. Today, the normal end-to-end generation path uses the pinned llama.cpp native backend and its standard model-loading/mmap behavior. The bounded reader and streamed F32/Q8 operators are implemented as **separate M2 building blocks**; they are **not yet the storage path for the full native transformer graph**.
+**Execution paths:** Normal generation defaults to the pinned llama.cpp resident backend. `--backend streamed` uses the experimental complete dense-Llama decoder with bounded Rust tensor reads, native ggml kernels and FP32 KV. It loads only tokenizer metadata through upstream's vocabulary-only path. The full cache/prefetch/scheduler integration shown above remains a target.
 
 ### Where to find the code
 
 | Location | Responsibility |
 | --- | --- |
 | `crates/llmbridge-cli/` | CLI entry point and developer commands |
-| `crates/llmbridge-core/src/inference.rs` | Rust/native inference boundary (native feature) |
+| `crates/llmbridge-core/src/inference.rs` | Resident/native inference and operator boundary |
+| `crates/llmbridge-core/src/streamed.rs`, `native/src/streamed.cpp` | Experimental complete streamed dense-Llama decoder |
 | `crates/llmbridge-core/src/gguf_index.rs` | GGUF metadata and tensor inventory |
 | `crates/llmbridge-core/src/storage.rs` | Bounded local file reads and source identity |
 | `crates/llmbridge-core/src/tensor_batch.rs` | Bounded indexed tensor-range operations |
@@ -79,7 +80,7 @@ Some components are experimental and may change as graph integration progresses.
 | M1 CPU baseline | Real GGUF tokenizer and native CPU generation; one small Q8 checkpoint matched pinned upstream greedy output in CI | Broader model families, cancellation and numerical validation |
 | GGUF inventory | Indexed tensor shapes/types/offsets and checked ranges; independent 57-tensor comparison recorded | More malformed-format and compatibility coverage |
 | Bounded storage | Range reader, source identity, optional integrity checks, cache budgeting | Connect reads to the **complete** native execution graph |
-| Streamed operators | F32/Q8 operator-level work, cancellation and output-safety tests under development | End-to-end logits and model parity using streamed weights |
+| Streamed decoder | Complete F32/Q8_0 dense-Llama path; pinned 15M output/logit and Linux address-space validation | Broader models, contexts, cache/prefetch and robustness |
 | Memory accounting | Linux RSS/PSS and cgroup-related instrumentation | **Enforced** process memory bounds under real model loads |
 | Adaptive planner | Early planning helpers | Full hardware-aware scheduling, KV-cache admission and benchmarks |
 | Large-model low-RAM inference | **Not verified** | Correctness, OS survival, I/O and latency evidence on actual constrained hardware |
@@ -89,7 +90,7 @@ Some components are experimental and may change as graph integration progresses.
 
 ## Build and run
 
-**Prerequisites:** Rust 1.82+, CMake 3.22+, a C++20 compiler, Git, and network access on the initial build (CMake FetchContent retrieves pinned llama.cpp v0.9.0).
+**Prerequisites:** Pinned Rust 1.85.1 (declared library minimum 1.82), CMake 3.22+, a C++20 compiler, Git, and network access on the initial build (CMake FetchContent retrieves pinned llama.cpp v0.9.0).
 
 ```sh
 cargo build --release -p llmbridge
@@ -99,9 +100,18 @@ cargo run --release -p llmbridge -- models inspect /models/model.gguf
 cargo run --release -p llmbridge -- chat /models/model.gguf --prompt "The sky is" --max-tokens 16 --ctx 128 --threads 2 --stream
 ```
 
-The current `chat` command performs **raw prompt continuation**, not chat-template-validated conversational inference. It uses native tokenization, attention, CPU kernels, and greedy sampling; it does not send prompts to a remote service. Terminal Ctrl+C requests cooperative cancellation, which still needs broader active-execution validation.
+The current `chat` command performs **raw prompt continuation**, not chat-template-validated conversational inference. It uses native tokenization, attention, CPU kernels, and greedy sampling; it does not send prompts to a remote service. Terminal Ctrl+C requests cooperative cancellation through native polling. A single blocking native operation remains non-preemptible.
 
 No model weights are bundled. For a known small GGUF model, its pinned hash, source, and reproducible test procedure, consult [M1 test protocol](docs/M1_TEST_PROTOCOL.md). Respect each model's license.
+
+### Experimental streamed generation
+
+```sh
+cargo run --release -p llmbridge -- chat /models/model.gguf --prompt "The sky is" \
+  --backend streamed --ctx 128 --max-tokens 8 --workspace-mb 8 --metrics
+```
+
+For Linux standalone CLI use, `--address-space-mb 24` enforces `RLIMIT_AS`. This is a virtual-address limit, distinct from an explicit workspace budget, cgroup memory or physical machine RAM. Only the pinned tiny checkpoint has been verified end to end. [Protocol, evidence and limits](docs/STREAMED_DECODER.md).
 
 ### Run checks before proposing changes
 
@@ -115,7 +125,7 @@ Native dependencies and test coverage may vary by platform; consult CI workflows
 
 ## Roadmap and acceptance criteria
 
-**M2 — current priority:** Finish verified tensor inventory and bounded range loading, connect that storage path to actual native model graph execution, enforce and measure memory budgets, prove cancellation and cache correctness, and independently compare real logits/tokens against a pinned reference. A streamed matvec alone does **not** complete M2.
+**M2 — current priority:** Build on the experimental full-decoder checkpoint: integrate verified immutable sessions, cache/prefetch, scheduling, portable worker limits, broader correctness and memory validation. The current Linux/tiny-model proof does **not** complete every M2 or product requirement.
 
 **M3 — adaptive hardware/memory planning:** Calculate feasible context, KV-cache, activation and staging budgets; choose execution strategies based on measured hardware; fail safely when a workload cannot be admitted.
 

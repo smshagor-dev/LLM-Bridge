@@ -351,7 +351,8 @@ mod tests {
         };
         let invoked = Cell::new(false);
         let result = limits.around_growth_with_peak_audit(
-            10, 0,
+            10,
+            0,
             || {
                 let mut reading = sample(Some(20), None);
                 reading.peak_rss_bytes = Some(101);
@@ -375,7 +376,9 @@ mod tests {
         };
         let invoked = Cell::new(false);
         let result = limits.around_growth_with_peak_audit(
-            1, 0, || sample(Some(10), None),
+            1,
+            0,
+            || sample(Some(10), None),
             || {
                 invoked.set(true);
                 Ok(())

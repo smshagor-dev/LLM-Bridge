@@ -31,8 +31,12 @@ pub fn audit_tensor_layout(
         return Err(invalid("GGUF tensor data begins beyond EOF"));
     }
     let mut spans = Vec::new();
-    spans.try_reserve_exact(regions.len())
-        .map_err(|_| io::Error::new(ErrorKind::OutOfMemory, "tensor audit offset table allocation failed"))?;
+    spans.try_reserve_exact(regions.len()).map_err(|_| {
+        io::Error::new(
+            ErrorKind::OutOfMemory,
+            "tensor audit offset table allocation failed",
+        )
+    })?;
     for region in regions {
         if region.byte_len == 0 {
             return Err(invalid("zero-length GGUF tensor"));
@@ -43,7 +47,8 @@ pub fn audit_tensor_layout(
         if region.file_offset != expected {
             return Err(invalid("tensor absolute and relative offsets disagree"));
         }
-        let end = expected.checked_add(region.byte_len)
+        let end = expected
+            .checked_add(region.byte_len)
             .ok_or_else(|| invalid("tensor byte range overflow"))?;
         if end > file_bytes {
             return Err(invalid("GGUF tensor extends beyond EOF"));
@@ -99,17 +104,26 @@ mod tests {
         assert_eq!(result.inter_tensor_padding_bytes, 16);
         assert_eq!(result.trailing_bytes, 16);
         assert_eq!(result.data_region_bytes, 64);
-        assert_eq!(result.payload_bytes + result.inter_tensor_padding_bytes + result.trailing_bytes, result.data_region_bytes);
+        assert_eq!(
+            result.payload_bytes + result.inter_tensor_padding_bytes + result.trailing_bytes,
+            result.data_region_bytes
+        );
     }
 
     #[test]
     fn overlap_and_mismatched_offsets_are_rejected() {
-        assert_eq!(audit_tensor_layout(&[region("a", 0, 20), region("b", 16, 4)], 64, 128)
-            .unwrap_err().kind(), ErrorKind::InvalidData);
+        assert_eq!(
+            audit_tensor_layout(&[region("a", 0, 20), region("b", 16, 4)], 64, 128)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidData
+        );
         let mut bad = region("a", 0, 4);
         bad.file_offset = 65;
-        assert_eq!(audit_tensor_layout(&[bad], 64, 128)
-            .unwrap_err().kind(), ErrorKind::InvalidData);
+        assert_eq!(
+            audit_tensor_layout(&[bad], 64, 128).unwrap_err().kind(),
+            ErrorKind::InvalidData
+        );
     }
 
     #[test]
@@ -117,7 +131,8 @@ mod tests {
         assert!(audit_tensor_layout(&[region("a", 64, 1)], 64, 128).is_err());
         assert!(audit_tensor_layout(&[region("a", 0, 0)], 64, 128).is_err());
         assert!(audit_tensor_layout(&[], 129, 128).is_err());
-        let mut bad = region("overflow", u64::MAX, 1);
+        let mut bad = region("overflow", 0, 1);
+        bad.relative_offset = u64::MAX;
         bad.file_offset = 0;
         assert!(audit_tensor_layout(&[bad], 64, u64::MAX).is_err());
     }

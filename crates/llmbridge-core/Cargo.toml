@@ -2,6 +2,7 @@
 name = "llmbridge-core"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 [features]
 default = []
@@ -18,4 +19,8 @@ required-features = ["native"]
 
 [[example]]
 name = "q8_two_stage"
+required-features = ["native"]
+
+[[example]]
+name = "streamed_contract"
 required-features = ["native"]

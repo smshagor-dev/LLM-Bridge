@@ -1,14 +1,14 @@
+# Verified execution support — 2026-11-13
 
-# LLM Bridge verified execution support (2026-11-12)
+| Model/format/path | Inspection | Generation | Validation |
+| --- | --- | --- | --- |
+| stories15M-q8_0, resident CPU | GGUF index | Yes | Complete generated-byte reference comparison |
+| stories15M-q8_0, streamed CPU | GGUF index | Yes, experimental full decoder | Three prompts/eight tokens; complete output and FP32-KV logits; Linux 24 MiB address-space cap below model file size |
+| Other dense Llama F32/Q8_0, standard full-head RoPE | GGUF index | Streamed path accepts implemented metadata/shapes | No independent per-model verification |
+| Other GGUF families/quantizations | Bounded header/index for known layouts | Resident upstream adapter may support them | Not adapter-verified; streamed path rejects |
+| SafeTensors/ONNX, MoE/multimodal/recurrent | Not implemented/adapter-verified | Not advertised | None |
+| GPU, remote storage | Not implemented | No | None |
 
-| Model/format | Bounded header inspection | CPU generation | Trusted greedy parity |
-|---|---|---|---|
-| ggml-org/tiny-llamas stories15M-q8_0.gguf | Yes | **Verified in GitHub Actions** | **Pass** vs pinned upstream llama-simple, byte-for-byte generated suffix |
-| GGUF v2/v3 other architectures | Header only | Available through native upstream adapter, unverified per-family | Not tested |
-| SafeTensors, ONNX | Not yet | No | No |
-| MoE, multimodal, recurrent | Not adapter-verified | Not advertised | No |
-| GPU, hard-RSS-bounded out-of-core | N/A | No | No |
+Pinned checkpoint SHA-256: `2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6`. Reference: llama.cpp `cd959bae99ff4bed22bef2604f45241c09bbb8c8` (v0.9.0). See [streamed decoder protocol](STREAMED_DECODER.md) and checked-in JSON evidence.
 
-**Evidence**: GitHub Actions run 43114276598, `model-parity` job, verified model SHA-256 `2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6`, pinned upstream llama.cpp v0.9.0. The model output matched the independent upstream example exactly in the tested greedy case. Artifact contains source outputs and JSON result.
-
-Scope is **raw prompt continuation**, not a chat-template-validated conversational model. No claim is made that every llama.cpp-supported quantization or family is verified. No memory-bounded tensor streaming proof is established.
+Raw prompt continuation only. Linux RLIMIT_AS validation is a constrained process test, not physical 2GB hardware, a general RSS API or evidence for large models. Unknown Llama metadata options and extra tensors fail closed in the streamed path.

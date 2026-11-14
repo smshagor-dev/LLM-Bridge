@@ -1,0 +1,257 @@
+//! Experimental complete Llama F32/Q8_0 decoder backed by bounded local reads.
+//! The explicit workspace budget is not an enforced process RSS limit.
+use crate::{gguf_index::GgufTensorIndex, storage::BoundedLocalReader};
+use std::ffi::{c_char, c_void, CStr, CString};
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+#[derive(Debug, Clone, Copy)]
+pub struct StreamedConfig {
+    pub context_tokens: u32,
+    pub max_tokens: u32,
+    pub chunk_bytes: usize,
+    pub workspace_bytes: u64,
+}
+impl Default for StreamedConfig {
+    fn default() -> Self {
+        Self {
+            context_tokens: 128,
+            max_tokens: 16,
+            chunk_bytes: 64 * 1024,
+            workspace_bytes: 8 * 1024 * 1024,
+        }
+    }
+}
+#[derive(Debug)]
+pub struct StreamedMetrics {
+    pub source_bytes_read: u64,
+    pub reader_buffer_bytes: usize,
+}
+
+extern "C" {
+    fn llmbridge_abi_version() -> u32;
+    fn llmbridge_generate_streamed_cpu(
+        path: *const c_char,
+        prompt: *const c_char,
+        context: u32,
+        max_tokens: u32,
+        file_bytes: u64,
+        max_chunk: usize,
+        workspace: u64,
+        reader: extern "C" fn(*mut c_void, *mut c_void, u64, usize) -> usize,
+        emit: extern "C" fn(*const c_char, usize, *mut c_void) -> i32,
+        logits: extern "C" fn(*const f32, usize, *mut c_void) -> i32,
+        poll: extern "C" fn(*mut c_void) -> i32,
+        state: *mut c_void,
+        error: *mut c_char,
+        capacity: usize,
+    ) -> i32;
+}
+struct State<'a, F, L> {
+    reader: BoundedLocalReader,
+    cancelled: &'a AtomicBool,
+    emit: F,
+    logits: L,
+    failure: Option<String>,
+}
+fn contained<T: Default>(call: impl FnOnce() -> T) -> T {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)).unwrap_or_default()
+}
+extern "C" fn poll<F, L>(state: *mut c_void) -> i32 {
+    contained(|| {
+        if state.is_null() {
+            return 0;
+        }
+        // SAFETY: native borrows this State synchronously, never stores its pointer.
+        let state = unsafe { &*(state.cast::<State<'_, F, L>>()) };
+        i32::from(!state.cancelled.load(Ordering::Acquire) && state.failure.is_none())
+    })
+}
+extern "C" fn read<F, L>(
+    state: *mut c_void,
+    output: *mut c_void,
+    offset: u64,
+    length: usize,
+) -> usize {
+    contained(|| {
+        if state.is_null() || output.is_null() || length == 0 {
+            return 0;
+        }
+        // SAFETY: sole mutable synchronous callback; C++ supplies length writable bytes.
+        let state = unsafe { &mut *(state.cast::<State<'_, F, L>>()) };
+        let flag = state.cancelled;
+        match state
+            .reader
+            .read_range_cancellable(offset, length, || flag.load(Ordering::Acquire))
+        {
+            Ok(bytes) => {
+                if flag.load(Ordering::Acquire) {
+                    return 0;
+                }
+                unsafe {
+                    std::ptr::copy_nonoverlapping(bytes.as_ptr(), output.cast(), bytes.len());
+                }
+                bytes.len()
+            }
+            Err(error) => {
+                state.failure = Some(error.to_string());
+                0
+            }
+        }
+    })
+}
+extern "C" fn emit<F: FnMut(&[u8]) -> bool, L>(
+    bytes: *const c_char,
+    count: usize,
+    state: *mut c_void,
+) -> i32 {
+    contained(|| {
+        if state.is_null() || bytes.is_null() || count > 4096 {
+            return 0;
+        }
+        let state = unsafe { &mut *(state.cast::<State<'_, F, L>>()) };
+        if state.cancelled.load(Ordering::Acquire) || state.failure.is_some() {
+            return 0;
+        }
+        let piece = unsafe { std::slice::from_raw_parts(bytes.cast(), count) };
+        i32::from((state.emit)(piece) && !state.cancelled.load(Ordering::Acquire))
+    })
+}
+extern "C" fn logits<F, L: FnMut(&[f32]) -> bool>(
+    values: *const f32,
+    count: usize,
+    state: *mut c_void,
+) -> i32 {
+    contained(|| {
+        if state.is_null() || values.is_null() || count == 0 || count > 262144 {
+            return 0;
+        }
+        let state = unsafe { &mut *(state.cast::<State<'_, F, L>>()) };
+        if state.cancelled.load(Ordering::Acquire) || state.failure.is_some() {
+            return 0;
+        }
+        let values = unsafe { std::slice::from_raw_parts(values, count) };
+        i32::from((state.logits)(values) && !state.cancelled.load(Ordering::Acquire))
+    })
+}
+
+/// Runs every decoder layer for each input token; only requested tensor rows are read.
+/// Tokenizer metadata uses upstream vocabulary-only loading. No mmap weight loader is used.
+/// Unknown architecture options/tensor layouts fail; logits are exposed before greedy sampling.
+/// Callbacks may see prior tokens before a later read fails, as with other streaming APIs.
+pub fn generate_streamed<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
+    model: &Path,
+    prompt: &str,
+    config: StreamedConfig,
+    cancelled: &AtomicBool,
+    on_piece: F,
+    on_logits: L,
+) -> Result<StreamedMetrics, String> {
+    if cancelled.load(Ordering::Acquire) {
+        return Err("streamed generation cancelled before admission".into());
+    }
+    if !(64..=8192).contains(&config.context_tokens)
+        || !(1..=2048).contains(&config.max_tokens)
+        || !(34..=1024 * 1024).contains(&config.chunk_bytes)
+        || config.workspace_bytes == 0
+        || config.workspace_bytes > 1024 * 1024 * 1024
+        || prompt.is_empty()
+        || prompt.len() > 65536
+    {
+        return Err("invalid streamed generation configuration".into());
+    }
+    let path = CString::new(model.to_str().ok_or("model path must be UTF-8")?)
+        .map_err(|_| "NUL in model path")?;
+    let prompt = CString::new(prompt).map_err(|_| "NUL in prompt")?;
+    let index = GgufTensorIndex::inspect(model).map_err(|e| e.to_string())?;
+    let reader = BoundedLocalReader::open(model, config.chunk_bytes, config.chunk_bytes * 2)
+        .map_err(|e| e.to_string())?;
+    if reader.identity() != &index.source_identity {
+        return Err("streamed model changed after index".into());
+    }
+    // SAFETY: constant ABI query; all pointers below remain live for this synchronous call.
+    if unsafe { llmbridge_abi_version() } != 1 {
+        return Err("streamed native ABI mismatch".into());
+    }
+    let mut state = State {
+        reader,
+        cancelled,
+        emit: on_piece,
+        logits: on_logits,
+        failure: None,
+    };
+    let mut error = [0 as c_char; 1024];
+    let status = unsafe {
+        llmbridge_generate_streamed_cpu(
+            path.as_ptr(),
+            prompt.as_ptr(),
+            config.context_tokens,
+            config.max_tokens,
+            index.file_bytes,
+            config.chunk_bytes,
+            config.workspace_bytes,
+            read::<F, L>,
+            emit::<F, L>,
+            logits::<F, L>,
+            poll::<F, L>,
+            (&mut state as *mut State<'_, F, L>).cast(),
+            error.as_mut_ptr(),
+            error.len(),
+        )
+    };
+    if status == 2 || cancelled.load(Ordering::Acquire) {
+        return Err("streamed generation cancelled".into());
+    }
+    if status != 0 {
+        let diagnostic = unsafe { CStr::from_ptr(error.as_ptr()) }.to_string_lossy();
+        return Err(format!(
+            "streamed generation failed: {diagnostic}; source: {}",
+            state.failure.as_deref().unwrap_or("no read error")
+        ));
+    }
+    Ok(StreamedMetrics {
+        source_bytes_read: state.reader.disk_bytes_read(),
+        reader_buffer_bytes: config.chunk_bytes,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn precancelled_streaming_never_opens_model_or_delivers_output() {
+        let result = generate_streamed(
+            Path::new("/absent.gguf"),
+            "Hello",
+            StreamedConfig::default(),
+            &AtomicBool::new(true),
+            |_| panic!("token delivered"),
+            |_| panic!("logits delivered"),
+        );
+        assert!(result.unwrap_err().contains("cancelled before admission"));
+    }
+    #[test]
+    fn invalid_budget_or_context_fails_before_model_open() {
+        for config in [
+            StreamedConfig {
+                workspace_bytes: 0,
+                ..StreamedConfig::default()
+            },
+            StreamedConfig {
+                context_tokens: 1,
+                ..StreamedConfig::default()
+            },
+        ] {
+            assert!(generate_streamed(
+                Path::new("/absent.gguf"),
+                "Hello",
+                config,
+                &AtomicBool::new(false),
+                |_| true,
+                |_| true
+            )
+            .unwrap_err()
+            .contains("configuration"));
+        }
+    }
+}

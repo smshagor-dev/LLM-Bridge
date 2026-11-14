@@ -64,12 +64,10 @@ mod tests {
             cgroup_current_bytes: Some(650),
             ..ProcessMemory::default()
         };
-        let plan = admit_additional_allocation(&hardware(Some(500)), &process, 100, 40)
-            .unwrap();
+        let plan = admit_additional_allocation(&hardware(Some(500)), &process, 100, 40).unwrap();
         assert_eq!(plan.headroom_after_reserve_bytes, 110);
         assert_eq!(plan.remaining_after_request_bytes, 10);
-        assert!(admit_additional_allocation(&hardware(Some(500)), &process, 111, 40)
-            .is_err());
+        assert!(admit_additional_allocation(&hardware(Some(500)), &process, 111, 40).is_err());
     }
 
     #[test]
@@ -80,8 +78,7 @@ mod tests {
             cgroup_limit_bytes: Some(100),
             ..ProcessMemory::default()
         };
-        assert!(admit_additional_allocation(&hardware(Some(100)), &incomplete, 1, 0)
-            .is_err());
+        assert!(admit_additional_allocation(&hardware(Some(100)), &incomplete, 1, 0).is_err());
     }
 
     #[test]
@@ -92,8 +89,9 @@ mod tests {
             ..ProcessMemory::default()
         };
         assert!(admit_additional_allocation(&hardware(Some(500)), &process, 1, 0).is_err());
-        let plan = admit_additional_allocation(&hardware(Some(10)), &ProcessMemory::default(), 0, 100)
-            .unwrap();
+        let plan =
+            admit_additional_allocation(&hardware(Some(10)), &ProcessMemory::default(), 0, 100)
+                .unwrap();
         assert_eq!(plan.remaining_after_request_bytes, 0);
     }
 }

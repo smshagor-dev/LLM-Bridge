@@ -4,13 +4,15 @@
 //! bounded Rust reader. This is a small graph execution slice: it is not
 //! transformer prefill/decode, a process-RSS limit, or logit parity evidence.
 
-use crate::gguf_index::{GgufTensorIndex};
+use crate::gguf_index::GgufTensorIndex;
 use crate::inference::q8_0_matvec_with_budget;
 use crate::storage::BoundedLocalReader;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 fn q8_shape(index: &GgufTensorIndex, name: &str) -> Result<(usize, usize), String> {
-    let tensor = index.tensor(name).ok_or_else(|| format!("missing Q8_0 tensor: {name}"))?;
+    let tensor = index
+        .tensor(name)
+        .ok_or_else(|| format!("missing Q8_0 tensor: {name}"))?;
     if tensor.ggml_type != 8 || tensor.dimensions.len() != 2 {
         return Err(format!("{name} must be a rank-2 Q8_0 GGUF tensor"));
     }
@@ -19,7 +21,9 @@ fn q8_shape(index: &GgufTensorIndex, name: &str) -> Result<(usize, usize), Strin
     let rows = usize::try_from(tensor.dimensions[1])
         .map_err(|_| format!("{name} rows exceed the address space"))?;
     if columns == 0 || columns > 16_384 || columns % 32 != 0 || rows == 0 || rows > 65_536 {
-        return Err(format!("{name} dimensions exceed native Q8_0 operator limits"));
+        return Err(format!(
+            "{name} dimensions exceed native Q8_0 operator limits"
+        ));
     }
     let row_bytes = (columns / 32)
         .checked_mul(34)
@@ -28,7 +32,9 @@ fn q8_shape(index: &GgufTensorIndex, name: &str) -> Result<(usize, usize), Strin
         .checked_mul(rows)
         .ok_or_else(|| format!("{name} tensor-byte arithmetic overflow"))?;
     if u64::try_from(tensor_bytes).ok() != Some(tensor.byte_len) {
-        return Err(format!("{name} indexed byte length disagrees with Q8_0 shape"));
+        return Err(format!(
+            "{name} indexed byte length disagrees with Q8_0 shape"
+        ));
     }
     Ok((columns, rows))
 }
@@ -43,6 +49,7 @@ fn q8_shape(index: &GgufTensorIndex, name: &str) -> Result<(usize, usize), Strin
 /// The graph budget conservatively reserves one native operator workspace plus
 /// the first stage's retained activation. It bounds only accounted application
 /// buffers, not the allocator, OS page cache, native model graph, or process RSS.
+#[allow(clippy::too_many_arguments)] // Existing explicit graph/operator budget API.
 pub fn q8_0_two_stage_with_budget(
     index: &GgufTensorIndex,
     reader: &mut BoundedLocalReader,
@@ -61,7 +68,8 @@ pub fn q8_0_two_stage_with_budget(
     }
     let (first_columns, first_rows) = q8_shape(index, first_name)?;
     let (second_columns, _second_rows) = q8_shape(index, second_name)?;
-    if input.len() != first_columns || first_rows != second_columns
+    if input.len() != first_columns
+        || first_rows != second_columns
         || input.iter().any(|value| !value.is_finite())
     {
         return Err("incompatible Q8_0 graph shapes or non-finite input".into());
@@ -76,14 +84,18 @@ pub fn q8_0_two_stage_with_budget(
         return Err("insufficient Q8_0 graph budget for retained activation".into());
     }
     // These checks precede the first tensor read or any activation allocation.
-    if reader.allocated_chunk_bytes() < 34
-        || reader.allocated_chunk_bytes() > operator_budget_bytes
+    if reader.allocated_chunk_bytes() < 34 || reader.allocated_chunk_bytes() > operator_budget_bytes
     {
         return Err("invalid Q8_0 reader chunk budget".into());
     }
 
     let intermediate = q8_0_matvec_with_budget(
-        index, reader, first_name, input, cancelled, operator_budget_bytes,
+        index,
+        reader,
+        first_name,
+        input,
+        cancelled,
+        operator_budget_bytes,
     )?;
     if cancelled.load(Ordering::Acquire) {
         return Err("Q8_0 graph cancelled after first stage".into());
@@ -91,7 +103,12 @@ pub fn q8_0_two_stage_with_budget(
     // The retained intermediate was accounted above. The native call returns
     // an owned output only on success; no partially computed output escapes.
     let final_output = q8_0_matvec_with_budget(
-        index, reader, second_name, &intermediate, cancelled, operator_budget_bytes,
+        index,
+        reader,
+        second_name,
+        &intermediate,
+        cancelled,
+        operator_budget_bytes,
     )?;
     if cancelled.load(Ordering::Acquire) {
         return Err("Q8_0 graph cancelled before output commit".into());
@@ -150,7 +167,10 @@ mod tests {
             std::process::id(),
             NEXT.fetch_add(1, AtomicOrdering::Relaxed)
         ));
-        std::fs::File::create(&path).unwrap().write_all(&bytes).unwrap();
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(&bytes)
+            .unwrap();
         path
     }
 
@@ -160,9 +180,16 @@ mod tests {
         let index = GgufTensorIndex::inspect(&path).unwrap();
         let mut reader = BoundedLocalReader::open(&path, 64, 128).unwrap();
         let output = q8_0_two_stage_with_budget(
-            &index, &mut reader, "first", "second", &[2f32; 32],
-            &AtomicBool::new(false), OP_BUDGET, GRAPH_BUDGET,
-        ).unwrap();
+            &index,
+            &mut reader,
+            "first",
+            "second",
+            &[2f32; 32],
+            &AtomicBool::new(false),
+            OP_BUDGET,
+            GRAPH_BUDGET,
+        )
+        .unwrap();
         assert_eq!(output, vec![64f32]);
         assert_eq!(reader.disk_bytes_read(), 32 * 34 + 34);
         assert_eq!(reader.allocated_chunk_bytes(), 64);
@@ -175,9 +202,16 @@ mod tests {
         let index = GgufTensorIndex::inspect(&path).unwrap();
         let mut reader = BoundedLocalReader::open(&path, 64, 128).unwrap();
         let output = q8_0_two_stage_with_budget(
-            &index, &mut reader, "first", "first", &[2f32; 32],
-            &AtomicBool::new(false), OP_BUDGET, GRAPH_BUDGET,
-        ).unwrap();
+            &index,
+            &mut reader,
+            "first",
+            "first",
+            &[2f32; 32],
+            &AtomicBool::new(false),
+            OP_BUDGET,
+            GRAPH_BUDGET,
+        )
+        .unwrap();
         assert_eq!(output, vec![2f32; 32]);
         assert_eq!(reader.disk_bytes_read(), 2 * 32 * 34);
         std::fs::remove_file(path).unwrap();
@@ -189,9 +223,16 @@ mod tests {
         let index = GgufTensorIndex::inspect(&path).unwrap();
         let mut reader = BoundedLocalReader::open(&path, 64, 128).unwrap();
         let err = q8_0_two_stage_with_budget(
-            &index, &mut reader, "first", "second", &[2f32; 32],
-            &AtomicBool::new(false), OP_BUDGET, GRAPH_BUDGET,
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "first",
+            "second",
+            &[2f32; 32],
+            &AtomicBool::new(false),
+            OP_BUDGET,
+            GRAPH_BUDGET,
+        )
+        .unwrap_err();
         assert!(err.contains("shape"));
         assert_eq!(reader.disk_bytes_read(), 0);
         std::fs::remove_file(path).unwrap();
@@ -203,16 +244,30 @@ mod tests {
         let index = GgufTensorIndex::inspect(&path).unwrap();
         let mut reader = BoundedLocalReader::open(&path, 64, 128).unwrap();
         let err = q8_0_two_stage_with_budget(
-            &index, &mut reader, "first", "second", &[2f32; 32],
-            &AtomicBool::new(false), OP_BUDGET, GRAPH_BUDGET - 1,
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "first",
+            "second",
+            &[2f32; 32],
+            &AtomicBool::new(false),
+            OP_BUDGET,
+            GRAPH_BUDGET - 1,
+        )
+        .unwrap_err();
         assert!(err.contains("graph budget"));
         assert_eq!(reader.disk_bytes_read(), 0);
         let cancelled = AtomicBool::new(true);
         let err = q8_0_two_stage_with_budget(
-            &index, &mut reader, "first", "second", &[2f32; 32],
-            &cancelled, OP_BUDGET, GRAPH_BUDGET,
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "first",
+            "second",
+            &[2f32; 32],
+            &cancelled,
+            OP_BUDGET,
+            GRAPH_BUDGET,
+        )
+        .unwrap_err();
         assert!(err.contains("cancelled"));
         assert_eq!(reader.disk_bytes_read(), 0);
         std::fs::remove_file(path).unwrap();
@@ -224,9 +279,16 @@ mod tests {
         let index = GgufTensorIndex::inspect(&path).unwrap();
         let mut reader = BoundedLocalReader::open(&path, 64, 128).unwrap();
         let err = q8_0_two_stage_with_budget(
-            &index, &mut reader, "first", "second", &[2f32; 32],
-            &AtomicBool::new(false), OP_BUDGET, GRAPH_BUDGET,
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            "first",
+            "second",
+            &[2f32; 32],
+            &AtomicBool::new(false),
+            OP_BUDGET,
+            GRAPH_BUDGET,
+        )
+        .unwrap_err();
         assert!(err.contains("non-finite") || err.contains("failed"));
         assert_eq!(reader.disk_bytes_read(), 32 * 34 + 34);
         std::fs::remove_file(path).unwrap();

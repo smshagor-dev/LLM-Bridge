@@ -16,7 +16,7 @@ fn main() {
     }
 }
 fn usage() -> &'static str {
-    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics]"
+    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--address-space-mb 24] [--logits path.f32]"
 }
 fn json_number(value: Option<u64>) -> String {
     value.map_or_else(|| "null".to_string(), |x| x.to_string())
@@ -183,6 +183,51 @@ fn run(args: Vec<String>) -> Result<(), String> {
 }
 
 #[cfg(feature = "native")]
+fn create_logit_trace(path: String) -> std::io::Result<std::fs::File> {
+    // Never truncate an existing model, trace or symlink supplied as --logits.
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+}
+
+/// Restricts this standalone CLI process, never a library host or parent process.
+#[cfg(all(feature = "native", target_os = "linux"))]
+fn restrict_address_space(bytes: u64) -> Result<(), String> {
+    if bytes == 0 {
+        return Err("address-space limit must be positive".into());
+    }
+    let mut previous = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: getrlimit/setrlimit operate on the live stack rlimit and this CLI only.
+    if unsafe { libc::getrlimit(libc::RLIMIT_AS, &mut previous) } != 0 {
+        return Err(format!(
+            "cannot read address-space limit: {}",
+            io::Error::last_os_error()
+        ));
+    }
+    let requested = libc::rlim_t::try_from(bytes).map_err(|_| "address-space limit too large")?;
+    let limit = requested.min(previous.rlim_cur).min(previous.rlim_max);
+    let next = libc::rlimit {
+        rlim_cur: limit,
+        rlim_max: limit,
+    };
+    if unsafe { libc::setrlimit(libc::RLIMIT_AS, &next) } != 0 {
+        return Err(format!(
+            "cannot enforce address-space limit: {}",
+            io::Error::last_os_error()
+        ));
+    }
+    Ok(())
+}
+#[cfg(all(feature = "native", not(target_os = "linux")))]
+fn restrict_address_space(_bytes: u64) -> Result<(), String> {
+    Err("address-space enforcement currently requires Linux".into())
+}
+
+#[cfg(feature = "native")]
 fn chat(args: &[String]) -> Result<(), String> {
     if args.is_empty() {
         return Err(usage().to_owned());
@@ -193,6 +238,10 @@ fn chat(args: &[String]) -> Result<(), String> {
     let mut ctx = 128u32;
     let mut threads = 2i32;
     let mut show_metrics = false;
+    let mut backend = String::from("resident");
+    let mut workspace_mb = 8u64;
+    let mut address_space_mb: Option<u64> = None;
+    let mut logits_path: Option<String> = None;
     let mut pos = 1usize;
     while pos < args.len() {
         if args[pos] == "--metrics" {
@@ -210,6 +259,12 @@ fn chat(args: &[String]) -> Result<(), String> {
             .ok_or_else(|| format!("missing value for {flag}"))?;
         match flag {
             "--prompt" => prompt = Some(value.clone()),
+            "--backend" => backend = value.clone(),
+            "--address-space-mb" => {
+                address_space_mb = Some(value.parse().map_err(|_| "invalid address-space-mb")?)
+            }
+            "--workspace-mb" => workspace_mb = value.parse().map_err(|_| "invalid workspace-mb")?,
+            "--logits" => logits_path = Some(value.clone()),
             "--max-tokens" => {
                 max_tokens = value.parse::<u32>().map_err(|_| "invalid max-tokens")?
             }
@@ -229,6 +284,19 @@ fn chat(args: &[String]) -> Result<(), String> {
     {
         return Err("context, token or thread request exceeds M1 bounds".to_string());
     }
+    if backend != "resident" && backend != "streamed" {
+        return Err("backend must be resident or streamed".into());
+    }
+    if backend == "resident" && logits_path.is_some() {
+        return Err("--logits requires streamed backend".into());
+    }
+    if let Some(megabytes) = address_space_mb {
+        restrict_address_space(
+            megabytes
+                .checked_mul(1024 * 1024)
+                .ok_or("address-space limit overflow")?,
+        )?;
+    }
     let info =
         models::inspect_gguf(model_path).map_err(|e| format!("GGUF inspection failed: {e}"))?;
     let h = hardware::profile();
@@ -240,10 +308,20 @@ fn chat(args: &[String]) -> Result<(), String> {
             .saturating_div(4)
             .max(512 * 1024 * 1024);
         let scratch_estimate = 256_u64 * 1024 * 1024 + u64::from(ctx) * 128 * 1024;
-        let estimate = info.file_bytes.saturating_add(scratch_estimate);
+        let estimate = if backend == "streamed" {
+            workspace_mb
+                .checked_mul(1024 * 1024)
+                .and_then(|n| n.checked_add(32 * 1024 * 1024))
+                .ok_or("workspace overflow")?
+        } else {
+            info.file_bytes.saturating_add(scratch_estimate)
+        };
         hardware::admit(Some(available), os_reserve, estimate)?;
     } else {
-        eprintln!("warning: available RAM not measurable on this host; M1 has no enforced process memory limit");
+        return Err(
+            "available RAM not measurable; refusing unverified inference admission on this host"
+                .into(),
+        );
     }
     let cancelled = Arc::new(AtomicBool::new(false));
     let stop = Arc::clone(&cancelled);
@@ -251,19 +329,60 @@ fn chat(args: &[String]) -> Result<(), String> {
         .map_err(|e| format!("unable to install cancellation handler: {e}"))?;
     let stdout = io::stdout();
     let mut handle = stdout.lock();
-    let generated = llmbridge_core::inference::generate(
-        model_path,
-        &prompt,
-        ctx,
-        max_tokens,
-        threads,
-        |bytes| {
-            if cancelled.load(Ordering::SeqCst) {
-                return false;
+    let mut logits_file = logits_path
+        .map(create_logit_trace)
+        .transpose()
+        .map_err(|e| e.to_string())?;
+    let generated = if backend == "streamed" {
+        let config = llmbridge_core::streamed::StreamedConfig {
+            context_tokens: ctx,
+            max_tokens,
+            workspace_bytes: workspace_mb
+                .checked_mul(1024 * 1024)
+                .ok_or("workspace overflow")?,
+            ..Default::default()
+        };
+        llmbridge_core::streamed::generate_streamed(
+            model_path,
+            &prompt,
+            config,
+            &cancelled,
+            |bytes| handle.write_all(bytes).and_then(|_| handle.flush()).is_ok(),
+            |values| {
+                if let Some(file) = logits_file.as_mut() {
+                    for value in values {
+                        if file.write_all(&value.to_le_bytes()).is_err() {
+                            return false;
+                        }
+                    }
+                }
+                true
+            },
+        )
+        .map(|metrics| {
+            if show_metrics {
+                eprintln!(
+                    "LLMBRIDGE_STREAMED source_bytes_read={} reader_buffer_bytes={}",
+                    metrics.source_bytes_read, metrics.reader_buffer_bytes
+                );
             }
-            handle.write_all(bytes).and_then(|_| handle.flush()).is_ok()
-        },
-    );
+        })
+    } else {
+        llmbridge_core::inference::generate_polled(
+            model_path,
+            &prompt,
+            ctx,
+            max_tokens,
+            threads,
+            &cancelled,
+            |bytes| {
+                if cancelled.load(Ordering::SeqCst) {
+                    return false;
+                }
+                handle.write_all(bytes).and_then(|_| handle.flush()).is_ok()
+            },
+        )
+    };
 
     if show_metrics {
         let usage = hardware::process_memory();
@@ -289,6 +408,22 @@ fn chat(_args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "native")]
+    #[test]
+    fn logits_export_never_truncates_an_existing_source() {
+        let path = std::env::temp_dir().join(format!(
+            "llmbridge-logits-protection-{}",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"preserve-model-or-existing-trace").unwrap();
+        assert!(create_logit_trace(path.to_string_lossy().into_owned()).is_err());
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            b"preserve-model-or-existing-trace"
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
     #[test]
     fn malformed_gguf_input_returns_error() {
         assert!(run(vec![

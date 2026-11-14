@@ -86,7 +86,6 @@ where
     Ok(total)
 }
 
-
 /// Validate a complete batch against caller-provided SHA-256 digests before
 /// delivering the first tensor chunk to the consumer.
 ///
@@ -108,35 +107,56 @@ where
     F: FnMut(&str, &[u8]) -> io::Result<()>,
 {
     if cancelled.load(Ordering::Acquire) {
-        return Err(io::Error::new(io::ErrorKind::Interrupted, "batch cancelled"));
+        return Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            "batch cancelled",
+        ));
     }
     if reader.identity() != &index.source_identity {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "GGUF source identity mismatch"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "GGUF source identity mismatch",
+        ));
     }
 
     let mut seen = HashSet::new();
     let mut total = 0u64;
     for &(name, digest) in tensors {
         if !seen.insert(name) {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "duplicate tensor in verified batch"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "duplicate tensor in verified batch",
+            ));
         }
         if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid expected tensor SHA-256"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid expected tensor SHA-256",
+            ));
         }
         let tensor = index.tensor(name).ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, "tensor missing from GGUF index")
         })?;
         total = total.checked_add(tensor.byte_len).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "verified batch byte count overflow")
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "verified batch byte count overflow",
+            )
         })?;
         if total > max_total_bytes {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "verified batch exceeds byte budget"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "verified batch exceeds byte budget",
+            ));
         }
     }
     // Finish *all* digest checks before invoking the consumer even once.
     for &(name, digest) in tensors {
         if cancelled.load(Ordering::Acquire) {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "batch cancelled"));
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "batch cancelled",
+            ));
         }
         index.verify_tensor_sha256_cancellable(reader, name, digest, cancelled)?;
     }
@@ -145,7 +165,6 @@ where
 }
 
 #[cfg(test)]
-#[allow(clippy::manual_is_multiple_of)] // GGUF fixture padding remains Rust 1.82-compatible.
 mod tests {
     use super::*;
     use crate::gguf_index::GgufTensorIndex;
@@ -192,21 +211,34 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let mut callbacks = 0usize;
         let err = stream_verified_tensor_batch(
-            &index, &mut reader, &[("weights", bad.as_str())], 16, &cancel,
-            |_, _| { callbacks += 1; Ok(()) },
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            &[("weights", bad.as_str())],
+            16,
+            &cancel,
+            |_, _| {
+                callbacks += 1;
+                Ok(())
+            },
+        )
+        .unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         assert_eq!(callbacks, 0);
         assert_eq!(reader.disk_bytes_read(), 16);
         let bytes = stream_verified_tensor_batch(
-            &index, &mut reader, &[("weights", good.as_str())], 16, &cancel,
+            &index,
+            &mut reader,
+            &[("weights", good.as_str())],
+            16,
+            &cancel,
             |name, chunk| {
                 assert_eq!(name, "weights");
                 assert!(!chunk.is_empty());
                 callbacks += 1;
                 Ok(())
             },
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(bytes, 16);
         assert_eq!(callbacks, 4);
         assert_eq!(reader.disk_bytes_read(), 48);
@@ -223,9 +255,17 @@ mod tests {
         let cancel = AtomicBool::new(true);
         let mut callbacks = 0usize;
         let err = stream_verified_tensor_batch(
-            &index, &mut reader, &[("weights", expected.as_str())], 16, &cancel,
-            |_, _| { callbacks += 1; Ok(()) },
-        ).unwrap_err();
+            &index,
+            &mut reader,
+            &[("weights", expected.as_str())],
+            16,
+            &cancel,
+            |_, _| {
+                callbacks += 1;
+                Ok(())
+            },
+        )
+        .unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::Interrupted);
         assert_eq!(callbacks, 0);
         assert_eq!(reader.disk_bytes_read(), 0);
@@ -245,13 +285,24 @@ mod tests {
             vec![("weights", good.as_str()), ("missing", good.as_str())],
         ] {
             assert!(stream_verified_tensor_batch(
-                &index, &mut reader, &manifest, 16, &cancel, |_, _| Ok(())
-            ).is_err());
+                &index,
+                &mut reader,
+                &manifest,
+                16,
+                &cancel,
+                |_, _| Ok(())
+            )
+            .is_err());
         }
         assert!(stream_verified_tensor_batch(
-            &index, &mut reader, &[("weights", good.as_str())], 15,
-            &cancel, |_, _| Ok(())
-        ).is_err());
+            &index,
+            &mut reader,
+            &[("weights", good.as_str())],
+            15,
+            &cancel,
+            |_, _| Ok(())
+        )
+        .is_err());
         assert_eq!(reader.disk_bytes_read(), 0);
         std::fs::remove_file(path).unwrap();
     }

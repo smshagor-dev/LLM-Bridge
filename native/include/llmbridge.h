@@ -37,6 +37,17 @@ int32_t llmbridge_generate_cpu(const char *model_path,
 typedef size_t (*llmbridge_range_callback)(void *userdata, void *output,
                                             uint64_t file_offset, size_t length);
 
+/* Experimental full dense Llama decoder. All weights use bounded range reads;
+ * tokenizer-only loading uses path. Workspace budget excludes tokenizer metadata,
+ * parser, allocator and OS pages: it is not a hard RSS cap. F32/Q8_0 only.
+ * Logits callback receives the complete vocabulary before greedy sampling. */
+typedef int32_t (*llmbridge_logits_callback)(const float *values, size_t count, void *userdata);
+int32_t llmbridge_generate_streamed_cpu(const char *path, const char *prompt,
+    uint32_t context, uint32_t max_tokens, uint64_t file_bytes, size_t max_chunk,
+    uint64_t workspace_budget, llmbridge_range_callback reader,
+    llmbridge_token_callback emit, llmbridge_logits_callback logits,
+    llmbridge_cancel_poll poll, void *userdata, char *error, size_t capacity);
+
 /* Parses GGUF metadata via caller-supplied range reads, no tensor weight allocation.
  * NOT an inference graph adapter and NOT a hard process RSS limit.
  * Returns 0 for success, -1 for failure. */
