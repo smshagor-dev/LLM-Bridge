@@ -10,6 +10,7 @@ pub mod f32_chain;
 pub mod f32_residual;
 pub mod f32_stream;
 pub mod f32_swiglu;
+pub mod io_schedule;
 pub mod memory_budget;
 pub mod memory_plan;
 #[cfg(feature = "native")]
