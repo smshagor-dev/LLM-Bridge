@@ -131,8 +131,8 @@ jobs:
       - name: Compare authenticated cached Q4_0 against the same reference
         run: python3 scripts/check_streamed_parity.py --binary ./target/release/llmbridge --reference ./reference-build/bin/llama-simple --model models/stories15M-derived-q4_0.gguf --checkpoint stories15M-derived-q4_0 --reference-no-repack --verify --cache-mb 1 --output benchmarks/results/q4-cached
 
-      - name: Require cache-transparent Q4_0 logits and measured range-read reduction
-        run: python3 scripts/compare_cache_results.py --uncached benchmarks/results/q4-uncached/streamed_parity.json --cached benchmarks/results/q4-cached/streamed_parity.json --output benchmarks/results/q4-cache-comparison.json
+      - name: Require exact Q4_0 logits and fresh authenticated source reads
+        run: python3 scripts/compare_cache_results.py --uncached benchmarks/results/q4-uncached/streamed_parity.json --cached benchmarks/results/q4-cached/streamed_parity.json --output benchmarks/results/q4-cache-comparison.json --expect-authenticated-bypass
 
       - name: Reject unsupported Q4_1 and validate real Q4_0 tensor inventory
         run: python3 scripts/check_q4_contract.py --binary ./target/release/llmbridge --model models/stories15M-derived-q4_0.gguf --unsupported-model models/stories15M-derived-q4_1.gguf --output benchmarks/results/q4-contract.json
@@ -180,6 +180,11 @@ jobs:
         run: |
           if LLMBRIDGE_CPU_PROFILE=invalid-profile cargo check --release -p llmbridge-core --features native --locked --target-dir target/baseline > benchmarks/results/invalid-cpu-profile.log 2>&1; then exit 1; fi
           grep -F "LLMBRIDGE_CPU_PROFILE must be avx2 or baseline" benchmarks/results/invalid-cpu-profile.log
+
+      - name: Verify bounded multi-row reads against odd and small chunk geometry
+        run: |
+          cargo run --release -p llmbridge-core --features native --example row_batch_contract -- models/stories15M-q8_0.gguf
+          cargo run --release -p llmbridge-core --features native --example row_batch_contract -- models/stories15M-derived-q4_0.gguf b5cd77bb0d1a785a82d7a8a2bcb4170dfe6e43e881b9cbb0d1c8184a6dd99839
 
       - name: Validate allocation-free cache release and retained authentication
         run: cargo run --release -p llmbridge-core --features native --example cache_release_contract -- models/stories15M-q8_0.gguf

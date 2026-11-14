@@ -42,3 +42,7 @@ cargo run --release -p llmbridge-core --features native --example verified_contr
 ```
 
 Tests cover hash/budget/cancellation admission, sealed-prefix content and write refusal, partial-block/EOF reads, and a changed uncached block with original size/inode/mtime deliberately preserved. The real-model contract copies its fixture to a newly created temporary file, mutates a future weight block after the first verified logits, restores mtime, and requires an authenticated-block error. Prior correct streamed tokens cannot be rolled back; no claim of all-or-nothing generation is made. CI retains raw reference/logit evidence.
+
+## Repeated-read correction
+
+Authenticated ranges now rehash requested source blocks on every public read and bypass the optional LRU, including repeated reads of a previously verified block. Historical cache/read-call results precede this correction and are not current authenticated-throughput evidence. See [bounded row batching](BOUNDED_ROW_BATCHING.md) for validation and the cost of fresh verification.

@@ -59,6 +59,12 @@ impl Default for StreamedConfig {
 }
 #[derive(Debug)]
 pub struct StreamedMetrics {
+    /// Native range callback attempts, including metadata and weight batches.
+    pub range_read_calls: u64,
+    pub range_bytes_requested: u64,
+    pub weight_read_calls: u64,
+    pub weight_bytes_requested: u64,
+    pub max_range_read_bytes: usize,
     pub source_bytes_read: u64,
     pub reader_buffer_bytes: usize,
     pub cache: ReadCacheMetrics,
@@ -86,7 +92,30 @@ extern "C" {
         capacity: usize,
     ) -> i32;
 }
+#[derive(Debug, Default)]
+struct RangeReads {
+    calls: u64,
+    bytes: u64,
+    maximum: usize,
+    weight_calls: u64,
+    weight_bytes: u64,
+}
+impl RangeReads {
+    fn record(&mut self, bytes: usize, weight: bool) {
+        self.calls = self.calls.saturating_add(1);
+        self.bytes = self.bytes.saturating_add(bytes as u64);
+        self.maximum = self.maximum.max(bytes);
+        if weight {
+            self.weight_calls = self.weight_calls.saturating_add(1);
+            self.weight_bytes = self.weight_bytes.saturating_add(bytes as u64);
+        }
+    }
+}
 struct State<'a, F, L> {
+    ranges: RangeReads,
+    sealed: Option<&'a crate::storage::SealedMetadata>,
+    weight_offset: u64,
+    max_chunk: usize,
     reader: CachedLocalReader,
     cancelled: &'a AtomicBool,
     cache_control: Option<&'a CacheControl>,
@@ -126,26 +155,49 @@ extern "C" fn read<F, L>(
         // SAFETY: sole mutable synchronous callback; C++ supplies length writable bytes.
         let state = unsafe { &mut *(state.cast::<State<'_, F, L>>()) };
         let start = state.performance.as_ref().map(|_| Instant::now());
+        if length > state.max_chunk {
+            state.failure = Some("native read exceeds configured chunk".into());
+            return 0;
+        }
+        state.ranges.record(length, offset >= state.weight_offset);
         // Native owns a copy of previous row bytes; no cache borrow survives
         // a synchronous callback, so releasing here cannot invalidate native data.
         apply_cache_control(state);
         let flag = state.cancelled;
-        let copied = (|| match state
-            .reader
-            .read_range_cancellable(offset, length, || flag.load(Ordering::Acquire))
-        {
-            Ok(bytes) => {
+        let copied = (|| {
+            // Authenticated metadata comes from the already sealed trusted prefix.
+            // This avoids rehashing a source block for every small GGUF field.
+            if let Some(metadata) = state.sealed.filter(|m| offset < m.prefix_bytes) {
                 if flag.load(Ordering::Acquire) {
                     return 0;
                 }
-                unsafe {
-                    std::ptr::copy_nonoverlapping(bytes.as_ptr(), output.cast(), bytes.len());
-                }
-                bytes.len()
+                let output = unsafe { std::slice::from_raw_parts_mut(output.cast::<u8>(), length) };
+                return match metadata.read_into(offset, output) {
+                    Ok(()) if !flag.load(Ordering::Acquire) => length,
+                    Ok(()) => 0,
+                    Err(error) => {
+                        state.failure = Some(error.to_string());
+                        0
+                    }
+                };
             }
-            Err(error) => {
-                state.failure = Some(error.to_string());
-                0
+            match state
+                .reader
+                .read_range_cancellable(offset, length, || flag.load(Ordering::Acquire))
+            {
+                Ok(bytes) => {
+                    if flag.load(Ordering::Acquire) {
+                        return 0;
+                    }
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(bytes.as_ptr(), output.cast(), bytes.len());
+                    }
+                    bytes.len()
+                }
+                Err(error) => {
+                    state.failure = Some(error.to_string());
+                    0
+                }
             }
         })();
         if let (Some(clock), Some(start)) = (&mut state.performance, start) {
@@ -254,7 +306,7 @@ pub fn generate_streamed_verified<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> b
         on_logits,
     )
 }
-/// Advanced synchronous session API. Release signals are honored at safe row
+/// Advanced synchronous session API. Release signals are honored at safe bounded-read
 /// and logits boundaries; all borrowed control references end with this call.
 /// Use one CacheControl per session. Cache release is monotonic and does not
 /// release KV/activation memory or the authenticated source manifest.
@@ -330,6 +382,10 @@ fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>
         return Err("streamed native ABI mismatch".into());
     }
     let mut state = State {
+        ranges: RangeReads::default(),
+        sealed: sealed.as_ref(),
+        weight_offset: index.data_offset,
+        max_chunk: config.chunk_bytes,
         reader: CachedLocalReader::new(reader, config.cache_bytes).map_err(|e| e.to_string())?,
         cancelled,
         cache_control: control.cache,
@@ -369,6 +425,11 @@ fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>
         ));
     }
     Ok(StreamedMetrics {
+        range_read_calls: state.ranges.calls,
+        range_bytes_requested: state.ranges.bytes,
+        weight_read_calls: state.ranges.weight_calls,
+        weight_bytes_requested: state.ranges.weight_bytes,
+        max_range_read_bytes: state.ranges.maximum,
         source_bytes_read: state.reader.source_bytes_read(),
         reader_buffer_bytes: config.chunk_bytes,
         cache: state.reader.metrics(),
@@ -380,6 +441,24 @@ fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn range_metrics_count_calls_bytes_and_maximum_without_overflow() {
+        let mut ranges = RangeReads::default();
+        ranges.record(34, false);
+        ranges.record(65536, true);
+        assert_eq!(
+            (ranges.calls, ranges.bytes, ranges.maximum),
+            (2, 65570, 65536)
+        );
+        assert_eq!((ranges.weight_calls, ranges.weight_bytes), (1, 65536));
+        ranges.calls = u64::MAX;
+        ranges.bytes = u64::MAX;
+        ranges.record(1, false);
+        assert_eq!(
+            (ranges.calls, ranges.bytes, ranges.maximum),
+            (u64::MAX, u64::MAX, 65536)
+        );
+    }
     #[test]
     fn cache_release_requests_are_one_shot_and_coalesced() {
         let control = CacheControl::default();

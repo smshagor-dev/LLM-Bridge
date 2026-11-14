@@ -122,7 +122,9 @@ impl CachedLocalReader {
         length: usize,
         mut cancelled: impl FnMut() -> bool,
     ) -> io::Result<&[u8]> {
-        if self.slots.is_empty() {
+        // Authenticated sessions must not serve stale payload from this LRU.
+        // The source re-verifies its SHA-256 block manifest on every range call.
+        if self.slots.is_empty() || self.source.is_authenticated() {
             increment(&mut self.metrics.source_read_calls)?;
             return self
                 .source
@@ -440,5 +442,48 @@ mod tests {
             )
             .is_err());
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn authenticated_cache_hit_rejects_same_identity_in_place_rewrite() {
+        use sha2::{Digest, Sha256};
+        use std::io::{Seek, SeekFrom, Write};
+        let fixture = Fixture::new();
+        let expected = format!("{:x}", Sha256::digest(std::fs::read(&fixture.0).unwrap()));
+        let modified = std::fs::metadata(&fixture.0).unwrap().modified().unwrap();
+        let mut source = BoundedLocalReader::open(&fixture.0, 8, 16).unwrap();
+        let _sealed = source
+            .authenticate_model(&expected, 8, 128 * 1024, || false)
+            .unwrap();
+        let mut cached = CachedLocalReader::new(source, 256).unwrap();
+        assert_eq!(
+            cached.read_range_cancellable(0, 2, || false).unwrap(),
+            b"ab"
+        );
+        let before = cached.source_bytes_read();
+        // A second read must rehash the authenticated block rather than use LRU.
+        assert_eq!(
+            cached.read_range_cancellable(0, 2, || false).unwrap(),
+            b"ab"
+        );
+        assert!(cached.source_bytes_read() > before);
+        let mut writer = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&fixture.0)
+            .unwrap();
+        writer.seek(SeekFrom::Start(0)).unwrap();
+        writer.write_all(b"X").unwrap();
+        writer
+            .set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        assert!(cached.source.validate_source().is_ok());
+        assert_eq!(
+            cached
+                .read_range_cancellable(0, 2, || false)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
     }
 }

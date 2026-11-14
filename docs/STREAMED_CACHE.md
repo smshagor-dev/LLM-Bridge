@@ -32,3 +32,7 @@ python3 scripts/compare_cache_results.py \
 The comparison gate requires identical model/binary/cap configuration, successful reference parity, identical cached/uncached full output and raw logit files, cache allocation within budget, and fewer actual source range reads. CI retains the raw evidence. Checked-in summaries identify source revision and binary hash.
 
 Regression coverage includes adjacent reads, cross-block/EOF ranges, LRU eviction, disabled mode, budget rejection, changed sources, cancellation on hits/refills, late source changes and invalidated failed refills. Real-model cancellation/workspace/context contracts run with cache both disabled and enabled. Optional Linux authenticated sessions now feed verified blocks into this cache; see [VERIFIED_MODEL_SESSIONS.md](VERIFIED_MODEL_SESSIONS.md). Portable authentication, asynchronous prefetch, persistent caches and adaptive cache scheduling remain future work.
+
+## Current execution and authentication policy
+
+Matrix rows are now grouped within the existing bounded native chunk. Authenticated sessions bypass this LRU and rehash every requested block per public range call. The configured cache reservation can still be released, but it does not provide authenticated cache hits. The numerical/read-call results above are historical measurements of the stated earlier source, not current authenticated-performance claims. See [bounded row batching](BOUNDED_ROW_BATCHING.md).

@@ -1,0 +1,114 @@
+{
+  "scope": "Replay of existing failed-CI raw output/logits with repaired validator; not newly executed inference. Numerical tolerances/output gates unchanged.",
+  "failed_run": 43601670614,
+  "failed_job": 132468338430,
+  "artifact_id": 14115944573,
+  "artifact_sha256": "dd17d912c0e4a058ccc20fe81d1cc119a76d1e0b6e4bb0000b59be4e0835e253",
+  "engine_pr_head": "ea69f0314ea5b6cdcdabeddfedd0199d0a1df181",
+  "validator_sha256": "65e7009fdce6716569882bc799eca743d3a232dfeb598df376f7df3428c9e505",
+  "python_tests_passed": 23,
+  "replays": {
+    "q4": {
+      "pass": true,
+      "model_sha256": "b5cd77bb0d1a785a82d7a8a2bcb4170dfe6e43e881b9cbb0d1c8184a6dd99839",
+      "binary_sha256": "e7e47c0303790ac9fb1b44b466e2784019c8481ace4054770553a7b2cc5ebabf",
+      "source_revision": "72568c2994ba762a5d281c71cd6920044fa244d7",
+      "address_space_limit_bytes": null,
+      "cache_budget_bytes": 1048576,
+      "trials": [
+        {
+          "pass": true,
+          "logits_identical": true,
+          "read_policy_pass": true,
+          "uncached_source_read_calls": 1451,
+          "cached_source_read_calls": 1451,
+          "read_call_reduction_percent": 0.0,
+          "uncached_source_bytes": 187591296,
+          "cached_source_bytes": 187591296,
+          "cached_peak_rss_bytes": 17760256,
+          "cache_allocated_bytes": 983376,
+          "prompt_sha256": "63460e4223f8a4b261087a8d8133f25ac5fe640d21f9ffbe2fcef4c3f8719c19"
+        },
+        {
+          "pass": true,
+          "logits_identical": true,
+          "read_policy_pass": true,
+          "uncached_source_read_calls": 1524,
+          "cached_source_read_calls": 1524,
+          "read_call_reduction_percent": 0.0,
+          "uncached_source_bytes": 195703648,
+          "cached_source_bytes": 195703648,
+          "cached_peak_rss_bytes": 17633280,
+          "cache_allocated_bytes": 983376,
+          "prompt_sha256": "e286222c229ec73b1bc520d88583191572ae0cbbaa66ea68053994a5e50ac87a"
+        },
+        {
+          "pass": true,
+          "logits_identical": true,
+          "read_policy_pass": true,
+          "uncached_source_read_calls": 1451,
+          "cached_source_read_calls": 1451,
+          "read_call_reduction_percent": 0.0,
+          "uncached_source_bytes": 187591296,
+          "cached_source_bytes": 187591296,
+          "cached_peak_rss_bytes": 17539072,
+          "cache_allocated_bytes": 983376,
+          "prompt_sha256": "1a2b1757a9c8f417e0591c1a96b413ea7ad629316f2c0106f7c533f11dd0999a"
+        }
+      ],
+      "read_policy": "authenticated_bypass",
+      "note": "Exact output/logit transparency remains required in both policies. Authenticated bypass requires fresh weight-source reads and zero LRU activity, not read savings. Application range counts are not physical device I/O or universal speed proof."
+    },
+    "q8": {
+      "pass": true,
+      "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+      "binary_sha256": "e7e47c0303790ac9fb1b44b466e2784019c8481ace4054770553a7b2cc5ebabf",
+      "source_revision": "72568c2994ba762a5d281c71cd6920044fa244d7",
+      "address_space_limit_bytes": 25165824,
+      "cache_budget_bytes": 1048576,
+      "trials": [
+        {
+          "pass": true,
+          "logits_identical": true,
+          "read_policy_pass": true,
+          "uncached_source_read_calls": 131150,
+          "cached_source_read_calls": 2293,
+          "read_call_reduction_percent": 98.25162028211972,
+          "uncached_source_bytes": 149025157,
+          "cached_source_bytes": 150253984,
+          "cached_peak_rss_bytes": 17453056,
+          "cache_allocated_bytes": 983376,
+          "prompt_sha256": "63460e4223f8a4b261087a8d8133f25ac5fe640d21f9ffbe2fcef4c3f8719c19"
+        },
+        {
+          "pass": true,
+          "logits_identical": true,
+          "read_policy_pass": true,
+          "uncached_source_read_calls": 131283,
+          "cached_source_read_calls": 2392,
+          "read_call_reduction_percent": 98.17798191692755,
+          "uncached_source_bytes": 155384503,
+          "cached_source_bytes": 156740224,
+          "cached_peak_rss_bytes": 17498112,
+          "cache_allocated_bytes": 983376,
+          "prompt_sha256": "e286222c229ec73b1bc520d88583191572ae0cbbaa66ea68053994a5e50ac87a"
+        },
+        {
+          "pass": true,
+          "logits_identical": true,
+          "read_policy_pass": true,
+          "uncached_source_read_calls": 131150,
+          "cached_source_read_calls": 2293,
+          "read_call_reduction_percent": 98.25162028211972,
+          "uncached_source_bytes": 149025157,
+          "cached_source_bytes": 150253984,
+          "cached_peak_rss_bytes": 17539072,
+          "cache_allocated_bytes": 983376,
+          "prompt_sha256": "1a2b1757a9c8f417e0591c1a96b413ea7ad629316f2c0106f7c533f11dd0999a"
+        }
+      ],
+      "read_policy": "unauthenticated_read_reduction",
+      "note": "Exact output/logit transparency remains required in both policies. Authenticated bypass requires fresh weight-source reads and zero LRU activity, not read savings. Application range counts are not physical device I/O or universal speed proof."
+    }
+  }
+}
