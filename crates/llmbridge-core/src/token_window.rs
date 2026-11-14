@@ -40,18 +40,24 @@ impl TokenWindows {
         if limits.scratch_bytes_per_token == 0 {
             return Err("per-token scratch estimate must be positive");
         }
-        let available = limits.scratch_budget_bytes
+        let available = limits
+            .scratch_budget_bytes
             .checked_sub(limits.outstanding_reservations_bytes)
             .ok_or("existing reservations exceed scratch budget")?;
-        let variable = available.checked_sub(limits.scratch_fixed_bytes)
+        let variable = available
+            .checked_sub(limits.scratch_fixed_bytes)
             .ok_or("fixed scratch exceeds available budget")?;
         let capacity = variable / limits.scratch_bytes_per_token;
         if capacity == 0 {
             return Err("even one token exceeds scratch budget");
         }
-        let width = capacity.min(limits.max_tokens_per_window).min(limits.total_tokens);
+        let width = capacity
+            .min(limits.max_tokens_per_window)
+            .min(limits.total_tokens);
         // All emitted windows are at most width, so validate the maximum allocation once.
-        limits.scratch_bytes_per_token.checked_mul(width)
+        limits
+            .scratch_bytes_per_token
+            .checked_mul(width)
             .and_then(|n| n.checked_add(limits.scratch_fixed_bytes))
             .ok_or("window reservation overflow")?;
         Ok(Self {
@@ -65,7 +71,10 @@ impl TokenWindows {
 
     /// Cancellation is checked before yielding work, including after the last window.
     /// A cancelled caller must not schedule further native execution.
-    pub fn next_checked(&mut self, cancelled: &AtomicBool) -> Result<Option<TokenWindow>, &'static str> {
+    pub fn next_checked(
+        &mut self,
+        cancelled: &AtomicBool,
+    ) -> Result<Option<TokenWindow>, &'static str> {
         if cancelled.load(Ordering::Acquire) {
             return Err("token scheduling cancelled");
         }
@@ -74,11 +83,20 @@ impl TokenWindows {
         }
         let remaining = self.total - self.next;
         let count = remaining.min(self.width);
-        let end = self.next.checked_add(count).ok_or("token window end overflow")?;
-        let reserved_bytes = self.per_token.checked_mul(count)
+        let end = self
+            .next
+            .checked_add(count)
+            .ok_or("token window end overflow")?;
+        let reserved_bytes = self
+            .per_token
+            .checked_mul(count)
             .and_then(|n| n.checked_add(self.fixed))
             .ok_or("token window allocation overflow")?;
-        let window = TokenWindow { start: self.next, end, reserved_bytes };
+        let window = TokenWindow {
+            start: self.next,
+            end,
+            reserved_bytes,
+        };
         self.next = end;
         Ok(Some(window))
     }
@@ -119,7 +137,10 @@ mod tests {
         let cancelled = AtomicBool::new(false);
         assert_eq!(p.next_checked(&cancelled).unwrap().unwrap().end, 4);
         cancelled.store(true, Ordering::Release);
-        assert_eq!(p.next_checked(&cancelled), Err("token scheduling cancelled"));
+        assert_eq!(
+            p.next_checked(&cancelled),
+            Err("token scheduling cancelled")
+        );
         assert_eq!(p.remaining_tokens(), 6);
     }
     #[test]
@@ -128,8 +149,14 @@ mod tests {
         l.scratch_budget_bytes = 35;
         l.outstanding_reservations_bytes = 5;
         let mut p = TokenWindows::plan(l).unwrap();
-        assert_eq!(p.next_checked(&AtomicBool::new(false)).unwrap().unwrap(),
-            TokenWindow { start: 0, end: 1, reserved_bytes: 30 });
+        assert_eq!(
+            p.next_checked(&AtomicBool::new(false)).unwrap().unwrap(),
+            TokenWindow {
+                start: 0,
+                end: 1,
+                reserved_bytes: 30
+            }
+        );
         l.scratch_budget_bytes = 34;
         assert!(TokenWindows::plan(l).is_err());
     }
@@ -159,7 +186,13 @@ mod tests {
             outstanding_reservations_bytes: 0,
         };
         let mut p = TokenWindows::plan(l).unwrap();
-        assert_eq!(p.next_checked(&AtomicBool::new(false)).unwrap().unwrap().end, u64::MAX);
+        assert_eq!(
+            p.next_checked(&AtomicBool::new(false))
+                .unwrap()
+                .unwrap()
+                .end,
+            u64::MAX
+        );
         assert!(p.next_checked(&AtomicBool::new(false)).unwrap().is_none());
     }
     #[test]
