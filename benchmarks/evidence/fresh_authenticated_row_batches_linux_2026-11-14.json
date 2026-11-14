@@ -1,0 +1,1375 @@
+{
+  "date": "2026-11-14",
+  "source_commit": "2ed02f53b498283bd32d97222d7699e52bdb5c86",
+  "source_tree": "11b632dabb535e4a84026138e659e8b63e3770bc",
+  "scope": "Bounded synchronous whole-row grouping and fresh authenticated source reads; sealed metadata reads are separate from source weight verification. No physical2GB, privileged cgroup, universal speed, device-I/O, large-model or new old-CPU-emulation claim. Authenticated LRU bypass retains a configured cache reservation until release/teardown. Q4 uses explicit no-repack reference; earlier default-repacked AVX2 Q4 mismatch remains open.",
+  "build": {
+    "rust": "1.85.1",
+    "msrv": "1.82.0",
+    "native_source": "pinned local checkout selected through an ephemeral CMAKE_TOOLCHAIN_FILE FetchContent source override",
+    "upstream_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+    "reference_patch_script_sha256": "82e0e9218c759367f67e0c8e9814b86655967276c8a4bb2f13c51bd2f51bea2b"
+  },
+  "local_validation": {
+    "native-final": {
+      "pass": true,
+      "log_sha256": "a9836e50175f65e99abc92a3f6e1a73f48ee558ba0a516687e070de089f1cacc",
+      "passed_tests": 201
+    },
+    "baseline-final": {
+      "pass": true,
+      "log_sha256": "f36762aea168817ff3690df72f0e1ae37992eda73e4c6acaae64adfa5ae7c0ff",
+      "passed_tests": 201
+    },
+    "msrv-final": {
+      "pass": true,
+      "log_sha256": "6e4fd19c6251df6541454cca85c9987a40ecb4daf7bf540ed21a1c0b6463ca4a",
+      "passed_tests": 171
+    },
+    "python-final": {
+      "pass": true,
+      "log_sha256": "6acfa7a2db8707c2a8f3530db94358e9979f0b6c8232437c9489cf5e5790c725",
+      "passed_tests": 17
+    },
+    "native-clippy-final": {
+      "pass": true,
+      "log_sha256": "1f608385ff8e66f60f58e87676471561fe00ea97282351053c846bc2fa0d7179",
+      "passed_tests": 0
+    },
+    "baseline-clippy-final": {
+      "pass": true,
+      "log_sha256": "92434e198f27984c035c376ec77a7cf9e6ebdde782f8ccb1336ae3329b66ddb7",
+      "passed_tests": 0
+    },
+    "nonnative-clippy-final": {
+      "pass": true,
+      "log_sha256": "4c2487fc012c35eb8d1ef4d15b120fdd05d2d093ce0dc5c6da30eca7b0ff1a37",
+      "passed_tests": 0
+    }
+  },
+  "real_model_contracts": {
+    "q8-contract-final": {
+      "pass": true,
+      "log_sha256": "af2c3097044eeacc5693fabcdbacbfa197e139f00f13d77a43b947eaa0313a55",
+      "result_lines": [
+        "{\"chunk_bytes\":4096,\"cache_budget_bytes\":0,\"weight_read_calls\":21283,\"weight_bytes_requested\":83688030,\"max_range_read_bytes\":4080,\"logits_steps\":4,\"output_sha256\":\"76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89\",\"logits_sha256\":\"f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb\"}",
+        "{\"chunk_bytes\":65536,\"cache_budget_bytes\":0,\"weight_read_calls\":1535,\"weight_bytes_requested\":83688030,\"max_range_read_bytes\":65484,\"logits_steps\":4,\"output_sha256\":\"76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89\",\"logits_sha256\":\"f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb\"}",
+        "{\"chunk_bytes\":65535,\"cache_budget_bytes\":0,\"weight_read_calls\":1535,\"weight_bytes_requested\":83688030,\"max_range_read_bytes\":65484,\"logits_steps\":4,\"output_sha256\":\"76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89\",\"logits_sha256\":\"f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb\"}",
+        "{\"chunk_bytes\":4096,\"cache_budget_bytes\":1048576,\"weight_read_calls\":21283,\"weight_bytes_requested\":83688030,\"max_range_read_bytes\":4080,\"logits_steps\":4,\"output_sha256\":\"76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89\",\"logits_sha256\":\"f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb\"}",
+        "{\"chunk_bytes\":65536,\"cache_budget_bytes\":1048576,\"weight_read_calls\":1535,\"weight_bytes_requested\":83688030,\"max_range_read_bytes\":65484,\"logits_steps\":4,\"output_sha256\":\"76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89\",\"logits_sha256\":\"f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb\"}",
+        "{\"chunk_bytes\":65535,\"cache_budget_bytes\":1048576,\"weight_read_calls\":1535,\"weight_bytes_requested\":83688030,\"max_range_read_bytes\":65484,\"logits_steps\":4,\"output_sha256\":\"76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89\",\"logits_sha256\":\"f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb\"}",
+        "bounded row batches: identical bytes/logits, exact logical reads, authenticated LRU bypass and chunk bounds: PASS"
+      ]
+    },
+    "q4-contract-final": {
+      "pass": true,
+      "log_sha256": "df14b313a9eba333ada019d582a85ffc3858237fb89365daaefb9cf295501037",
+      "result_lines": [
+        "{\"chunk_bytes\":4096,\"cache_budget_bytes\":0,\"weight_read_calls\":11179,\"weight_bytes_requested\":44353134,\"max_range_read_bytes\":4050,\"logits_steps\":4,\"output_sha256\":\"7e79ee586e39b7415c14b0b26f7cde3743e82e1d7fd6bb552ac02c976e55c111\",\"logits_sha256\":\"658b2b7d8b7fcfc01698ddb7ad7d01a17864096eb8a49dbbae2696f9436e26bf\"}",
+        "{\"chunk_bytes\":65536,\"cache_budget_bytes\":0,\"weight_read_calls\":835,\"weight_bytes_requested\":44353134,\"max_range_read_bytes\":65448,\"logits_steps\":4,\"output_sha256\":\"7e79ee586e39b7415c14b0b26f7cde3743e82e1d7fd6bb552ac02c976e55c111\",\"logits_sha256\":\"658b2b7d8b7fcfc01698ddb7ad7d01a17864096eb8a49dbbae2696f9436e26bf\"}",
+        "{\"chunk_bytes\":65535,\"cache_budget_bytes\":0,\"weight_read_calls\":835,\"weight_bytes_requested\":44353134,\"max_range_read_bytes\":65448,\"logits_steps\":4,\"output_sha256\":\"7e79ee586e39b7415c14b0b26f7cde3743e82e1d7fd6bb552ac02c976e55c111\",\"logits_sha256\":\"658b2b7d8b7fcfc01698ddb7ad7d01a17864096eb8a49dbbae2696f9436e26bf\"}",
+        "{\"chunk_bytes\":4096,\"cache_budget_bytes\":1048576,\"weight_read_calls\":11179,\"weight_bytes_requested\":44353134,\"max_range_read_bytes\":4050,\"logits_steps\":4,\"output_sha256\":\"7e79ee586e39b7415c14b0b26f7cde3743e82e1d7fd6bb552ac02c976e55c111\",\"logits_sha256\":\"658b2b7d8b7fcfc01698ddb7ad7d01a17864096eb8a49dbbae2696f9436e26bf\"}",
+        "{\"chunk_bytes\":65536,\"cache_budget_bytes\":1048576,\"weight_read_calls\":835,\"weight_bytes_requested\":44353134,\"max_range_read_bytes\":65448,\"logits_steps\":4,\"output_sha256\":\"7e79ee586e39b7415c14b0b26f7cde3743e82e1d7fd6bb552ac02c976e55c111\",\"logits_sha256\":\"658b2b7d8b7fcfc01698ddb7ad7d01a17864096eb8a49dbbae2696f9436e26bf\"}",
+        "{\"chunk_bytes\":65535,\"cache_budget_bytes\":1048576,\"weight_read_calls\":835,\"weight_bytes_requested\":44353134,\"max_range_read_bytes\":65448,\"logits_steps\":4,\"output_sha256\":\"7e79ee586e39b7415c14b0b26f7cde3743e82e1d7fd6bb552ac02c976e55c111\",\"logits_sha256\":\"658b2b7d8b7fcfc01698ddb7ad7d01a17864096eb8a49dbbae2696f9436e26bf\"}",
+        "bounded row batches: identical bytes/logits, exact logical reads, authenticated LRU bypass and chunk bounds: PASS"
+      ]
+    },
+    "release-q8-contract": {
+      "pass": true,
+      "log_sha256": "cd8b307ca22966c888ebaa4547d762898dff60f793edefded885e129992b4772",
+      "result_lines": [
+        "cache release output/logit parity, zero final allocation, cancellation and late-mutation rejection: PASS",
+        "released_bytes=983376 release_events=1 current_cache_bytes=0"
+      ]
+    },
+    "release-q4-contract": {
+      "pass": true,
+      "log_sha256": "887ef3563144f5f97f595e0bdb1628c2fa7eead20492d803be9a15cfebd47ed5",
+      "result_lines": [
+        "cache release output/logit parity, zero final allocation, cancellation and late-mutation rejection: PASS",
+        "released_bytes=983376 release_events=1 current_cache_bytes=0"
+      ]
+    },
+    "cancel-q8-contract": {
+      "pass": true,
+      "log_sha256": "032c83c8481dc04c95367a6ee7193c3ddd73b7d17bfbe9b90baace4c3a992168",
+      "result_lines": [
+        "cached/uncached streamed real-model cancellation, workspace and context gates: PASS"
+      ]
+    },
+    "mutation-q8-contract": {
+      "pass": true,
+      "log_sha256": "4d724b2ac1c5debb951f3ff1cd8894ece355633e4bd058887d67c37c2c4283fa",
+      "result_lines": [
+        "verified hash admission, budget, cancellation and same-identity late mutation: PASS"
+      ]
+    }
+  },
+  "before_fix_regression": {
+    "base_commit": "85755236d7785b552c0a26a85e6c207309f73d9e",
+    "expected_failure_observed": true,
+    "log_sha256": "5e76c712b714f33e7ca27a718e5eabab93faa42b85941e8cbce0cae2f2fef3a4",
+    "protocol": "Copy the new same-block regression to the old source, omitting the earlier I/O-count assertion to reach the late-mutation assertion. The old reader returned cached fixture bytes after a same-identity rewrite instead of rejecting. This demonstrates rewrite-detection semantics, not forged-checkpoint acceptance."
+  },
+  "golden_reports": {
+    "verified-q8": {
+      "pass": true,
+      "checkpoint": "stories15M-q8_0",
+      "generation_max_tokens": 8,
+      "cpu_profile": {
+        "native_profile": "x86-avx2",
+        "architecture": "x86_64",
+        "native_compatible": true,
+        "capabilities": {
+          "sse2": true,
+          "sse42": true,
+          "avx": true,
+          "avx2": true,
+          "fma": true,
+          "f16c": true,
+          "bmi2": true
+        },
+        "missing_cpu_os_capabilities": [],
+        "scalar_fallback_validated": false
+      },
+      "emulation": null,
+      "reference_weight_repacking": "upstream_default",
+      "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+      "model_file_bytes": 26671328,
+      "binary_sha256": "dd919108a97107f7657dab7729554359986b5c57a8d9e1143cb6fe9dd1f7bdba",
+      "reference_binary_sha256": "e3e80ef8f467264183c011b902167ff7c2de2ec2f88ff15de705113d3ad19a27",
+      "reference_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+      "working_tree_dirty": false,
+      "source_sha256": {
+        "native/src/streamed.cpp": "6a6607de9f80f9a8e690a9b38e31d86299c37c44a94792d744330f3c3b933ee6",
+        "crates/llmbridge-core/src/streamed.rs": "89f6b44ceffdede0159cb4e66fa6c1ebd2ae5792e1b2d4a65e6c69a25003ec6d",
+        "crates/llmbridge-core/src/read_cache.rs": "63fea96b27b7547c197312c4bb8b136fc4596f743881a123e0b9ac598c19edef",
+        "crates/llmbridge-core/src/storage.rs": "24855e5ad44345ccd5a26a4f68c33ee7aa876373a76051abe1e505c0a164ff5d",
+        "crates/llmbridge-core/src/storage_auth.rs": "1d60d554e6438a26c3f421eac2a82d228f21671fd384c1d30668cf6ff5adeabb"
+      },
+      "verified_session_requested": true,
+      "cache_budget_bytes": 0,
+      "cache_pressure_floor_mib": null,
+      "cache_release_required": false,
+      "address_space_limit_bytes": 25165824,
+      "memory_proof_scope": "native_model_larger_than_cap",
+      "host": "Linux-6.18.57-x86_64-with-glibc2.41",
+      "git_sha": "2ed02f53b498283bd32d97222d7699e52bdb5c86",
+      "kv_precision": "FP32 on both paths; reference flash attention disabled",
+      "logit_tolerance": {
+        "atol": 0.01,
+        "rtol": 0.001
+      },
+      "note": "Checkpoint-specific experimental streamed path with pinned ggml dot kernels versus upstream graph; observed matching logits are checkpoint-specific. RLIMIT_AS is a Linux process address-space cap, not a portable RSS API.",
+      "trials": [
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "4930",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131150,
+            "range_bytes_requested": 149025157,
+            "weight_read_calls": 2671,
+            "weight_bytes_requested": 148298022,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 349703616,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2671,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 0,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.5160734800000455,
+          "memory": {
+            "peak_rss_bytes": 14249984,
+            "rss_after_run_bytes": 12046336,
+            "pss_after_run_bytes": 8840192,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "prompt_sha256": "63460e4223f8a4b261087a8d8133f25ac5fe640d21f9ffbe2fcef4c3f8719c19",
+          "streamed_text_sha256": "f4f18cc561041c240e9f5da9cb7c508360be81641cf6e0ec48c1a2e7cc976c18",
+          "reference_text_sha256": "b0829dfe85cb88e6c82ffc14248d38f7e15819d675d7fee4ba6dd0151666490d",
+          "streamed_stderr_sha256": "1afa6c18652572ebd08ea8c1325b376829a9d5497b163768861c6db785782fd4",
+          "reference_stderr_sha256": "0ed959ace6ed160c474b8aacd2ed26bb7873fbc6b20ea3adea0f247404282b5a"
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "5160",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131283,
+            "range_bytes_requested": 155384503,
+            "weight_read_calls": 2804,
+            "weight_bytes_requested": 154657368,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 364771424,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2804,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 0,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.4869610969999485,
+          "memory": {
+            "peak_rss_bytes": 14110720,
+            "rss_after_run_bytes": 11988992,
+            "pss_after_run_bytes": 8848384,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "prompt_sha256": "e286222c229ec73b1bc520d88583191572ae0cbbaa66ea68053994a5e50ac87a",
+          "streamed_text_sha256": "b6a73596905e09047d5e42f90a6fb08cf3c1693ff5f77140857bc683d7b32b51",
+          "reference_text_sha256": "1525ac0a5669601447dfea094cd245db5a9c0c2dae866c618bd935c53ffaea81",
+          "streamed_stderr_sha256": "c8c648e86d4c6a4b1b3a8dd953fa3405e426b614efddcca92178a2d7f5c0de6d",
+          "reference_stderr_sha256": "abed1f28428cd28d5afb026d6c6c4b1271ef1cf7404be5514bb32108270dbc74"
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "4930",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131150,
+            "range_bytes_requested": 149025157,
+            "weight_read_calls": 2671,
+            "weight_bytes_requested": 148298022,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 349703616,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2671,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 0,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 1.1477113699999109,
+          "memory": {
+            "peak_rss_bytes": 14180352,
+            "rss_after_run_bytes": 11915264,
+            "pss_after_run_bytes": 10418176,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "prompt_sha256": "1a2b1757a9c8f417e0591c1a96b413ea7ad629316f2c0106f7c533f11dd0999a",
+          "streamed_text_sha256": "329f7d34792c637658ed8af9efb54ee951ee6c879c067e3e72314e6e20b2392f",
+          "reference_text_sha256": "a3ce7ebbe809af04dbd52cb9a3e544818e4c66335b55b6f379379010977d6337",
+          "streamed_stderr_sha256": "06020c1dfb20d63cbb7b173cd58ae94dd9a32cb0731d86681574047ebbbbdf26",
+          "reference_stderr_sha256": "873a91863f78ba53bcc4194b5469292d187a8321f6515079a5363f92ec11653e"
+        }
+      ]
+    },
+    "release-q8": {
+      "pass": true,
+      "checkpoint": "stories15M-q8_0",
+      "generation_max_tokens": 8,
+      "cpu_profile": {
+        "native_profile": "x86-avx2",
+        "architecture": "x86_64",
+        "native_compatible": true,
+        "capabilities": {
+          "sse2": true,
+          "sse42": true,
+          "avx": true,
+          "avx2": true,
+          "fma": true,
+          "f16c": true,
+          "bmi2": true
+        },
+        "missing_cpu_os_capabilities": [],
+        "scalar_fallback_validated": false
+      },
+      "emulation": null,
+      "reference_weight_repacking": "upstream_default",
+      "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+      "model_file_bytes": 26671328,
+      "binary_sha256": "dd919108a97107f7657dab7729554359986b5c57a8d9e1143cb6fe9dd1f7bdba",
+      "reference_binary_sha256": "e3e80ef8f467264183c011b902167ff7c2de2ec2f88ff15de705113d3ad19a27",
+      "reference_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+      "working_tree_dirty": false,
+      "source_sha256": {
+        "native/src/streamed.cpp": "6a6607de9f80f9a8e690a9b38e31d86299c37c44a94792d744330f3c3b933ee6",
+        "crates/llmbridge-core/src/streamed.rs": "89f6b44ceffdede0159cb4e66fa6c1ebd2ae5792e1b2d4a65e6c69a25003ec6d",
+        "crates/llmbridge-core/src/read_cache.rs": "63fea96b27b7547c197312c4bb8b136fc4596f743881a123e0b9ac598c19edef",
+        "crates/llmbridge-core/src/storage.rs": "24855e5ad44345ccd5a26a4f68c33ee7aa876373a76051abe1e505c0a164ff5d",
+        "crates/llmbridge-core/src/storage_auth.rs": "1d60d554e6438a26c3f421eac2a82d228f21671fd384c1d30668cf6ff5adeabb"
+      },
+      "verified_session_requested": true,
+      "cache_budget_bytes": 1048576,
+      "cache_pressure_floor_mib": 1048576,
+      "cache_release_required": true,
+      "address_space_limit_bytes": 25165824,
+      "memory_proof_scope": "native_model_larger_than_cap",
+      "host": "Linux-6.18.57-x86_64-with-glibc2.41",
+      "git_sha": "2ed02f53b498283bd32d97222d7699e52bdb5c86",
+      "kv_precision": "FP32 on both paths; reference flash attention disabled",
+      "logit_tolerance": {
+        "atol": 0.01,
+        "rtol": 0.001
+      },
+      "note": "Checkpoint-specific experimental streamed path with pinned ggml dot kernels versus upstream graph; observed matching logits are checkpoint-specific. RLIMIT_AS is a Linux process address-space cap, not a portable RSS API.",
+      "trials": [
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "4930",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131150,
+            "range_bytes_requested": 149025157,
+            "weight_read_calls": 2671,
+            "weight_bytes_requested": 148298022,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 349703616,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2671,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 983376,
+            "cache_release_events": 1
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.5103942200000802,
+          "memory": {
+            "peak_rss_bytes": 14880768,
+            "rss_after_run_bytes": 11948032,
+            "pss_after_run_bytes": 8844288,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "prompt_sha256": "63460e4223f8a4b261087a8d8133f25ac5fe640d21f9ffbe2fcef4c3f8719c19",
+          "streamed_text_sha256": "f4f18cc561041c240e9f5da9cb7c508360be81641cf6e0ec48c1a2e7cc976c18",
+          "reference_text_sha256": "b0829dfe85cb88e6c82ffc14248d38f7e15819d675d7fee4ba6dd0151666490d",
+          "streamed_stderr_sha256": "7b6528b66e5e579608fe50f37673f87dd555904dc216ea5016f3d72f2fdac949",
+          "reference_stderr_sha256": "356a0df521421acda00d13cef2af9ca7b955d3733cd55ad0791ec561eb018d74"
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "5160",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131283,
+            "range_bytes_requested": 155384503,
+            "weight_read_calls": 2804,
+            "weight_bytes_requested": 154657368,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 364771424,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2804,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 983376,
+            "cache_release_events": 1
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.5814773349999314,
+          "memory": {
+            "peak_rss_bytes": 14778368,
+            "rss_after_run_bytes": 11956224,
+            "pss_after_run_bytes": 9149440,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "prompt_sha256": "e286222c229ec73b1bc520d88583191572ae0cbbaa66ea68053994a5e50ac87a",
+          "streamed_text_sha256": "b6a73596905e09047d5e42f90a6fb08cf3c1693ff5f77140857bc683d7b32b51",
+          "reference_text_sha256": "1525ac0a5669601447dfea094cd245db5a9c0c2dae866c618bd935c53ffaea81",
+          "streamed_stderr_sha256": "7e4eb3bfdd4d48993e4646367ee2dd4a872347b54ecd2ccd332444e7e4db07d0",
+          "reference_stderr_sha256": "298b3ede89381da6d642f4da87d5ae3f121d4c7353349e116eabc8ae0ab1b2ac"
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "4930",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131150,
+            "range_bytes_requested": 149025157,
+            "weight_read_calls": 2671,
+            "weight_bytes_requested": 148298022,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 349703616,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2671,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 983376,
+            "cache_release_events": 1
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.8435997109999107,
+          "memory": {
+            "peak_rss_bytes": 15024128,
+            "rss_after_run_bytes": 12005376,
+            "pss_after_run_bytes": 9701376,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "prompt_sha256": "1a2b1757a9c8f417e0591c1a96b413ea7ad629316f2c0106f7c533f11dd0999a",
+          "streamed_text_sha256": "329f7d34792c637658ed8af9efb54ee951ee6c879c067e3e72314e6e20b2392f",
+          "reference_text_sha256": "a3ce7ebbe809af04dbd52cb9a3e544818e4c66335b55b6f379379010977d6337",
+          "streamed_stderr_sha256": "e69caf0901136a91e3c1f6e2ba10344b13fbcda82cbd044798112311a4c71921",
+          "reference_stderr_sha256": "6ec14932117a09da09e1d78477e65083d6237b4ee00390e948d11eca049a162f"
+        }
+      ]
+    },
+    "uncached-q8": {
+      "pass": true,
+      "checkpoint": "stories15M-q8_0",
+      "generation_max_tokens": 8,
+      "cpu_profile": {
+        "native_profile": "x86-avx2",
+        "architecture": "x86_64",
+        "native_compatible": true,
+        "capabilities": {
+          "sse2": true,
+          "sse42": true,
+          "avx": true,
+          "avx2": true,
+          "fma": true,
+          "f16c": true,
+          "bmi2": true
+        },
+        "missing_cpu_os_capabilities": [],
+        "scalar_fallback_validated": false
+      },
+      "emulation": null,
+      "reference_weight_repacking": "upstream_default",
+      "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+      "model_file_bytes": 26671328,
+      "binary_sha256": "dd919108a97107f7657dab7729554359986b5c57a8d9e1143cb6fe9dd1f7bdba",
+      "reference_binary_sha256": "e3e80ef8f467264183c011b902167ff7c2de2ec2f88ff15de705113d3ad19a27",
+      "reference_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+      "working_tree_dirty": false,
+      "source_sha256": {
+        "native/src/streamed.cpp": "6a6607de9f80f9a8e690a9b38e31d86299c37c44a94792d744330f3c3b933ee6",
+        "crates/llmbridge-core/src/streamed.rs": "89f6b44ceffdede0159cb4e66fa6c1ebd2ae5792e1b2d4a65e6c69a25003ec6d",
+        "crates/llmbridge-core/src/read_cache.rs": "63fea96b27b7547c197312c4bb8b136fc4596f743881a123e0b9ac598c19edef",
+        "crates/llmbridge-core/src/storage.rs": "24855e5ad44345ccd5a26a4f68c33ee7aa876373a76051abe1e505c0a164ff5d",
+        "crates/llmbridge-core/src/storage_auth.rs": "1d60d554e6438a26c3f421eac2a82d228f21671fd384c1d30668cf6ff5adeabb"
+      },
+      "verified_session_requested": false,
+      "cache_budget_bytes": 0,
+      "cache_pressure_floor_mib": null,
+      "cache_release_required": false,
+      "address_space_limit_bytes": 25165824,
+      "memory_proof_scope": "native_model_larger_than_cap",
+      "host": "Linux-6.18.57-x86_64-with-glibc2.41",
+      "git_sha": "2ed02f53b498283bd32d97222d7699e52bdb5c86",
+      "kv_precision": "FP32 on both paths; reference flash attention disabled",
+      "logit_tolerance": {
+        "atol": 0.01,
+        "rtol": 0.001
+      },
+      "note": "Checkpoint-specific experimental streamed path with pinned ggml dot kernels versus upstream graph; observed matching logits are checkpoint-specific. RLIMIT_AS is a Linux process address-space cap, not a portable RSS API.",
+      "trials": [
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "0"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131150,
+            "range_bytes_requested": 149025157,
+            "weight_read_calls": 2671,
+            "weight_bytes_requested": 148298022,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 149025157,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 131150,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 0,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.709099488999982,
+          "memory": {
+            "peak_rss_bytes": 13582336,
+            "rss_after_run_bytes": 11603968,
+            "pss_after_run_bytes": 8367104,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "prompt_sha256": "63460e4223f8a4b261087a8d8133f25ac5fe640d21f9ffbe2fcef4c3f8719c19",
+          "streamed_text_sha256": "f4f18cc561041c240e9f5da9cb7c508360be81641cf6e0ec48c1a2e7cc976c18",
+          "reference_text_sha256": "b0829dfe85cb88e6c82ffc14248d38f7e15819d675d7fee4ba6dd0151666490d",
+          "streamed_stderr_sha256": "314afa35f177e3233783a03c4f27a75ed513c951b38104888b062ffce64421a3",
+          "reference_stderr_sha256": "e499e5141cea7f309f7c4b56e740c2162d4d5222ed464bf4639667f758949e45"
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "0"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131283,
+            "range_bytes_requested": 155384503,
+            "weight_read_calls": 2804,
+            "weight_bytes_requested": 154657368,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 155384503,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 131283,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 0,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 1.1068267489999926,
+          "memory": {
+            "peak_rss_bytes": 14106624,
+            "rss_after_run_bytes": 11841536,
+            "pss_after_run_bytes": 8947712,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "prompt_sha256": "e286222c229ec73b1bc520d88583191572ae0cbbaa66ea68053994a5e50ac87a",
+          "streamed_text_sha256": "b6a73596905e09047d5e42f90a6fb08cf3c1693ff5f77140857bc683d7b32b51",
+          "reference_text_sha256": "1525ac0a5669601447dfea094cd245db5a9c0c2dae866c618bd935c53ffaea81",
+          "streamed_stderr_sha256": "62d6977a239ff6337dfa644f68426e42c8724c79bd89016dcafb5d51b84127bb",
+          "reference_stderr_sha256": "562c448c437ef5c1497d902ede0254f22e2efb46ca4b428b10647fc1636e21cb"
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "0"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131150,
+            "range_bytes_requested": 149025157,
+            "weight_read_calls": 2671,
+            "weight_bytes_requested": 148298022,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 149025157,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 131150,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 0,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.4829044179999755,
+          "memory": {
+            "peak_rss_bytes": 14008320,
+            "rss_after_run_bytes": 11800576,
+            "pss_after_run_bytes": 10983424,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "prompt_sha256": "1a2b1757a9c8f417e0591c1a96b413ea7ad629316f2c0106f7c533f11dd0999a",
+          "streamed_text_sha256": "329f7d34792c637658ed8af9efb54ee951ee6c879c067e3e72314e6e20b2392f",
+          "reference_text_sha256": "a3ce7ebbe809af04dbd52cb9a3e544818e4c66335b55b6f379379010977d6337",
+          "streamed_stderr_sha256": "df45f5aa1053c61bab25c7a619b1283c6959973fad0ea37214c043e7ac9dda93",
+          "reference_stderr_sha256": "6e3a2fc48359a1931cc7dc1cee4a9e1e40ba6061ea78ad5941595620bd3e5d2e"
+        }
+      ]
+    },
+    "cached-q8": {
+      "pass": true,
+      "checkpoint": "stories15M-q8_0",
+      "generation_max_tokens": 8,
+      "cpu_profile": {
+        "native_profile": "x86-avx2",
+        "architecture": "x86_64",
+        "native_compatible": true,
+        "capabilities": {
+          "sse2": true,
+          "sse42": true,
+          "avx": true,
+          "avx2": true,
+          "fma": true,
+          "f16c": true,
+          "bmi2": true
+        },
+        "missing_cpu_os_capabilities": [],
+        "scalar_fallback_validated": false
+      },
+      "emulation": null,
+      "reference_weight_repacking": "upstream_default",
+      "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+      "model_file_bytes": 26671328,
+      "binary_sha256": "dd919108a97107f7657dab7729554359986b5c57a8d9e1143cb6fe9dd1f7bdba",
+      "reference_binary_sha256": "e3e80ef8f467264183c011b902167ff7c2de2ec2f88ff15de705113d3ad19a27",
+      "reference_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+      "working_tree_dirty": false,
+      "source_sha256": {
+        "native/src/streamed.cpp": "6a6607de9f80f9a8e690a9b38e31d86299c37c44a94792d744330f3c3b933ee6",
+        "crates/llmbridge-core/src/streamed.rs": "89f6b44ceffdede0159cb4e66fa6c1ebd2ae5792e1b2d4a65e6c69a25003ec6d",
+        "crates/llmbridge-core/src/read_cache.rs": "63fea96b27b7547c197312c4bb8b136fc4596f743881a123e0b9ac598c19edef",
+        "crates/llmbridge-core/src/storage.rs": "24855e5ad44345ccd5a26a4f68c33ee7aa876373a76051abe1e505c0a164ff5d",
+        "crates/llmbridge-core/src/storage_auth.rs": "1d60d554e6438a26c3f421eac2a82d228f21671fd384c1d30668cf6ff5adeabb"
+      },
+      "verified_session_requested": false,
+      "cache_budget_bytes": 1048576,
+      "cache_pressure_floor_mib": null,
+      "cache_release_required": false,
+      "address_space_limit_bytes": 25165824,
+      "memory_proof_scope": "native_model_larger_than_cap",
+      "host": "Linux-6.18.57-x86_64-with-glibc2.41",
+      "git_sha": "2ed02f53b498283bd32d97222d7699e52bdb5c86",
+      "kv_precision": "FP32 on both paths; reference flash attention disabled",
+      "logit_tolerance": {
+        "atol": 0.01,
+        "rtol": 0.001
+      },
+      "note": "Checkpoint-specific experimental streamed path with pinned ggml dot kernels versus upstream graph; observed matching logits are checkpoint-specific. RLIMIT_AS is a Linux process address-space cap, not a portable RSS API.",
+      "trials": [
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "0"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131150,
+            "range_bytes_requested": 149025157,
+            "weight_read_calls": 2671,
+            "weight_bytes_requested": 148298022,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 150253984,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2293,
+            "cache_allocated_bytes": 983376,
+            "cache_block_hits": 131126,
+            "cache_block_misses": 2293,
+            "cache_evictions": 2279,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.5363672140000517,
+          "memory": {
+            "peak_rss_bytes": 14852096,
+            "rss_after_run_bytes": 11665408,
+            "pss_after_run_bytes": 8430592,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "prompt_sha256": "63460e4223f8a4b261087a8d8133f25ac5fe640d21f9ffbe2fcef4c3f8719c19",
+          "streamed_text_sha256": "f4f18cc561041c240e9f5da9cb7c508360be81641cf6e0ec48c1a2e7cc976c18",
+          "reference_text_sha256": "b0829dfe85cb88e6c82ffc14248d38f7e15819d675d7fee4ba6dd0151666490d",
+          "streamed_stderr_sha256": "b64e8e83190f242879557f36c0bd0370b5c1b6d1d72c464e21086a683e9aee52",
+          "reference_stderr_sha256": "2fe2a7e7bf271f703f044f2e536322934cff96924c8249aac385c63349e0fe84"
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "0"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131283,
+            "range_bytes_requested": 155384503,
+            "weight_read_calls": 2804,
+            "weight_bytes_requested": 154657368,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 156740224,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2392,
+            "cache_allocated_bytes": 983376,
+            "cache_block_hits": 131257,
+            "cache_block_misses": 2392,
+            "cache_evictions": 2378,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.7042550880000817,
+          "memory": {
+            "peak_rss_bytes": 15147008,
+            "rss_after_run_bytes": 11956224,
+            "pss_after_run_bytes": 10393600,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "prompt_sha256": "e286222c229ec73b1bc520d88583191572ae0cbbaa66ea68053994a5e50ac87a",
+          "streamed_text_sha256": "b6a73596905e09047d5e42f90a6fb08cf3c1693ff5f77140857bc683d7b32b51",
+          "reference_text_sha256": "1525ac0a5669601447dfea094cd245db5a9c0c2dae866c618bd935c53ffaea81",
+          "streamed_stderr_sha256": "e7eab5b5ec247b8e490a1b664ef0068fd36cf4700695a94e51ac8aa809a574ea",
+          "reference_stderr_sha256": "d31486b89e0ebb9dccfa86b64a64556b88a13ab88b50ad0e57f11f07e179ffb9"
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "0"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131150,
+            "range_bytes_requested": 149025157,
+            "weight_read_calls": 2671,
+            "weight_bytes_requested": 148298022,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 150253984,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2293,
+            "cache_allocated_bytes": 983376,
+            "cache_block_hits": 131126,
+            "cache_block_misses": 2293,
+            "cache_evictions": 2279,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.5883438460000434,
+          "memory": {
+            "peak_rss_bytes": 15089664,
+            "rss_after_run_bytes": 11915264,
+            "pss_after_run_bytes": 10381312,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "prompt_sha256": "1a2b1757a9c8f417e0591c1a96b413ea7ad629316f2c0106f7c533f11dd0999a",
+          "streamed_text_sha256": "329f7d34792c637658ed8af9efb54ee951ee6c879c067e3e72314e6e20b2392f",
+          "reference_text_sha256": "a3ce7ebbe809af04dbd52cb9a3e544818e4c66335b55b6f379379010977d6337",
+          "streamed_stderr_sha256": "3c2e77dffbc7dac510a39d901ea9157af67aa0a09a37980d81bd2fba3db6774f",
+          "reference_stderr_sha256": "b7555f317be2a7b441d23c2f35e873dbecf5c70ea1f19077599b6f0b4a12fb20"
+        }
+      ]
+    },
+    "verified-q4": {
+      "pass": true,
+      "checkpoint": "stories15M-derived-q4_0",
+      "generation_max_tokens": 8,
+      "cpu_profile": {
+        "native_profile": "x86-avx2",
+        "architecture": "x86_64",
+        "native_compatible": true,
+        "capabilities": {
+          "sse2": true,
+          "sse42": true,
+          "avx": true,
+          "avx2": true,
+          "fma": true,
+          "f16c": true,
+          "bmi2": true
+        },
+        "missing_cpu_os_capabilities": [],
+        "scalar_fallback_validated": false
+      },
+      "emulation": null,
+      "reference_weight_repacking": "explicitly_disabled",
+      "model_sha256": "b5cd77bb0d1a785a82d7a8a2bcb4170dfe6e43e881b9cbb0d1c8184a6dd99839",
+      "model_file_bytes": 14469344,
+      "binary_sha256": "dd919108a97107f7657dab7729554359986b5c57a8d9e1143cb6fe9dd1f7bdba",
+      "reference_binary_sha256": "e3e80ef8f467264183c011b902167ff7c2de2ec2f88ff15de705113d3ad19a27",
+      "reference_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+      "working_tree_dirty": false,
+      "source_sha256": {
+        "native/src/streamed.cpp": "6a6607de9f80f9a8e690a9b38e31d86299c37c44a94792d744330f3c3b933ee6",
+        "crates/llmbridge-core/src/streamed.rs": "89f6b44ceffdede0159cb4e66fa6c1ebd2ae5792e1b2d4a65e6c69a25003ec6d",
+        "crates/llmbridge-core/src/read_cache.rs": "63fea96b27b7547c197312c4bb8b136fc4596f743881a123e0b9ac598c19edef",
+        "crates/llmbridge-core/src/storage.rs": "24855e5ad44345ccd5a26a4f68c33ee7aa876373a76051abe1e505c0a164ff5d",
+        "crates/llmbridge-core/src/storage_auth.rs": "1d60d554e6438a26c3f421eac2a82d228f21671fd384c1d30668cf6ff5adeabb"
+      },
+      "verified_session_requested": true,
+      "cache_budget_bytes": 1048576,
+      "cache_pressure_floor_mib": null,
+      "cache_release_required": false,
+      "address_space_limit_bytes": null,
+      "memory_proof_scope": "not_a_memory_cap_proof",
+      "host": "Linux-6.18.57-x86_64-with-glibc2.41",
+      "git_sha": "2ed02f53b498283bd32d97222d7699e52bdb5c86",
+      "kv_precision": "FP32 on both paths; reference flash attention disabled",
+      "logit_tolerance": {
+        "atol": 0.01,
+        "rtol": 0.001
+      },
+      "note": "Checkpoint-specific experimental streamed path with pinned ggml dot kernels versus upstream graph; observed matching logits are checkpoint-specific. RLIMIT_AS is a Linux process address-space cap, not a portable RSS API.",
+      "trials": [
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "801760",
+            "blocks_verified": "2644",
+            "sha256": "b5cd77bb0d1a785a82d7a8a2bcb4170dfe6e43e881b9cbb0d1c8184a6dd99839"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 129930,
+            "range_bytes_requested": 79313749,
+            "weight_read_calls": 1451,
+            "weight_bytes_requested": 78586614,
+            "max_range_read_bytes": 65448,
+            "source_bytes_read": 187591296,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 1451,
+            "cache_allocated_bytes": 983376,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.460152522000044,
+          "memory": {
+            "peak_rss_bytes": 15196160,
+            "rss_after_run_bytes": 12070912,
+            "pss_after_run_bytes": 8475648,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "prompt_sha256": "63460e4223f8a4b261087a8d8133f25ac5fe640d21f9ffbe2fcef4c3f8719c19",
+          "streamed_text_sha256": "83285a9a94de741a854930a67f9ff4b9a4abc87d7163ef47cf3fae615114e8bc",
+          "reference_text_sha256": "a76e4c1cf99a5d3c33064d78255ba7000b0cbf637195c5c0fd8d893130a38cfa",
+          "streamed_stderr_sha256": "5f5ee6f373083947e912252b909ba5c70e78f87daae209a12320b2a0d633898e",
+          "reference_stderr_sha256": "b1157c1b93d9e27be925a25242e14cdf3fbf7e2753e778dfdda4db81f06342ca"
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "801760",
+            "blocks_verified": "2768",
+            "sha256": "b5cd77bb0d1a785a82d7a8a2bcb4170dfe6e43e881b9cbb0d1c8184a6dd99839"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 130003,
+            "range_bytes_requested": 82686967,
+            "weight_read_calls": 1524,
+            "weight_bytes_requested": 81959832,
+            "max_range_read_bytes": 65448,
+            "source_bytes_read": 195703648,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 1524,
+            "cache_allocated_bytes": 983376,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.3889736429999857,
+          "memory": {
+            "peak_rss_bytes": 15224832,
+            "rss_after_run_bytes": 12029952,
+            "pss_after_run_bytes": 8382464,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "prompt_sha256": "e286222c229ec73b1bc520d88583191572ae0cbbaa66ea68053994a5e50ac87a",
+          "streamed_text_sha256": "b6a73596905e09047d5e42f90a6fb08cf3c1693ff5f77140857bc683d7b32b51",
+          "reference_text_sha256": "1525ac0a5669601447dfea094cd245db5a9c0c2dae866c618bd935c53ffaea81",
+          "streamed_stderr_sha256": "8b275375ed9bcbb98afc5bf11140b5c97f6f76b13c8acc5a6ef565633fe2e897",
+          "reference_stderr_sha256": "30b85b75612a17e2bfc5d4eb36bf9f1f8f128ff65f6acecf8f09eade71f629c7"
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "801760",
+            "blocks_verified": "2644",
+            "sha256": "b5cd77bb0d1a785a82d7a8a2bcb4170dfe6e43e881b9cbb0d1c8184a6dd99839"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 129930,
+            "range_bytes_requested": 79313749,
+            "weight_read_calls": 1451,
+            "weight_bytes_requested": 78586614,
+            "max_range_read_bytes": 65448,
+            "source_bytes_read": 187591296,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 1451,
+            "cache_allocated_bytes": 983376,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.9709304780000139,
+          "memory": {
+            "peak_rss_bytes": 15171584,
+            "rss_after_run_bytes": 11976704,
+            "pss_after_run_bytes": 10406912,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "prompt_sha256": "1a2b1757a9c8f417e0591c1a96b413ea7ad629316f2c0106f7c533f11dd0999a",
+          "streamed_text_sha256": "329f7d34792c637658ed8af9efb54ee951ee6c879c067e3e72314e6e20b2392f",
+          "reference_text_sha256": "a3ce7ebbe809af04dbd52cb9a3e544818e4c66335b55b6f379379010977d6337",
+          "streamed_stderr_sha256": "8b4e349d4318364a1a7d29e323b1796f552fa0a6b65e1dcefd0d57c193266ac0",
+          "reference_stderr_sha256": "8da3fca1469823e409c5e66fad844545c4c451ee2d8dd98ffe131dabcc1f4765"
+        }
+      ]
+    },
+    "baseline-q8": {
+      "pass": true,
+      "checkpoint": "stories15M-q8_0",
+      "generation_max_tokens": 8,
+      "cpu_profile": {
+        "native_profile": "x86-baseline",
+        "architecture": "x86_64",
+        "native_compatible": true,
+        "capabilities": {
+          "sse2": true,
+          "sse42": true,
+          "avx": true,
+          "avx2": true,
+          "fma": true,
+          "f16c": true,
+          "bmi2": true
+        },
+        "missing_cpu_os_capabilities": [],
+        "scalar_fallback_validated": false
+      },
+      "emulation": null,
+      "reference_weight_repacking": "upstream_default",
+      "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+      "model_file_bytes": 26671328,
+      "binary_sha256": "d00f234423af12bc8d0b790ac09ca2a9ec6d1c88871763c5cb61a40c611c6173",
+      "reference_binary_sha256": "811022bcf42db2789cc697bf883a7ee2e9395265a978e566298116208fcf1531",
+      "reference_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+      "working_tree_dirty": false,
+      "source_sha256": {
+        "native/src/streamed.cpp": "6a6607de9f80f9a8e690a9b38e31d86299c37c44a94792d744330f3c3b933ee6",
+        "crates/llmbridge-core/src/streamed.rs": "89f6b44ceffdede0159cb4e66fa6c1ebd2ae5792e1b2d4a65e6c69a25003ec6d",
+        "crates/llmbridge-core/src/read_cache.rs": "63fea96b27b7547c197312c4bb8b136fc4596f743881a123e0b9ac598c19edef",
+        "crates/llmbridge-core/src/storage.rs": "24855e5ad44345ccd5a26a4f68c33ee7aa876373a76051abe1e505c0a164ff5d",
+        "crates/llmbridge-core/src/storage_auth.rs": "1d60d554e6438a26c3f421eac2a82d228f21671fd384c1d30668cf6ff5adeabb"
+      },
+      "verified_session_requested": true,
+      "cache_budget_bytes": 0,
+      "cache_pressure_floor_mib": null,
+      "cache_release_required": false,
+      "address_space_limit_bytes": 25165824,
+      "memory_proof_scope": "native_model_larger_than_cap",
+      "host": "Linux-6.18.57-x86_64-with-glibc2.41",
+      "git_sha": "2ed02f53b498283bd32d97222d7699e52bdb5c86",
+      "kv_precision": "FP32 on both paths; reference flash attention disabled",
+      "logit_tolerance": {
+        "atol": 0.01,
+        "rtol": 0.001
+      },
+      "note": "Checkpoint-specific experimental streamed path with pinned ggml dot kernels versus upstream graph; observed matching logits are checkpoint-specific. RLIMIT_AS is a Linux process address-space cap, not a portable RSS API.",
+      "trials": [
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "4930",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131150,
+            "range_bytes_requested": 149025157,
+            "weight_read_calls": 2671,
+            "weight_bytes_requested": 148298022,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 349703616,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2671,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 0,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.5424547889999758,
+          "memory": {
+            "peak_rss_bytes": 13717504,
+            "rss_after_run_bytes": 11616256,
+            "pss_after_run_bytes": 10087424,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "prompt_sha256": "63460e4223f8a4b261087a8d8133f25ac5fe640d21f9ffbe2fcef4c3f8719c19",
+          "streamed_text_sha256": "f4f18cc561041c240e9f5da9cb7c508360be81641cf6e0ec48c1a2e7cc976c18",
+          "reference_text_sha256": "b0829dfe85cb88e6c82ffc14248d38f7e15819d675d7fee4ba6dd0151666490d",
+          "streamed_stderr_sha256": "bec682980fdde6b5755db57e950978e5b57bae715f38420fc44e5d796dbf2a52",
+          "reference_stderr_sha256": "f220dae0f4c268fc4eeca8361f707270028a6b9e40a700096f528f3e9d92f5f6"
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "5160",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131283,
+            "range_bytes_requested": 155384503,
+            "weight_read_calls": 2804,
+            "weight_bytes_requested": 154657368,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 364771424,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2804,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 0,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.5347494330000018,
+          "memory": {
+            "peak_rss_bytes": 14012416,
+            "rss_after_run_bytes": 11878400,
+            "pss_after_run_bytes": 10308608,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "prompt_sha256": "e286222c229ec73b1bc520d88583191572ae0cbbaa66ea68053994a5e50ac87a",
+          "streamed_text_sha256": "b6a73596905e09047d5e42f90a6fb08cf3c1693ff5f77140857bc683d7b32b51",
+          "reference_text_sha256": "1525ac0a5669601447dfea094cd245db5a9c0c2dae866c618bd935c53ffaea81",
+          "streamed_stderr_sha256": "6287dfc18cb73e87917668086430f5e3d258eeed2d712c8017fbfbbd67b2c13c",
+          "reference_stderr_sha256": "e62b822013b1d9f99e9ba22a1676333b8b5a19e502fb69618a4b83116d7da657"
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "4930",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131150,
+            "range_bytes_requested": 149025157,
+            "weight_read_calls": 2671,
+            "weight_bytes_requested": 148298022,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 349703616,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2671,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 0,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.5916490770000564,
+          "memory": {
+            "peak_rss_bytes": 13852672,
+            "rss_after_run_bytes": 11612160,
+            "pss_after_run_bytes": 10076160,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "prompt_sha256": "1a2b1757a9c8f417e0591c1a96b413ea7ad629316f2c0106f7c533f11dd0999a",
+          "streamed_text_sha256": "329f7d34792c637658ed8af9efb54ee951ee6c879c067e3e72314e6e20b2392f",
+          "reference_text_sha256": "a3ce7ebbe809af04dbd52cb9a3e544818e4c66335b55b6f379379010977d6337",
+          "streamed_stderr_sha256": "b459b2c140692b766fa0b64d7c0995cf2279b19c949f94a5c517e91d9afb4612",
+          "reference_stderr_sha256": "307dbafdd8f693519719e148e67be681ad891c30cc5b0594666e5dc26edadfe0"
+        }
+      ]
+    }
+  },
+  "unauthenticated_cache_comparison": {
+    "pass": true,
+    "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+    "binary_sha256": "dd919108a97107f7657dab7729554359986b5c57a8d9e1143cb6fe9dd1f7bdba",
+    "source_revision": "2ed02f53b498283bd32d97222d7699e52bdb5c86",
+    "address_space_limit_bytes": 25165824,
+    "cache_budget_bytes": 1048576,
+    "trials": [
+      {
+        "pass": true,
+        "logits_identical": true,
+        "uncached_source_read_calls": 131150,
+        "cached_source_read_calls": 2293,
+        "read_call_reduction_percent": 98.25162028211972,
+        "uncached_source_bytes": 149025157,
+        "cached_source_bytes": 150253984,
+        "cached_peak_rss_bytes": 14852096,
+        "cache_allocated_bytes": 983376,
+        "prompt_sha256": "63460e4223f8a4b261087a8d8133f25ac5fe640d21f9ffbe2fcef4c3f8719c19"
+      },
+      {
+        "pass": true,
+        "logits_identical": true,
+        "uncached_source_read_calls": 131283,
+        "cached_source_read_calls": 2392,
+        "read_call_reduction_percent": 98.17798191692755,
+        "uncached_source_bytes": 155384503,
+        "cached_source_bytes": 156740224,
+        "cached_peak_rss_bytes": 15147008,
+        "cache_allocated_bytes": 983376,
+        "prompt_sha256": "e286222c229ec73b1bc520d88583191572ae0cbbaa66ea68053994a5e50ac87a"
+      },
+      {
+        "pass": true,
+        "logits_identical": true,
+        "uncached_source_read_calls": 131150,
+        "cached_source_read_calls": 2293,
+        "read_call_reduction_percent": 98.25162028211972,
+        "uncached_source_bytes": 149025157,
+        "cached_source_bytes": 150253984,
+        "cached_peak_rss_bytes": 15089664,
+        "cache_allocated_bytes": 983376,
+        "prompt_sha256": "1a2b1757a9c8f417e0591c1a96b413ea7ad629316f2c0106f7c533f11dd0999a"
+      }
+    ],
+    "note": "Source read calls/bytes are application file-range I/O, not physical device I/O. Cache includes bounded aligned read-ahead. This is not a speed or real-2GB-host claim."
+  }
+}
