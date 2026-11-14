@@ -52,6 +52,13 @@ Local checks: Python regression suite; workspace non-native tests; release nativ
 - Pure budget-boundary tests plus real-model zero/minimum/larger cache boundary executions validate context preservation, exact allocations and unchanged output. The CLI protocol includes authenticated adaptive cache and resident-backend refusal.
 - This is deterministic admission, not runtime cache resizing or a measured speed optimizer. Full prefetch/thread/compute scheduling remains incomplete.
 
+## Native CPU compatibility checkpoint
+
+- Cargo stamps the explicit x86 AVX2 build profile. Runtime CPU/OS checks guard safe Rust resident/streamed/authenticated generation, native metadata probing and Q8 execution before FFI. CLI generation checks before model inspection. Unknown/disabled/unvalidated profiles refuse native execution.
+- `doctor --json` reports native profile, architecture and feature availability without invoking native code. No unvalidated scalar fallback is selected.
+- Actual binaries run under QEMU Core 2 Duo CPUID: doctor reports incompatibility, CLI native requests fail normally, and ten direct Rust library paths reject before FFI with no operator range reads. This is negative-path emulation, not physical old-CPU inference or a 2GB-hardware measurement.
+- Direct C ABI consumers and custom higher-ISA Rust compiler flags remain outside this Rust admission guard. Generic pre-AVX2/ARM numerical validation and dynamic dispatch remain incomplete. See `docs/NATIVE_CPU_COMPATIBILITY.md`.
+
 ## M3–M11
 
 M3 now has native-derived CLI/context admission, not a complete adaptive scheduler. M4 remote providers, M5 MoE, M6 GPU, M7 API/SDK, M8 desktop, M9 full robustness/benchmarks, M10 format/plugin extensibility and M11 large-model feasibility remain incomplete. No 70B/550B or real 2GB-machine result is claimed.

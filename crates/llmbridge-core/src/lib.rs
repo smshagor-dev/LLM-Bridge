@@ -30,3 +30,5 @@ pub mod streamed_plan;
 
 #[cfg(feature = "native")]
 pub mod session_performance;
+
+pub mod native_cpu;

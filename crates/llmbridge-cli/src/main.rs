@@ -16,16 +16,25 @@ fn main() {
     }
 }
 fn usage() -> &'static str {
-    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge plan <path.gguf> [--ctx 128] [--workspace-mb 8] [--max-ram-mb 64] [--auto-context] [--auto-cache] [--json]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--sha256 trusted-digest] [--verification-mb 8] [--address-space-mb 24] [--auto-context] [--auto-cache] [--max-ram-mb 64] [--logits path.f32]\n  Planning max-ram-mb is an incremental estimate budget; address-space-mb enforces a separate Linux process limit."
+    "Usage:\n  llmbridge doctor [--json]\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge plan <path.gguf> [--ctx 128] [--workspace-mb 8] [--max-ram-mb 64] [--auto-context] [--auto-cache] [--json]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--sha256 trusted-digest] [--verification-mb 8] [--address-space-mb 24] [--auto-context] [--auto-cache] [--max-ram-mb 64] [--logits path.f32]\n  Planning max-ram-mb is an incremental estimate budget; address-space-mb enforces a separate Linux process limit."
 }
 fn json_number(value: Option<u64>) -> String {
     value.map_or_else(|| "null".to_string(), |x| x.to_string())
 }
 fn run(args: Vec<String>) -> Result<(), String> {
     match args.first().map(String::as_str) {
+        Some("doctor") if args.len() == 2 && args[1] == "--json" => {
+            let h = hardware::profile();
+            let cpu = llmbridge_core::native_cpu::compatibility();
+            println!("{{\"logical_cpus\":{},\"total_ram_bytes\":{},\"available_ram_bytes\":{},\"cpu\":{}}}",
+                h.logical_cpus, json_number(h.total_ram_bytes), json_number(h.available_ram_bytes), cpu.to_json());
+            Ok(())
+        }
         Some("doctor") if args.len() == 1 => {
             let h = hardware::profile();
             println!("LLM Bridge M1 — real CPU GGUF baseline; not out-of-core inference");
+            let cpu = llmbridge_core::native_cpu::compatibility();
+            println!("native CPU: {}", cpu.to_json());
             println!("logical CPUs: {}", h.logical_cpus);
             println!("total RAM bytes: {:?}", h.total_ram_bytes);
             println!("available RAM bytes: {:?}", h.available_ram_bytes);
@@ -418,6 +427,7 @@ fn chat(args: &[String]) -> Result<(), String> {
     if backend == "resident" && logits_path.is_some() {
         return Err("--logits requires streamed backend".into());
     }
+    llmbridge_core::native_cpu::ensure_compatible()?;
     if let Some(megabytes) = address_space_mb {
         restrict_address_space(
             megabytes
