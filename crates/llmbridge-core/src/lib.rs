@@ -36,3 +36,6 @@ pub mod native_cpu;
 
 #[cfg(target_os = "linux")]
 mod cgroup_memory;
+
+#[cfg(feature = "native")]
+pub mod queued_streamed;

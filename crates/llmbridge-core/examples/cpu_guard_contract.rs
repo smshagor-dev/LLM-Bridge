@@ -84,6 +84,17 @@ fn main() {
             |_| panic!("logits"),
         ));
     }
+    let budget = llmbridge_core::memory_budget::MemoryBudget::new(1).unwrap();
+    let queue = llmbridge_core::admission_queue::AdmissionQueue::new(budget.clone(), 1).unwrap();
+    rejected(llmbridge_core::queued_streamed::generate_streamed_queued(
+        &queue,
+        llmbridge_core::queued_streamed::QueuedStreamedRequest::new(model, "fixture"),
+        &cancelled,
+        |_| panic!("output"),
+        |_| panic!("logits"),
+    ));
+    assert_eq!(queue.pending(), 0);
+    assert_eq!(budget.reserved(), 0);
     // Caller-owned invalid metadata proves CPU admission precedes native parsing,
     // and the operator performs no range I/O before rejecting the CPU.
     let path = std::env::temp_dir().join(format!("llmbridge-cpu-guard-{}", std::process::id()));
@@ -124,5 +135,5 @@ fn main() {
     drop(file);
     std::fs::remove_file(path).unwrap();
     println!("LLMBRIDGE_CPU_GUARD {}", cpu.to_json());
-    println!("twelve Rust native execution/probe paths rejected before FFI: PASS");
+    println!("thirteen Rust native execution/probe paths rejected before FFI: PASS");
 }

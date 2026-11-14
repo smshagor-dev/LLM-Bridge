@@ -3,10 +3,18 @@
 //! the returned reservation for the entire execution lifetime.
 use crate::memory_budget::{MemoryBudget, Reservation};
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, Mutex,
+};
+
+static NEXT_QUEUE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Ticket(u64);
+pub struct Ticket {
+    owner: u64,
+    sequence: u64,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdmissionError {
@@ -33,6 +41,7 @@ struct QueueState {
 /// Cancelling a ticket is explicit; dropping a ticket value does not cancel it.
 #[derive(Debug)]
 pub struct AdmissionQueue {
+    identity: u64,
     budget: Arc<MemoryBudget>,
     max_pending: usize,
     state: Mutex<QueueState>,
@@ -43,7 +52,13 @@ impl AdmissionQueue {
         if max_pending == 0 {
             return Err(AdmissionError::InvalidRequest);
         }
+        let identity = NEXT_QUEUE
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+                value.checked_add(1)
+            })
+            .map_err(|_| AdmissionError::TicketExhausted)?;
         Ok(Self {
+            identity,
             budget,
             max_pending,
             state: Mutex::new(QueueState::default()),
@@ -68,9 +83,20 @@ impl AdmissionQueue {
             .checked_add(1)
             .ok_or(AdmissionError::TicketExhausted)?;
         state.next = next;
-        let ticket = Ticket(next);
+        let ticket = Ticket {
+            owner: self.identity,
+            sequence: next,
+        };
         state.pending.push_back(Pending { ticket, bytes });
         Ok(ticket)
+    }
+
+    /// Owned pending request: dropping it removes its ticket automatically.
+    pub fn request(&self, bytes: u64) -> Result<PendingAdmission<'_>, AdmissionError> {
+        Ok(PendingAdmission {
+            queue: self,
+            ticket: Some(self.enqueue(bytes)?),
+        })
     }
 
     /// Nonblocking poll. Only the oldest live ticket can acquire a reservation.
@@ -115,9 +141,75 @@ impl AdmissionQueue {
     }
 }
 
+/// A pending ticket cannot outlive its queue. Admission transfers ownership to
+/// Reservation; dropping this handle never releases a running reservation.
+#[derive(Debug)]
+pub struct PendingAdmission<'a> {
+    queue: &'a AdmissionQueue,
+    ticket: Option<Ticket>,
+}
+impl PendingAdmission<'_> {
+    pub fn try_admit(&mut self) -> Result<Option<Reservation>, AdmissionError> {
+        let ticket = self.ticket.ok_or(AdmissionError::UnknownTicket)?;
+        let reservation = self.queue.try_admit(ticket)?;
+        if reservation.is_some() {
+            self.ticket = None;
+        }
+        Ok(reservation)
+    }
+}
+impl Drop for PendingAdmission<'_> {
+    fn drop(&mut self) {
+        if let Some(ticket) = self.ticket.take() {
+            self.queue.cancel(ticket);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tickets_from_another_queue_cannot_admit_or_cancel_local_requests() {
+        let budget = MemoryBudget::new(100).unwrap();
+        let a = AdmissionQueue::new(Arc::clone(&budget), 2).unwrap();
+        let b = AdmissionQueue::new(Arc::clone(&budget), 2).unwrap();
+        let ta = a.enqueue(10).unwrap();
+        let tb = b.enqueue(10).unwrap();
+        assert_ne!(ta, tb);
+        assert_eq!(a.try_admit(tb).unwrap_err(), AdmissionError::UnknownTicket);
+        assert!(!a.cancel(tb));
+        assert_eq!(a.pending(), 1);
+        let reservation = a.try_admit(ta).unwrap().unwrap();
+        assert_eq!(budget.reserved(), 10);
+        assert!(b.cancel(tb));
+        drop(reservation);
+        assert_eq!(budget.reserved(), 0);
+    }
+    #[test]
+    fn pending_handle_drop_removes_only_waiting_ticket() {
+        let budget = MemoryBudget::new(100).unwrap();
+        let queue = AdmissionQueue::new(Arc::clone(&budget), 2).unwrap();
+        let held = budget.try_reserve(100).unwrap();
+        let mut pending = queue.request(30).unwrap();
+        assert!(pending.try_admit().unwrap().is_none());
+        drop(pending);
+        assert_eq!(queue.pending(), 0);
+        assert_eq!(budget.reserved(), 100);
+        drop(held);
+        let mut pending = queue.request(30).unwrap();
+        let reservation = pending.try_admit().unwrap().unwrap();
+        assert_eq!(
+            pending.try_admit().unwrap_err(),
+            AdmissionError::UnknownTicket
+        );
+        drop(pending);
+        assert_eq!(queue.pending(), 0);
+        assert_eq!(budget.reserved(), 30);
+        drop(reservation);
+        assert_eq!(budget.reserved(), 0);
+    }
 
     #[test]
     fn fifo_waits_for_head_even_when_tail_fits() {
