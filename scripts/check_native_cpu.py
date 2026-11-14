@@ -69,9 +69,10 @@ def main():
                 result = run(name, binary, command)
                 assert result.returncode == 1 and not result.stdout
                 assert b'native CPU incompatible' in result.stderr
-            result = run('ten_library_paths', contract, [])
+            result = run('library_entry_paths', contract, [])
             assert result.returncode == 0
-            assert b'ten Rust native execution/probe paths rejected before FFI: PASS' in result.stdout
+            assert b'twelve Rust native execution/probe paths rejected before FFI: PASS' in result.stdout
+            report['library_paths_checked'] = 12
             report['pass'] = True
         except (OSError, subprocess.SubprocessError, ValueError, AssertionError, KeyError, IndexError) as error:
             report['error'] = type(error).__name__ + ': ' + str(error)

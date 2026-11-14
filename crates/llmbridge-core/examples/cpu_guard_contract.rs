@@ -3,7 +3,10 @@ use llmbridge_core::{
     gguf_index::GgufTensorIndex,
     inference, native_cpu,
     storage::BoundedLocalReader,
-    streamed::{generate_streamed, generate_streamed_verified, StreamedConfig},
+    streamed::{
+        generate_streamed, generate_streamed_controlled, generate_streamed_verified, CacheControl,
+        StreamedConfig, StreamedControl,
+    },
     streamed_plan::{inspect_streamed_shape, inspect_streamed_shape_verified},
 };
 use std::{path::Path, sync::atomic::AtomicBool};
@@ -65,6 +68,22 @@ fn main() {
         &digest,
         8 * 1024 * 1024,
     ));
+    let control = CacheControl::default();
+    control.request_release();
+    for expected_sha256 in [None, Some(digest.as_str())] {
+        rejected(generate_streamed_controlled(
+            model,
+            "fixture",
+            StreamedConfig::default(),
+            &cancelled,
+            StreamedControl {
+                expected_sha256,
+                cache: Some(&control),
+            },
+            |_| panic!("output"),
+            |_| panic!("logits"),
+        ));
+    }
     // Caller-owned invalid metadata proves CPU admission precedes native parsing,
     // and the operator performs no range I/O before rejecting the CPU.
     let path = std::env::temp_dir().join(format!("llmbridge-cpu-guard-{}", std::process::id()));
@@ -105,5 +124,5 @@ fn main() {
     drop(file);
     std::fs::remove_file(path).unwrap();
     println!("LLMBRIDGE_CPU_GUARD {}", cpu.to_json());
-    println!("ten Rust native execution/probe paths rejected before FFI: PASS");
+    println!("twelve Rust native execution/probe paths rejected before FFI: PASS");
 }

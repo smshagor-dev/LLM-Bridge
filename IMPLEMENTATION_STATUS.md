@@ -73,6 +73,12 @@ Local checks: Python regression suite; workspace non-native tests; release nativ
 - Profile-specific CPU/OS admission accepts SSE2 baseline CPUs without AVX. No automatic ISA dispatch or scalar fallback is introduced; other architectures remain unvalidated.
 - Matching independent baseline reference protocols exercise authenticated cached Q8/Q4 on the host and under Core 2 Duo emulation. Native Q8 process-cap validation is separate; emulation cannot be labeled as a memory-cap proof. Real old-CPU/2GB hardware and larger-model validation remain pending. See `docs/BASELINE_CPU_BUILD.md`.
 
+## Runtime optional-cache release checkpoint
+
+- A session-local atomic control can release optional cache payload/staging/slots at safe row/logits boundaries without replacement allocation. Current capacities/accounting reach zero; KV/context and authenticated source state remain live. Cache does not regrow during the session.
+- Existing generation entry-point signatures/default behavior remain unchanged; the advanced controlled session API explicitly carries optional trusted SHA and cache control. CLI opt-in `--cache-pressure-mb` samples effective available RAM until one release, with conservative handling of unknown samples. It does not bypass initial admission or impose a hard RSS limit.
+- Real-model output/logit parity, cancellation and same-identity late mutation are checked after release. Golden trials force the signal with an oversized floor and preserve the original Q8 24 MiB proof. This is not physical RAM-pressure/RSS-reclamation or real 2GB-host validation. See `docs/RUNTIME_CACHE_PRESSURE.md`.
+
 ## M3–M11
 
 M3 now has native-derived CLI/context admission, not a complete adaptive scheduler. M4 remote providers, M5 MoE, M6 GPU, M7 API/SDK, M8 desktop, M9 full robustness/benchmarks, M10 format/plugin extensibility and M11 large-model feasibility remain incomplete. No 70B/550B or real 2GB-machine result is claimed.

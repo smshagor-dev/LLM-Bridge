@@ -39,3 +39,7 @@ required-features = ["native"]
 [[example]]
 name = "cpu_guard_contract"
 required-features = ["native"]
+
+[[example]]
+name = "cache_release_contract"
+required-features = ["native"]

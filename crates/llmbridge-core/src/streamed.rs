@@ -11,6 +11,28 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
+/// One cooperative release signal per session; repeated requests coalesce.
+/// This never grows a cache or bypasses source/integrity checks.
+#[derive(Debug, Default)]
+pub struct CacheControl {
+    release: AtomicBool,
+}
+impl CacheControl {
+    pub fn request_release(&self) {
+        self.release.store(true, Ordering::Release);
+    }
+    fn take_release(&self) -> bool {
+        self.release.swap(false, Ordering::AcqRel)
+    }
+}
+/// Optional independently trusted digest and session-local cache signal.
+/// No digest means explicitly unverified execution, exactly as generate_streamed.
+#[derive(Clone, Copy, Default)]
+pub struct StreamedControl<'a> {
+    pub expected_sha256: Option<&'a str>,
+    pub cache: Option<&'a CacheControl>,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct StreamedConfig {
     pub context_tokens: u32,
@@ -67,10 +89,16 @@ extern "C" {
 struct State<'a, F, L> {
     reader: CachedLocalReader,
     cancelled: &'a AtomicBool,
+    cache_control: Option<&'a CacheControl>,
     emit: F,
     logits: L,
     failure: Option<String>,
     performance: Option<PerformanceClock>,
+}
+fn apply_cache_control<F, L>(state: &mut State<'_, F, L>) {
+    if state.cache_control.is_some_and(CacheControl::take_release) {
+        state.reader.release_cache();
+    }
 }
 fn contained<T: Default>(call: impl FnOnce() -> T) -> T {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)).unwrap_or_default()
@@ -97,8 +125,11 @@ extern "C" fn read<F, L>(
         }
         // SAFETY: sole mutable synchronous callback; C++ supplies length writable bytes.
         let state = unsafe { &mut *(state.cast::<State<'_, F, L>>()) };
-        let flag = state.cancelled;
         let start = state.performance.as_ref().map(|_| Instant::now());
+        // Native owns a copy of previous row bytes; no cache borrow survives
+        // a synchronous callback, so releasing here cannot invalidate native data.
+        apply_cache_control(state);
+        let flag = state.cancelled;
         let copied = (|| match state
             .reader
             .read_range_cancellable(offset, length, || flag.load(Ordering::Acquire))
@@ -161,6 +192,7 @@ extern "C" fn logits<F, L: FnMut(&[f32]) -> bool>(
         if state.cancelled.load(Ordering::Acquire) || state.failure.is_some() {
             return 0;
         }
+        apply_cache_control(state);
         let values = unsafe { std::slice::from_raw_parts(values, count) };
         if let Some(clock) = state.performance.as_mut() {
             clock.logits();
@@ -170,6 +202,7 @@ extern "C" fn logits<F, L: FnMut(&[f32]) -> bool>(
         if let (Some(clock), Some(start)) = (&mut state.performance, start) {
             clock.consumer(start.elapsed());
         }
+        apply_cache_control(state);
         i32::from(accepted && !state.cancelled.load(Ordering::Acquire))
     })
 }
@@ -186,7 +219,15 @@ pub fn generate_streamed<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
     on_piece: F,
     on_logits: L,
 ) -> Result<StreamedMetrics, String> {
-    generate_streamed_internal(model, prompt, config, cancelled, None, on_piece, on_logits)
+    generate_streamed_internal(
+        model,
+        prompt,
+        config,
+        cancelled,
+        StreamedControl::default(),
+        on_piece,
+        on_logits,
+    )
 }
 
 /// Opt-in authenticated generation: expected whole-file hash must be independently trusted.
@@ -205,9 +246,29 @@ pub fn generate_streamed_verified<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> b
         prompt,
         config,
         cancelled,
-        Some(expected_sha256),
+        StreamedControl {
+            expected_sha256: Some(expected_sha256),
+            cache: None,
+        },
         on_piece,
         on_logits,
+    )
+}
+/// Advanced synchronous session API. Release signals are honored at safe row
+/// and logits boundaries; all borrowed control references end with this call.
+/// Use one CacheControl per session. Cache release is monotonic and does not
+/// release KV/activation memory or the authenticated source manifest.
+pub fn generate_streamed_controlled<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
+    model: &Path,
+    prompt: &str,
+    config: StreamedConfig,
+    cancelled: &AtomicBool,
+    control: StreamedControl<'_>,
+    on_piece: F,
+    on_logits: L,
+) -> Result<StreamedMetrics, String> {
+    generate_streamed_internal(
+        model, prompt, config, cancelled, control, on_piece, on_logits,
     )
 }
 fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
@@ -215,10 +276,11 @@ fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>
     prompt: &str,
     config: StreamedConfig,
     cancelled: &AtomicBool,
-    expected_sha256: Option<&str>,
+    control: StreamedControl<'_>,
     on_piece: F,
     on_logits: L,
 ) -> Result<StreamedMetrics, String> {
+    let expected_sha256 = control.expected_sha256;
     let performance = config.collect_performance.then(PerformanceClock::start);
     if cancelled.load(Ordering::Acquire) {
         return Err("streamed generation cancelled before admission".into());
@@ -270,6 +332,7 @@ fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>
     let mut state = State {
         reader: CachedLocalReader::new(reader, config.cache_bytes).map_err(|e| e.to_string())?,
         cancelled,
+        cache_control: control.cache,
         emit: on_piece,
         logits: on_logits,
         failure: None,
@@ -317,6 +380,23 @@ fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cache_release_requests_are_one_shot_and_coalesced() {
+        let control = CacheControl::default();
+        assert!(!control.take_release());
+        control.request_release();
+        control.request_release();
+        assert!(control.take_release());
+        assert!(!control.take_release());
+    }
+    #[test]
+    fn cache_signal_can_be_sent_from_another_thread() {
+        let control = CacheControl::default();
+        std::thread::scope(|scope| {
+            scope.spawn(|| control.request_release()).join().unwrap();
+        });
+        assert!(control.take_release());
+    }
     #[test]
     fn precancelled_streaming_never_opens_model_or_delivers_output() {
         let result = generate_streamed(

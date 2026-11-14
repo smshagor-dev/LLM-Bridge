@@ -11,7 +11,11 @@ struct Slot {
 }
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ReadCacheMetrics {
+    /// Snapshot before automatic session teardown, not a process-RSS sample.
     pub allocated_bytes: usize,
+    pub peak_allocated_bytes: usize,
+    pub released_bytes: usize,
+    pub release_events: u64,
     pub block_hits: u64,
     pub block_misses: u64,
     pub evictions: u64,
@@ -77,6 +81,7 @@ impl CachedLocalReader {
             tick: 0,
             metrics: ReadCacheMetrics {
                 allocated_bytes,
+                peak_allocated_bytes: allocated_bytes,
                 ..Default::default()
             },
         })
@@ -89,6 +94,23 @@ impl CachedLocalReader {
     }
     pub fn source_bytes_read(&self) -> u64 {
         self.source.disk_bytes_read()
+    }
+
+    /// Drop optional cache-owned allocations without allocating replacements.
+    /// Source buffer/authentication stay live. Allocator page retention means
+    /// this is not an assertion that process RSS immediately decreases.
+    pub fn release_cache(&mut self) -> usize {
+        let released = self.metrics.allocated_bytes;
+        if released == 0 {
+            return 0;
+        }
+        drop(std::mem::take(&mut self.payload));
+        drop(std::mem::take(&mut self.response));
+        drop(std::mem::take(&mut self.slots));
+        self.metrics.allocated_bytes = 0;
+        self.metrics.released_bytes += released;
+        self.metrics.release_events += 1;
+        released
     }
 
     /// Read-ahead fills one aligned source block, never beyond EOF or the reader chunk.
@@ -196,6 +218,56 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
+    #[test]
+    fn release_of_disabled_cache_retains_the_bounded_source_buffer() {
+        let fixture = Fixture::new();
+        let mut reader = fixture.reader(0);
+        assert_eq!(reader.release_cache(), 0);
+        assert_eq!(reader.metrics().release_events, 0);
+        assert_eq!(reader.source.allocated_chunk_bytes(), 8);
+        assert_eq!(
+            reader.read_range_cancellable(1, 3, || false).unwrap(),
+            b"bcd"
+        );
+    }
+    #[test]
+    fn release_drops_all_cache_capacities_and_keeps_source_checks() {
+        let fixture = Fixture::new();
+        let reader = BoundedLocalReader::open(&fixture.0, 64, 128).unwrap();
+        let mut cached = CachedLocalReader::new(reader, 256).unwrap();
+        let before = cached
+            .read_range_cancellable(3, 9, || false)
+            .unwrap()
+            .to_vec();
+        let allocated = cached.metrics().allocated_bytes;
+        let calls = cached.metrics().source_read_calls;
+        assert_eq!(cached.release_cache(), allocated);
+        assert_eq!(
+            (
+                cached.payload.capacity(),
+                cached.response.capacity(),
+                cached.slots.capacity()
+            ),
+            (0, 0, 0)
+        );
+        assert_eq!(cached.metrics().peak_allocated_bytes, allocated);
+        assert_eq!(cached.metrics().allocated_bytes, 0);
+        assert_eq!(cached.metrics().released_bytes, allocated);
+        assert_eq!(cached.release_cache(), 0);
+        assert_eq!(cached.metrics().release_events, 1);
+        assert_eq!(
+            cached.read_range_cancellable(3, 9, || false).unwrap(),
+            before
+        );
+        assert_eq!(cached.metrics().source_read_calls, calls + 1);
+        let calls = cached.metrics().source_read_calls;
+        let bytes = cached.source_bytes_read();
+        assert!(cached.read_range_cancellable(3, 9, || true).is_err());
+        assert_eq!(cached.source_bytes_read(), bytes);
+        assert_eq!(cached.metrics().source_read_calls, calls + 1); // Attempt, no successful I/O.
+        std::fs::remove_file(&fixture.0).unwrap();
+        assert!(cached.read_range_cancellable(3, 9, || false).is_err());
+    }
     struct Fixture(PathBuf);
     impl Fixture {
         fn new() -> Self {

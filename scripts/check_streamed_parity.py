@@ -48,8 +48,14 @@ def main():
     p.add_argument('--max-tokens', type=int, default=8)
     p.add_argument('--verify', action='store_true')
     p.add_argument('--cache-mb', type=int, default=0)
+    p.add_argument('--cache-pressure-mb', type=int)
+    p.add_argument('--require-cache-release', action='store_true')
     p.add_argument('--max-address-space-mb', type=int, default=0, help='Linux child RLIMIT_AS; 0 disables')
     args = p.parse_args()
+    if args.cache_pressure_mb is not None and args.cache_pressure_mb <= 0:
+        p.error('cache pressure floor must be positive')
+    if args.require_cache_release and (args.cache_pressure_mb is None or args.cache_mb == 0):
+        p.error('required cache release needs a pressure floor and a nonzero cache')
     if not 1 <= args.max_tokens <= 64:
         p.error('max-tokens must be 1..64')
     if sys.byteorder != 'little':
@@ -92,6 +98,7 @@ def main():
         base = prefix + [str(args.binary.resolve()), 'chat', str(args.model.resolve()), '--prompt', prompt,
                 '--max-tokens', str(args.max_tokens), '--ctx', '128', '--metrics', '--cache-mb', str(args.cache_mb)]
         if args.verify: base += ['--sha256', digest]
+        if args.cache_pressure_mb is not None: base += ['--cache-pressure-mb', str(args.cache_pressure_mb)]
         started = time.monotonic()
         actual = subprocess.run(base + ['--backend', 'streamed', '--workspace-mb', '8',
                                        '--logits', str(streamed_logits)], capture_output=True, timeout=240,
@@ -110,6 +117,11 @@ def main():
         result['integrity_metrics'] = dict(re.findall(r'(\w+)=(\w+)', integrity.group(1))) if integrity else {}
         result['integrity_pass'] = not args.verify or (result['integrity_metrics'].get('verified') == '1' and result['integrity_metrics'].get('sha256') == digest and int(result['integrity_metrics'].get('blocks_verified', '0')) > 0)
         result['reader_metrics'] = {key: int(value) for key, value in re.findall(r'(\w+)=(\d+)', cache_metrics.group(1))} if cache_metrics else {}
+        cache = result['reader_metrics']
+        result['cache_release_pass'] = not args.require_cache_release or (
+            cache.get('cache_allocated_bytes') == 0 and cache.get('cache_release_events') == 1
+            and cache.get('cache_peak_allocated_bytes', 0) > 0
+            and cache.get('cache_released_bytes') == cache.get('cache_peak_allocated_bytes'))
         result['wall_seconds_including_load'] = wall_seconds
         memory = re.search(r'^LLMBRIDGE_MEMORY (\{.*\})$', result['streamed_stderr'], re.MULTILINE)
         result['memory'] = json.loads(memory.group(1)) if memory else {}
@@ -130,7 +142,7 @@ def main():
             math.isfinite(x) and math.isfinite(y) and abs(x-y) <= 0.01 + 0.001*abs(y) for x,y in zip(a,b))
         result['reference_repacking_observed'] = 'repack tensor ' in result['reference_stderr']
         result['reference_configuration_pass'] = not args.reference_no_repack or not result['reference_repacking_observed']
-        result['pass'] = result['reference_configuration_pass'] and result['tokens_match'] and result['logits_match'] and result['memory_cap_pass'] and result['integrity_pass']
+        result['pass'] = result['cache_release_pass'] and result['reference_configuration_pass'] and result['tokens_match'] and result['logits_match'] and result['memory_cap_pass'] and result['integrity_pass']
         trials.append(result)
     report = {'pass': all(t['pass'] for t in trials), 'checkpoint': args.checkpoint, 'generation_max_tokens': args.max_tokens, 'cpu_profile': cpu, 'emulation': emulation,
               'reference_weight_repacking': 'explicitly_disabled' if args.reference_no_repack else 'upstream_default', 'model_sha256': digest, 'model_file_bytes': args.model.stat().st_size,
@@ -140,6 +152,7 @@ def main():
               'source_sha256': {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in [Path('native/src/streamed.cpp'), Path('crates/llmbridge-core/src/streamed.rs'), Path('crates/llmbridge-core/src/read_cache.rs'), Path('crates/llmbridge-core/src/storage.rs'), Path('crates/llmbridge-core/src/storage_auth.rs')]},
               'verified_session_requested': args.verify,
               'cache_budget_bytes': args.cache_mb * 1024 * 1024,
+              'cache_pressure_floor_mib': args.cache_pressure_mb, 'cache_release_required': args.require_cache_release,
               'address_space_limit_bytes': limit_bytes or None,
               'memory_proof_scope': 'native_model_larger_than_cap' if limit_bytes else 'not_a_memory_cap_proof', 'host': platform.platform(),
               'git_sha': subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True, check=True).stdout.strip(),

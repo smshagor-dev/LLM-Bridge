@@ -16,7 +16,7 @@ fn main() {
     }
 }
 fn usage() -> &'static str {
-    "Usage:\n  llmbridge doctor [--json]\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge plan <path.gguf> [--ctx 128] [--workspace-mb 8] [--max-ram-mb 64] [--auto-context] [--auto-cache] [--json]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--sha256 trusted-digest] [--verification-mb 8] [--address-space-mb 24] [--auto-context] [--auto-cache] [--max-ram-mb 64] [--logits path.f32]\n  Planning max-ram-mb is an incremental estimate budget; address-space-mb enforces a separate Linux process limit."
+    "Usage:\n  llmbridge doctor [--json]\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge plan <path.gguf> [--ctx 128] [--workspace-mb 8] [--max-ram-mb 64] [--auto-context] [--auto-cache] [--json]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--cache-pressure-mb floor] [--sha256 trusted-digest] [--verification-mb 8] [--address-space-mb 24] [--auto-context] [--auto-cache] [--max-ram-mb 64] [--logits path.f32]\n  Planning max-ram-mb is an incremental estimate budget; address-space-mb enforces a separate Linux process limit."
 }
 fn json_number(value: Option<u64>) -> String {
     value.map_or_else(|| "null".to_string(), |x| x.to_string())
@@ -315,6 +315,11 @@ fn restrict_address_space(_bytes: u64) -> Result<(), String> {
 }
 
 #[cfg(feature = "native")]
+fn cache_pressure_requires_release(available: Option<u64>, floor: u64) -> bool {
+    available.is_none_or(|bytes| bytes < floor)
+}
+
+#[cfg(feature = "native")]
 fn chat(args: &[String]) -> Result<(), String> {
     if args.is_empty() {
         return Err(usage().to_owned());
@@ -331,6 +336,7 @@ fn chat(args: &[String]) -> Result<(), String> {
     let mut verification_mb = 8usize;
     let mut auto_context = false;
     let mut auto_cache = false;
+    let mut cache_pressure_mb: Option<u64> = None;
     let mut cache_specified = false;
     let mut max_admission_mb: Option<u64> = None;
     let mut expected_hash: Option<String> = None;
@@ -370,6 +376,9 @@ fn chat(args: &[String]) -> Result<(), String> {
             "--sha256" => expected_hash = Some(value.clone()),
             "--verification-mb" => {
                 verification_mb = value.parse().map_err(|_| "invalid verification-mb")?
+            }
+            "--cache-pressure-mb" => {
+                cache_pressure_mb = Some(value.parse().map_err(|_| "invalid cache-pressure-mb")?)
             }
             "--cache-mb" => {
                 cache_mb = value.parse().map_err(|_| "invalid cache-mb")?;
@@ -423,6 +432,18 @@ fn chat(args: &[String]) -> Result<(), String> {
     if cache_mb > 32 || (backend == "resident" && cache_mb != 0) {
         return Err("cache-mb requires streamed backend and must be 0..32".into());
     }
+    if cache_pressure_mb.is_some() && backend != "streamed" {
+        return Err("cache pressure monitoring requires streamed backend".into());
+    }
+    let cache_pressure_floor = cache_pressure_mb
+        .map(|mb| {
+            if mb == 0 {
+                return Err("cache-pressure-mb must be positive");
+            }
+            mb.checked_mul(1024 * 1024)
+                .ok_or("cache pressure MiB overflow")
+        })
+        .transpose()?;
     let mut cache_bytes = cache_mb * 1024 * 1024;
     if backend == "resident" && logits_path.is_some() {
         return Err("--logits requires streamed backend".into());
@@ -550,8 +571,24 @@ fn chat(args: &[String]) -> Result<(), String> {
                 .ok_or("workspace overflow")?,
             ..Default::default()
         };
+        let control = llmbridge_core::streamed::CacheControl::default();
+        let mut pressure_triggered = false;
         let emit = |bytes: &[u8]| handle.write_all(bytes).and_then(|_| handle.flush()).is_ok();
         let logits = |values: &[f32]| {
+            if let Some(floor) = cache_pressure_floor {
+                if cache_bytes > 0 && !pressure_triggered {
+                    let available = hardware::profile().available_ram_bytes;
+                    if cache_pressure_requires_release(available, floor) {
+                        control.request_release();
+                        pressure_triggered = true;
+                        eprintln!(
+                            "LLMBRIDGE_CACHE_PRESSURE available_bytes={} floor_bytes={}",
+                            json_number(available),
+                            floor
+                        );
+                    }
+                }
+            }
             if let Some(file) = logits_file.as_mut() {
                 for value in values {
                     if file.write_all(&value.to_le_bytes()).is_err() {
@@ -561,15 +598,18 @@ fn chat(args: &[String]) -> Result<(), String> {
             }
             true
         };
-        let execution = if let Some(hash) = expected_hash.as_ref() {
-            llmbridge_core::streamed::generate_streamed_verified(
-                model_path, &prompt, config, &cancelled, hash, emit, logits,
-            )
-        } else {
-            llmbridge_core::streamed::generate_streamed(
-                model_path, &prompt, config, &cancelled, emit, logits,
-            )
-        };
+        let execution = llmbridge_core::streamed::generate_streamed_controlled(
+            model_path,
+            &prompt,
+            config,
+            &cancelled,
+            llmbridge_core::streamed::StreamedControl {
+                expected_sha256: expected_hash.as_deref(),
+                cache: cache_pressure_floor.map(|_| &control),
+            },
+            emit,
+            logits,
+        );
         execution
         .map(|metrics| {
             if show_metrics {
@@ -580,8 +620,8 @@ fn chat(args: &[String]) -> Result<(), String> {
                     eprintln!("LLMBRIDGE_INTEGRITY verified=1 accounted_bytes={} blocks_verified={} sha256={}", authentication.accounted_bytes, authentication.blocks_verified, authentication.expected_sha256);
                 } else { eprintln!("LLMBRIDGE_INTEGRITY verified=0"); }
                 eprintln!(
-                    "LLMBRIDGE_STREAMED source_bytes_read={} reader_buffer_bytes={} source_read_calls={} cache_allocated_bytes={} cache_block_hits={} cache_block_misses={} cache_evictions={}",
-                    metrics.source_bytes_read, metrics.reader_buffer_bytes, metrics.cache.source_read_calls, metrics.cache.allocated_bytes, metrics.cache.block_hits, metrics.cache.block_misses, metrics.cache.evictions
+                    "LLMBRIDGE_STREAMED source_bytes_read={} reader_buffer_bytes={} source_read_calls={} cache_allocated_bytes={} cache_block_hits={} cache_block_misses={} cache_evictions={} cache_peak_allocated_bytes={} cache_released_bytes={} cache_release_events={}",
+                    metrics.source_bytes_read, metrics.reader_buffer_bytes, metrics.cache.source_read_calls, metrics.cache.allocated_bytes, metrics.cache.block_hits, metrics.cache.block_misses, metrics.cache.evictions, metrics.cache.peak_allocated_bytes, metrics.cache.released_bytes, metrics.cache.release_events
                 );
             }
         })
@@ -640,6 +680,15 @@ mod tests {
             b"preserve-model-or-existing-trace"
         );
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[cfg(feature = "native")]
+    #[test]
+    fn cache_pressure_is_conservative_for_unknown_memory_and_exact_at_floor() {
+        assert!(cache_pressure_requires_release(None, 100));
+        assert!(cache_pressure_requires_release(Some(99), 100));
+        assert!(!cache_pressure_requires_release(Some(100), 100));
+        assert!(!cache_pressure_requires_release(Some(101), 100));
     }
 
     #[test]

@@ -178,6 +178,18 @@ jobs:
           if LLMBRIDGE_CPU_PROFILE=invalid-profile cargo check --release -p llmbridge-core --features native --locked --target-dir target/baseline > benchmarks/results/invalid-cpu-profile.log 2>&1; then exit 1; fi
           grep -F "LLMBRIDGE_CPU_PROFILE must be avx2 or baseline" benchmarks/results/invalid-cpu-profile.log
 
+      - name: Validate allocation-free cache release and retained authentication
+        run: cargo run --release -p llmbridge-core --features native --example cache_release_contract -- models/stories15M-q8_0.gguf
+
+      - name: Verify forced-threshold Q8 cache release under the unchanged native cap
+        run: python3 scripts/check_streamed_parity.py --binary ./target/release/llmbridge --reference ./reference-build/bin/llama-simple --model models/stories15M-q8_0.gguf --verify --cache-mb 1 --cache-pressure-mb 1048576 --require-cache-release --max-address-space-mb 24 --output benchmarks/results/pressure-release-q8
+
+      - name: Verify forced-threshold Q4 cache release against the same unpacked reference
+        run: python3 scripts/check_streamed_parity.py --binary ./target/release/llmbridge --reference ./reference-build/bin/llama-simple --model models/stories15M-derived-q4_0.gguf --checkpoint stories15M-derived-q4_0 --reference-no-repack --verify --cache-mb 1 --cache-pressure-mb 1048576 --require-cache-release --output benchmarks/results/pressure-release-q4
+
+      - name: Verify baseline SSE2 cache release with actual emulated inference
+        run: python3 scripts/check_streamed_parity.py --binary target/baseline/release/llmbridge --reference reference-baseline-build/bin/llama-simple --model models/stories15M-q8_0.gguf --reference-no-repack --verify --cache-mb 1 --cache-pressure-mb 1048576 --require-cache-release --emulator /usr/bin/qemu-x86_64 --max-tokens 2 --output benchmarks/results/pressure-release-baseline-q8
+
       - name: Save raw parity evidence
         if: always()
         uses: actions/upload-artifact@v4
