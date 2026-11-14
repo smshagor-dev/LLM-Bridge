@@ -33,6 +33,15 @@ fn main() {
         .profile("Release")
         .define("GGML_OPENMP", "OFF")
         .define("GGML_BLAS", "OFF")
+        // A host-specific -march=native build changes binary mappings and memory
+        // admission across runners (including AMX). Use a reproducible baseline.
+        .define("GGML_NATIVE", "OFF")
+        .define("GGML_SSE42", "OFF")
+        .define("GGML_AVX", "OFF")
+        .define("GGML_AVX2", "OFF")
+        .define("GGML_FMA", "OFF")
+        .define("GGML_F16C", "OFF")
+        .define("GGML_BMI2", "OFF")
         .build();
     let mut paths = Vec::new();
     walk(&out, &mut paths);

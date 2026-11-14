@@ -34,3 +34,7 @@ python3 scripts/check_streamed_plan.py --binary target/release/llmbridge \
 ```
 
 The real-model contract asks for 128 tokens with a native workspace budget calculated for 96, requires selection of exactly 96, executes generation at that exact budget, then requires rejection with no token/logit delivery at one byte less. Its two-core/2GB profile is synthetic admission input, not a real 2GB-host experiment. The CLI protocol checks model-context reduction only with opt-in, too-small workspace/reserve rejection, adaptive/manual output agreement, trusted-hash adaptive mode and wrong-hash refusal. Independent reference output/logit protocols remain in CI. Broader hardware/model tiers, bandwidth/compute feasibility, dynamic thread selection and full M3 scheduling remain incomplete.
+
+## Reproducible CPU baseline
+
+The Rust native build and CI reference explicitly disable host-specific `-march=native` and optional SSE4.2/AVX/AVX2/FMA/F16C/BMI2 target flags. On x86-64 this retains the compiler baseline (including baseline SSE2). Earlier CI cached runs hit `std::bad_alloc` under 24 MiB on a host-specific AMX-capable runner even though local runs passed. Different instruction-set builds change mapped binary size and allocator headroom. This build repair removes that host-dependent optimization input; the process ceiling stays 24 MiB and all real-model checks must still pass. It does not establish a portable whole-process RSS guarantee or a universal CPU compatibility result. Future SIMD selection needs explicit, separately measured build profiles.
