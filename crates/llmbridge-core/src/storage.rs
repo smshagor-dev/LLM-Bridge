@@ -1,3 +1,6 @@
+#[path = "storage_auth.rs"]
+mod auth;
+pub use auth::{AuthenticationMetrics, SealedMetadata};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom};
@@ -38,6 +41,7 @@ pub struct BoundedLocalReader {
     source_identity: SourceIdentity,
     buffer: Box<[u8]>,
     disk_bytes_read: u64,
+    auth: Option<auth::Authentication>,
 }
 
 impl BoundedLocalReader {
@@ -92,6 +96,7 @@ impl BoundedLocalReader {
             source_identity: SourceIdentity::from_metadata(&metadata),
             buffer: vec![0u8; max_chunk_bytes].into_boxed_slice(),
             disk_bytes_read: 0,
+            auth: None,
         })
     }
 
@@ -109,6 +114,11 @@ impl BoundedLocalReader {
 
     pub fn disk_bytes_read(&self) -> u64 {
         self.disk_bytes_read
+    }
+
+    /// Revalidate an open source before publishing bytes held in a session cache.
+    pub fn validate_source(&self) -> io::Result<()> {
+        self.assert_unchanged()
     }
 
     fn assert_unchanged(&self) -> io::Result<()> {
@@ -140,6 +150,9 @@ impl BoundedLocalReader {
                 io::ErrorKind::InvalidInput,
                 "range exceeds file or chunk budget",
             ));
+        }
+        if self.auth.is_some() {
+            return self.read_authenticated_range(offset, bytes);
         }
         // Reject accounting overflow before touching the source. Saturating the
         // counter would make an I/O audit appear valid after losing bytes.

@@ -1,9 +1,37 @@
-//! Experimental complete Llama F32/Q8_0 decoder backed by bounded local reads.
+//! Experimental complete Llama F32/Q8_0/Q4_0 decoder backed by bounded local reads.
 //! The explicit workspace budget is not an enforced process RSS limit.
-use crate::{gguf_index::GgufTensorIndex, storage::BoundedLocalReader};
+use crate::{
+    gguf_index::GgufTensorIndex,
+    read_cache::{CachedLocalReader, ReadCacheMetrics},
+    session_performance::{PerformanceClock, SessionPerformance},
+    storage::BoundedLocalReader,
+};
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
+
+/// One cooperative release signal per session; repeated requests coalesce.
+/// This never grows a cache or bypasses source/integrity checks.
+#[derive(Debug, Default)]
+pub struct CacheControl {
+    release: AtomicBool,
+}
+impl CacheControl {
+    pub fn request_release(&self) {
+        self.release.store(true, Ordering::Release);
+    }
+    fn take_release(&self) -> bool {
+        self.release.swap(false, Ordering::AcqRel)
+    }
+}
+/// Optional independently trusted digest and session-local cache signal.
+/// No digest means explicitly unverified execution, exactly as generate_streamed.
+#[derive(Clone, Copy, Default)]
+pub struct StreamedControl<'a> {
+    pub expected_sha256: Option<&'a str>,
+    pub cache: Option<&'a CacheControl>,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct StreamedConfig {
@@ -11,6 +39,10 @@ pub struct StreamedConfig {
     pub max_tokens: u32,
     pub chunk_bytes: usize,
     pub workspace_bytes: u64,
+    pub cache_bytes: usize,
+    pub authentication_budget_bytes: usize,
+    /// Adds constant-space wall-clock observations; disabled by default.
+    pub collect_performance: bool,
 }
 impl Default for StreamedConfig {
     fn default() -> Self {
@@ -19,6 +51,9 @@ impl Default for StreamedConfig {
             max_tokens: 16,
             chunk_bytes: 64 * 1024,
             workspace_bytes: 8 * 1024 * 1024,
+            cache_bytes: 0,
+            authentication_budget_bytes: 8 * 1024 * 1024,
+            collect_performance: false,
         }
     }
 }
@@ -26,11 +61,14 @@ impl Default for StreamedConfig {
 pub struct StreamedMetrics {
     pub source_bytes_read: u64,
     pub reader_buffer_bytes: usize,
+    pub cache: ReadCacheMetrics,
+    pub authentication: Option<crate::storage::AuthenticationMetrics>,
+    pub performance: Option<SessionPerformance>,
 }
 
 extern "C" {
     fn llmbridge_abi_version() -> u32;
-    fn llmbridge_generate_streamed_cpu(
+    fn llmbridge_generate_streamed_cpu_v2(
         path: *const c_char,
         prompt: *const c_char,
         context: u32,
@@ -38,6 +76,7 @@ extern "C" {
         file_bytes: u64,
         max_chunk: usize,
         workspace: u64,
+        tokenizer_prefix: u64,
         reader: extern "C" fn(*mut c_void, *mut c_void, u64, usize) -> usize,
         emit: extern "C" fn(*const c_char, usize, *mut c_void) -> i32,
         logits: extern "C" fn(*const f32, usize, *mut c_void) -> i32,
@@ -48,11 +87,18 @@ extern "C" {
     ) -> i32;
 }
 struct State<'a, F, L> {
-    reader: BoundedLocalReader,
+    reader: CachedLocalReader,
     cancelled: &'a AtomicBool,
+    cache_control: Option<&'a CacheControl>,
     emit: F,
     logits: L,
     failure: Option<String>,
+    performance: Option<PerformanceClock>,
+}
+fn apply_cache_control<F, L>(state: &mut State<'_, F, L>) {
+    if state.cache_control.is_some_and(CacheControl::take_release) {
+        state.reader.release_cache();
+    }
 }
 fn contained<T: Default>(call: impl FnOnce() -> T) -> T {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)).unwrap_or_default()
@@ -79,8 +125,12 @@ extern "C" fn read<F, L>(
         }
         // SAFETY: sole mutable synchronous callback; C++ supplies length writable bytes.
         let state = unsafe { &mut *(state.cast::<State<'_, F, L>>()) };
+        let start = state.performance.as_ref().map(|_| Instant::now());
+        // Native owns a copy of previous row bytes; no cache borrow survives
+        // a synchronous callback, so releasing here cannot invalidate native data.
+        apply_cache_control(state);
         let flag = state.cancelled;
-        match state
+        let copied = (|| match state
             .reader
             .read_range_cancellable(offset, length, || flag.load(Ordering::Acquire))
         {
@@ -97,7 +147,11 @@ extern "C" fn read<F, L>(
                 state.failure = Some(error.to_string());
                 0
             }
+        })();
+        if let (Some(clock), Some(start)) = (&mut state.performance, start) {
+            clock.range(start.elapsed());
         }
+        copied
     })
 }
 extern "C" fn emit<F: FnMut(&[u8]) -> bool, L>(
@@ -114,7 +168,15 @@ extern "C" fn emit<F: FnMut(&[u8]) -> bool, L>(
             return 0;
         }
         let piece = unsafe { std::slice::from_raw_parts(bytes.cast(), count) };
-        i32::from((state.emit)(piece) && !state.cancelled.load(Ordering::Acquire))
+        if let Some(clock) = state.performance.as_mut() {
+            clock.piece(count);
+        }
+        let start = state.performance.as_ref().map(|_| Instant::now());
+        let accepted = (state.emit)(piece);
+        if let (Some(clock), Some(start)) = (&mut state.performance, start) {
+            clock.consumer(start.elapsed());
+        }
+        i32::from(accepted && !state.cancelled.load(Ordering::Acquire))
     })
 }
 extern "C" fn logits<F, L: FnMut(&[f32]) -> bool>(
@@ -130,12 +192,22 @@ extern "C" fn logits<F, L: FnMut(&[f32]) -> bool>(
         if state.cancelled.load(Ordering::Acquire) || state.failure.is_some() {
             return 0;
         }
+        apply_cache_control(state);
         let values = unsafe { std::slice::from_raw_parts(values, count) };
-        i32::from((state.logits)(values) && !state.cancelled.load(Ordering::Acquire))
+        if let Some(clock) = state.performance.as_mut() {
+            clock.logits();
+        }
+        let start = state.performance.as_ref().map(|_| Instant::now());
+        let accepted = (state.logits)(values);
+        if let (Some(clock), Some(start)) = (&mut state.performance, start) {
+            clock.consumer(start.elapsed());
+        }
+        apply_cache_control(state);
+        i32::from(accepted && !state.cancelled.load(Ordering::Acquire))
     })
 }
 
-/// Runs every decoder layer for each input token; only requested tensor rows are read.
+/// Runs every decoder layer. Optional caching reads bounded adjacent blocks ahead.
 /// Tokenizer metadata uses upstream vocabulary-only loading. No mmap weight loader is used.
 /// Unknown architecture options/tensor layouts fail; logits are exposed before greedy sampling.
 /// Callbacks may see prior tokens before a later read fails, as with other streaming APIs.
@@ -147,12 +219,78 @@ pub fn generate_streamed<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
     on_piece: F,
     on_logits: L,
 ) -> Result<StreamedMetrics, String> {
+    generate_streamed_internal(
+        model,
+        prompt,
+        config,
+        cancelled,
+        StreamedControl::default(),
+        on_piece,
+        on_logits,
+    )
+}
+
+/// Opt-in authenticated generation: expected whole-file hash must be independently trusted.
+/// Sealed tokenizer metadata and per-block verification prevent a hash/load source race.
+pub fn generate_streamed_verified<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
+    model: &Path,
+    prompt: &str,
+    config: StreamedConfig,
+    cancelled: &AtomicBool,
+    expected_sha256: &str,
+    on_piece: F,
+    on_logits: L,
+) -> Result<StreamedMetrics, String> {
+    generate_streamed_internal(
+        model,
+        prompt,
+        config,
+        cancelled,
+        StreamedControl {
+            expected_sha256: Some(expected_sha256),
+            cache: None,
+        },
+        on_piece,
+        on_logits,
+    )
+}
+/// Advanced synchronous session API. Release signals are honored at safe row
+/// and logits boundaries; all borrowed control references end with this call.
+/// Use one CacheControl per session. Cache release is monotonic and does not
+/// release KV/activation memory or the authenticated source manifest.
+pub fn generate_streamed_controlled<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
+    model: &Path,
+    prompt: &str,
+    config: StreamedConfig,
+    cancelled: &AtomicBool,
+    control: StreamedControl<'_>,
+    on_piece: F,
+    on_logits: L,
+) -> Result<StreamedMetrics, String> {
+    generate_streamed_internal(
+        model, prompt, config, cancelled, control, on_piece, on_logits,
+    )
+}
+fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
+    model: &Path,
+    prompt: &str,
+    config: StreamedConfig,
+    cancelled: &AtomicBool,
+    control: StreamedControl<'_>,
+    on_piece: F,
+    on_logits: L,
+) -> Result<StreamedMetrics, String> {
+    let expected_sha256 = control.expected_sha256;
+    let performance = config.collect_performance.then(PerformanceClock::start);
     if cancelled.load(Ordering::Acquire) {
         return Err("streamed generation cancelled before admission".into());
     }
     if !(64..=8192).contains(&config.context_tokens)
         || !(1..=2048).contains(&config.max_tokens)
         || !(34..=1024 * 1024).contains(&config.chunk_bytes)
+        || config.cache_bytes > 32 * 1024 * 1024
+        || config.authentication_budget_bytes == 0
+        || config.authentication_budget_bytes > 64 * 1024 * 1024
         || config.workspace_bytes == 0
         || config.workspace_bytes > 1024 * 1024 * 1024
         || prompt.is_empty()
@@ -160,29 +298,49 @@ pub fn generate_streamed<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
     {
         return Err("invalid streamed generation configuration".into());
     }
-    let path = CString::new(model.to_str().ok_or("model path must be UTF-8")?)
-        .map_err(|_| "NUL in model path")?;
+    if expected_sha256
+        .is_some_and(|hash| hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()))
+    {
+        return Err("expected SHA-256 must be 64 hex digits".into());
+    }
+    crate::native_cpu::ensure_compatible()?;
     let prompt = CString::new(prompt).map_err(|_| "NUL in prompt")?;
     let index = GgufTensorIndex::inspect(model).map_err(|e| e.to_string())?;
-    let reader = BoundedLocalReader::open(model, config.chunk_bytes, config.chunk_bytes * 2)
+    let mut reader = BoundedLocalReader::open(model, config.chunk_bytes, config.chunk_bytes * 2)
         .map_err(|e| e.to_string())?;
     if reader.identity() != &index.source_identity {
         return Err("streamed model changed after index".into());
     }
+    let sealed = expected_sha256
+        .map(|hash| {
+            reader.authenticate_model(
+                hash,
+                index.data_offset,
+                config.authentication_budget_bytes,
+                || cancelled.load(Ordering::Acquire),
+            )
+        })
+        .transpose()
+        .map_err(|e| e.to_string())?;
+    let tokenizer_path = sealed.as_ref().map_or(model, |snapshot| snapshot.path());
+    let path = CString::new(tokenizer_path.to_str().ok_or("model path must be UTF-8")?)
+        .map_err(|_| "NUL in model path")?;
     // SAFETY: constant ABI query; all pointers below remain live for this synchronous call.
     if unsafe { llmbridge_abi_version() } != 1 {
         return Err("streamed native ABI mismatch".into());
     }
     let mut state = State {
-        reader,
+        reader: CachedLocalReader::new(reader, config.cache_bytes).map_err(|e| e.to_string())?,
         cancelled,
+        cache_control: control.cache,
         emit: on_piece,
         logits: on_logits,
         failure: None,
+        performance,
     };
     let mut error = [0 as c_char; 1024];
     let status = unsafe {
-        llmbridge_generate_streamed_cpu(
+        llmbridge_generate_streamed_cpu_v2(
             path.as_ptr(),
             prompt.as_ptr(),
             config.context_tokens,
@@ -190,6 +348,7 @@ pub fn generate_streamed<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
             index.file_bytes,
             config.chunk_bytes,
             config.workspace_bytes,
+            sealed.as_ref().map_or(0, |snapshot| snapshot.prefix_bytes),
             read::<F, L>,
             emit::<F, L>,
             logits::<F, L>,
@@ -210,14 +369,34 @@ pub fn generate_streamed<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
         ));
     }
     Ok(StreamedMetrics {
-        source_bytes_read: state.reader.disk_bytes_read(),
+        source_bytes_read: state.reader.source_bytes_read(),
         reader_buffer_bytes: config.chunk_bytes,
+        cache: state.reader.metrics(),
+        authentication: state.reader.authentication_metrics(),
+        performance: state.performance.map(PerformanceClock::finish),
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cache_release_requests_are_one_shot_and_coalesced() {
+        let control = CacheControl::default();
+        assert!(!control.take_release());
+        control.request_release();
+        control.request_release();
+        assert!(control.take_release());
+        assert!(!control.take_release());
+    }
+    #[test]
+    fn cache_signal_can_be_sent_from_another_thread() {
+        let control = CacheControl::default();
+        std::thread::scope(|scope| {
+            scope.spawn(|| control.request_release()).join().unwrap();
+        });
+        assert!(control.take_release());
+    }
     #[test]
     fn precancelled_streaming_never_opens_model_or_delivers_output() {
         let result = generate_streamed(

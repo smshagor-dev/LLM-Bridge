@@ -104,12 +104,24 @@ The current `chat` command performs **raw prompt continuation**, not chat-templa
 
 No model weights are bundled. For a known small GGUF model, its pinned hash, source, and reproducible test procedure, consult [M1 test protocol](docs/M1_TEST_PROTOCOL.md). Respect each model's license.
 
+### Inspect a streamed memory plan
+
+```sh
+cargo run --release -p llmbridge -- plan /models/model.gguf --ctx 128 --max-ram-mb 64 --json
+```
+
+This budget is an incremental admission estimate, not a process-RSS cap. Context reduction requires `--auto-context`; generation prints its chosen plan. [Planning protocol and limits](docs/STREAMED_MEMORY_PLANNING.md).
+
 ### Experimental streamed generation
 
 ```sh
 cargo run --release -p llmbridge -- chat /models/model.gguf --prompt "The sky is" \
   --backend streamed --ctx 128 --max-tokens 8 --workspace-mb 8 --metrics
 ```
+
+On Linux, `--sha256 <trusted-digest>` binds streamed generation to authenticated blocks and sealed tokenizer metadata. `--verification-mb` bounds verification overhead. [Verified session protocol](docs/VERIFIED_MODEL_SESSIONS.md).
+
+Optional `--cache-mb 1` enables bounded session-local block caching/read-ahead, with source identity and cancellation checks on hits. Default caching is disabled. [Measured cache behavior](docs/STREAMED_CACHE.md).
 
 For Linux standalone CLI use, `--address-space-mb 24` enforces `RLIMIT_AS`. This is a virtual-address limit, distinct from an explicit workspace budget, cgroup memory or physical machine RAM. Only the pinned tiny checkpoint has been verified end to end. [Protocol, evidence and limits](docs/STREAMED_DECODER.md).
 
@@ -125,7 +137,7 @@ Native dependencies and test coverage may vary by platform; consult CI workflows
 
 ## Roadmap and acceptance criteria
 
-**M2 — current priority:** Build on the experimental full-decoder checkpoint: integrate verified immutable sessions, cache/prefetch, scheduling, portable worker limits, broader correctness and memory validation. The current Linux/tiny-model proof does **not** complete every M2 or product requirement.
+**M2 — current priority:** Build on the experimental full-decoder checkpoint: extend verified sessions and bounded caches, prefetch, scheduling, portable worker limits, broader correctness and memory validation. The current Linux/tiny-model proof does **not** complete every M2 or product requirement.
 
 **M3 — adaptive hardware/memory planning:** Calculate feasible context, KV-cache, activation and staging budgets; choose execution strategies based on measured hardware; fail safely when a workload cannot be admitted.
 
@@ -160,3 +172,27 @@ For architecture questions, prefer concrete proposals specifying tensor flow, bu
 - **Upstream:** The baseline C++ backend is pinned to [llama.cpp v0.9.0](https://github.com/ggml-org/llama.cpp/releases/tag/v0.9.0), commit `cd959bae99ff4bed22bef2604f45241c09bbb8c8`, behind a versioned Rust/C ABI.
 
 **Status of this README:** Describes the repository's direction and confirmed checkpoints, not a claim that all roadmap capabilities are available on `main`.
+
+### Streamed session timing
+
+`chat --backend streamed --metrics` reports first-logits/piece readiness, actual sampling/decode intervals and range/consumer callback wall time. Collection is opt-in in the library and uses constant space. Run `python3 scripts/benchmark_streamed.py --binary target/release/llmbridge --model model.gguf --output /tmp/session-performance.json` for repeated real sessions, byte-complete output comparison against uninstrumented execution and optional measured-workload targets. These are page-cache-affected observations, with no physical-storage or larger-model claim. See [measurement semantics](docs/STREAMED_PERFORMANCE.md).
+
+`--auto-cache` optionally selects a cache that fits after context and required reserves. Its default ceiling is 1 MiB; `--cache-mb N` changes the ceiling. It can select zero without reducing context. Plans report the exact selected byte budget used by execution. See [adaptive cache admission](docs/STREAMED_MEMORY_PLANNING.md#adaptive-cache-admission).
+
+### CPU compatibility
+
+Run `llmbridge doctor --json` before using this build on another PC. The default x86 native profile requires SSE4.2/AVX/AVX2/FMA/F16C/BMI2 and OS AVX state support. Rust native entry paths reject incompatible CPUs before FFI instead of selecting an unvalidated scalar fallback. CPU capability is separate from core count and RAM. [Admission and emulated-host validation](docs/NATIVE_CPU_COMPATIBILITY.md).
+
+### Experimental Q4_0 streamed execution
+
+The dense Llama streamed path also accepts Q4_0 tensors through bounded row reads and pinned ggml CPU primitives. A reproducible Q8-to-Q4 fixture and explicit reference numerical profile test execution agreement; this does not measure model quality or prove larger-model/2GB feasibility. [Derivation, configuration and validation](docs/STREAMED_Q4_VALIDATION.md).
+
+### Explicit pre-AVX2 CPU build
+
+`LLMBRIDGE_CPU_PROFILE=baseline cargo build --release --locked --target-dir target/baseline` produces a separate x86-64/SSE2 artifact. The default AVX2 binary keeps its guard and does not silently fall back. Pinned tiny Q8/Q4 execution is compared with an independent matching reference on the host and under Core 2 Duo CPU emulation. This is not a physical 2GB-machine or speed claim. [Build and validation details](docs/BASELINE_CPU_BUILD.md).
+
+### Optional cache pressure handling
+
+`chat --backend streamed --cache-mb 1 --cache-pressure-mb 512 --metrics` can release optional cache allocations when effective available RAM drops below the floor. KV/context and authentication remain intact. The library also exposes a cooperative per-session release signal; no cache regrowth or RSS guarantee is implied. [Semantics and forced-signal validation](docs/RUNTIME_CACHE_PRESSURE.md).
+
+Linux memory admission includes headroom from every visible cgroup-v2 ancestor, including sibling usage. [Discovery, regression coverage and namespace limits](docs/CGROUP_MEMORY_ADMISSION.md).

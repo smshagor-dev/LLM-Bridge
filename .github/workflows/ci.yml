@@ -35,8 +35,9 @@ jobs:
       - name: Build pinned independent upstream reference example
         run: |
           git clone --depth 1 --branch v0.9.0 https://github.com/ggml-org/llama.cpp.git reference
+          test "$(git -C reference rev-parse HEAD)" = cd959bae99ff4bed22bef2604f45241c09bbb8c8
           python3 scripts/prepare_reference_logits.py reference/examples/simple/simple.cpp
-          cmake -S reference -B reference-build -DGGML_OPENMP=OFF -DGGML_NATIVE=OFF -DLLAMA_BUILD_EXAMPLES=ON -DLLAMA_BUILD_SERVER=OFF -DLLAMA_BUILD_TESTS=OFF
+          cmake -S reference -B reference-build -DGGML_OPENMP=OFF -DGGML_NATIVE=OFF -DGGML_SSE42=ON -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_BMI2=ON -DLLAMA_BUILD_EXAMPLES=ON -DLLAMA_BUILD_SERVER=OFF -DLLAMA_BUILD_TESTS=OFF
           cmake --build reference-build --target llama-simple --parallel 2
       - name: Run real greedy generation and compare native token bytes
         run: |
@@ -73,8 +74,121 @@ jobs:
       - name: Compare complete streamed decoder output and logits
         run: python3 scripts/check_streamed_parity.py --binary ./target/release/llmbridge --reference ./reference-build/bin/llama-simple --model models/stories15M-q8_0.gguf --output benchmarks/results/streamed --max-address-space-mb 24
 
+      - name: Verify cached streamed decoder within the same process cap
+        run: python3 scripts/check_streamed_parity.py --binary ./target/release/llmbridge --reference ./reference-build/bin/llama-simple --model models/stories15M-q8_0.gguf --output benchmarks/results/streamed-cached --max-address-space-mb 24 --cache-mb 1
+
+      - name: Require identical cached logits and measured read-call reduction
+        run: python3 scripts/compare_cache_results.py --uncached benchmarks/results/streamed/streamed_parity.json --cached benchmarks/results/streamed-cached/streamed_parity.json --output benchmarks/results/cache_comparison.json
+
       - name: Streamed decoder cancellation and refusal contracts
         run: cargo run --release -p llmbridge-core --features native --example streamed_contract -- models/stories15M-q8_0.gguf
+
+      - name: Verify authenticated decoder output and logits under process cap
+        run: python3 scripts/check_streamed_parity.py --binary ./target/release/llmbridge --reference ./reference-build/bin/llama-simple --model models/stories15M-q8_0.gguf --output benchmarks/results/streamed-verified --max-address-space-mb 24 --verify
+
+      - name: Verify authenticated cached generation under the same process cap
+        run: python3 scripts/check_streamed_parity.py --binary ./target/release/llmbridge --reference ./reference-build/bin/llama-simple --model models/stories15M-q8_0.gguf --output benchmarks/results/streamed-verified-cached --max-address-space-mb 24 --verify --cache-mb 1
+
+      - name: Reject same-identity mutation after model verification
+        run: cargo run --release -p llmbridge-core --features native --example verified_contract -- models/stories15M-q8_0.gguf
+
+      - name: Validate native plan and decoder at exact workspace boundary
+        run: cargo run --release -p llmbridge-core --features native --example streamed_plan_contract -- models/stories15M-q8_0.gguf
+
+      - name: Validate planning CLI and explicit adaptive-context generation
+        run: python3 scripts/check_streamed_plan.py --binary ./target/release/llmbridge --model models/stories15M-q8_0.gguf --output benchmarks/results/streamed_plan.json
+
+      - name: Measure streamed session timing and compare uninstrumented output
+        run: python3 scripts/benchmark_streamed.py --binary ./target/release/llmbridge --model models/stories15M-q8_0.gguf --output benchmarks/results/streamed_performance.json --repetitions 3 --address-space-mb 24
+
+      - name: Measure authenticated cached session timing under the same cap
+        run: python3 scripts/benchmark_streamed.py --binary ./target/release/llmbridge --model models/stories15M-q8_0.gguf --output benchmarks/results/streamed_performance_verified_cached.json --repetitions 3 --cache-mb 1 --address-space-mb 24 --sha256 2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6
+
+      - name: Install CPU emulator for unsupported-host admission checks
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-user
+
+      - name: Build native CPU compatibility contract
+        run: cargo build --release -p llmbridge-core --features native --example cpu_guard_contract
+
+      - name: Reject native calls on an emulated pre-AVX2 CPU
+        run: python3 scripts/check_native_cpu.py --binary ./target/release/llmbridge --contract ./target/release/examples/cpu_guard_contract --emulator /usr/bin/qemu-x86_64 --output benchmarks/results/native_cpu_guard.json
+
+      - name: Derive pinned pure Q4 checkpoints with the independent quantizer
+        run: |
+          cmake --build reference-build --target llama-quantize --parallel 2
+          ./reference-build/bin/llama-quantize --allow-requantize --pure models/stories15M-q8_0.gguf models/stories15M-derived-q4_0.gguf Q4_0 1
+          echo "b5cd77bb0d1a785a82d7a8a2bcb4170dfe6e43e881b9cbb0d1c8184a6dd99839  models/stories15M-derived-q4_0.gguf" | sha256sum --check -
+          ./reference-build/bin/llama-quantize --allow-requantize --pure models/stories15M-q8_0.gguf models/stories15M-derived-q4_1.gguf Q4_1 1
+
+      - name: Compare Q4_0 output and logits against explicit unpacked reference kernels
+        run: python3 scripts/check_streamed_parity.py --binary ./target/release/llmbridge --reference ./reference-build/bin/llama-simple --model models/stories15M-derived-q4_0.gguf --checkpoint stories15M-derived-q4_0 --reference-no-repack --verify --output benchmarks/results/q4-uncached
+
+      - name: Compare authenticated cached Q4_0 against the same reference
+        run: python3 scripts/check_streamed_parity.py --binary ./target/release/llmbridge --reference ./reference-build/bin/llama-simple --model models/stories15M-derived-q4_0.gguf --checkpoint stories15M-derived-q4_0 --reference-no-repack --verify --cache-mb 1 --output benchmarks/results/q4-cached
+
+      - name: Require cache-transparent Q4_0 logits and measured range-read reduction
+        run: python3 scripts/compare_cache_results.py --uncached benchmarks/results/q4-uncached/streamed_parity.json --cached benchmarks/results/q4-cached/streamed_parity.json --output benchmarks/results/q4-cache-comparison.json
+
+      - name: Reject unsupported Q4_1 and validate real Q4_0 tensor inventory
+        run: python3 scripts/check_q4_contract.py --binary ./target/release/llmbridge --model models/stories15M-derived-q4_0.gguf --unsupported-model models/stories15M-derived-q4_1.gguf --output benchmarks/results/q4-contract.json
+
+      - name: Reject same-identity Q4_0 mutation after authenticated admission
+        run: cargo run --release -p llmbridge-core --features native --example verified_contract -- models/stories15M-derived-q4_0.gguf b5cd77bb0d1a785a82d7a8a2bcb4170dfe6e43e881b9cbb0d1c8184a6dd99839
+
+      - name: Build explicit baseline artifacts without clobbering AVX2
+        run: LLMBRIDGE_CPU_PROFILE=baseline cargo build --release --locked --target-dir target/baseline
+
+      - name: Build matching independent SSE2 reference
+        run: |
+          cmake -S reference -B reference-baseline-build -DGGML_OPENMP=OFF -DGGML_NATIVE=OFF -DGGML_SSE42=OFF -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_BMI2=OFF -DGGML_CPU_REPACK=OFF -DLLAMA_BUILD_EXAMPLES=ON -DLLAMA_BUILD_SERVER=OFF -DLLAMA_BUILD_TESTS=OFF
+          cmake --build reference-baseline-build --target llama-simple --parallel 2
+
+      - name: Validate baseline workspace and Clippy
+        run: |
+          LLMBRIDGE_CPU_PROFILE=baseline cargo test --release --workspace --all-targets --locked --target-dir target/baseline
+          LLMBRIDGE_CPU_PROFILE=baseline cargo clippy --release --workspace --all-targets --locked --target-dir target/baseline -- -D warnings
+
+      - name: Baseline Q8 reference parity under the original native process cap
+        run: python3 scripts/check_streamed_parity.py --binary target/baseline/release/llmbridge --reference reference-baseline-build/bin/llama-simple --model models/stories15M-q8_0.gguf --reference-no-repack --verify --cache-mb 1 --max-address-space-mb 24 --output benchmarks/results/baseline-q8
+
+      - name: Baseline Q4 reference parity
+        run: python3 scripts/check_streamed_parity.py --binary target/baseline/release/llmbridge --reference reference-baseline-build/bin/llama-simple --model models/stories15M-derived-q4_0.gguf --checkpoint stories15M-derived-q4_0 --reference-no-repack --verify --cache-mb 1 --output benchmarks/results/baseline-q4
+
+      - name: Execute Q8 on emulated Core 2 Duo against the independent baseline reference
+        run: python3 scripts/check_streamed_parity.py --binary target/baseline/release/llmbridge --reference reference-baseline-build/bin/llama-simple --model models/stories15M-q8_0.gguf --reference-no-repack --verify --cache-mb 1 --emulator /usr/bin/qemu-x86_64 --max-tokens 2 --output benchmarks/results/emulated-baseline-q8
+
+      - name: Execute Q4 on emulated Core 2 Duo against the independent baseline reference
+        run: python3 scripts/check_streamed_parity.py --binary target/baseline/release/llmbridge --reference reference-baseline-build/bin/llama-simple --model models/stories15M-derived-q4_0.gguf --checkpoint stories15M-derived-q4_0 --reference-no-repack --verify --cache-mb 1 --emulator /usr/bin/qemu-x86_64 --max-tokens 2 --output benchmarks/results/emulated-baseline-q4
+
+      - name: Switch one Cargo cache to AVX2 and back to baseline
+        run: |
+          LLMBRIDGE_CPU_PROFILE=avx2 cargo build --release --locked --target-dir target/baseline
+          ./target/baseline/release/llmbridge doctor --json > benchmarks/results/profile-switched-avx2.json
+          LLMBRIDGE_CPU_PROFILE=baseline cargo build --release --locked --target-dir target/baseline
+          ./target/baseline/release/llmbridge doctor --json > benchmarks/results/profile-restored-baseline.json
+          python3 -c 'import json; a=json.load(open("benchmarks/results/profile-switched-avx2.json")); b=json.load(open("benchmarks/results/profile-restored-baseline.json")); assert a["cpu"]["native_profile"] == "x86-avx2" and b["cpu"]["native_profile"] == "x86-baseline"'
+
+      - name: Execute the restored cache artifact on emulated SSE2
+        run: python3 scripts/check_streamed_parity.py --binary target/baseline/release/llmbridge --reference reference-baseline-build/bin/llama-simple --model models/stories15M-q8_0.gguf --reference-no-repack --verify --cache-mb 1 --emulator /usr/bin/qemu-x86_64 --max-tokens 2 --output benchmarks/results/cache-restored-baseline-q8
+
+      - name: Refuse unknown build profiles before native configuration
+        run: |
+          if LLMBRIDGE_CPU_PROFILE=invalid-profile cargo check --release -p llmbridge-core --features native --locked --target-dir target/baseline > benchmarks/results/invalid-cpu-profile.log 2>&1; then exit 1; fi
+          grep -F "LLMBRIDGE_CPU_PROFILE must be avx2 or baseline" benchmarks/results/invalid-cpu-profile.log
+
+      - name: Validate allocation-free cache release and retained authentication
+        run: cargo run --release -p llmbridge-core --features native --example cache_release_contract -- models/stories15M-q8_0.gguf
+
+      - name: Verify forced-threshold Q8 cache release under the unchanged native cap
+        run: python3 scripts/check_streamed_parity.py --binary ./target/release/llmbridge --reference ./reference-build/bin/llama-simple --model models/stories15M-q8_0.gguf --verify --cache-mb 1 --cache-pressure-mb 1048576 --require-cache-release --max-address-space-mb 24 --output benchmarks/results/pressure-release-q8
+
+      - name: Verify forced-threshold Q4 cache release against the same unpacked reference
+        run: python3 scripts/check_streamed_parity.py --binary ./target/release/llmbridge --reference ./reference-build/bin/llama-simple --model models/stories15M-derived-q4_0.gguf --checkpoint stories15M-derived-q4_0 --reference-no-repack --verify --cache-mb 1 --cache-pressure-mb 1048576 --require-cache-release --output benchmarks/results/pressure-release-q4
+
+      - name: Verify baseline SSE2 cache release with actual emulated inference
+        run: python3 scripts/check_streamed_parity.py --binary target/baseline/release/llmbridge --reference reference-baseline-build/bin/llama-simple --model models/stories15M-q8_0.gguf --reference-no-repack --verify --cache-mb 1 --cache-pressure-mb 1048576 --require-cache-release --emulator /usr/bin/qemu-x86_64 --max-tokens 2 --output benchmarks/results/pressure-release-baseline-q8
 
       - name: Save raw parity evidence
         if: always()

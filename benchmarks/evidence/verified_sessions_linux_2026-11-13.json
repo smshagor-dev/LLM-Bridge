@@ -1,0 +1,274 @@
+{
+  "pass": true,
+  "source_tree_sha": "2d8ac9a04f2ddfe77a19cc92ee74e069b4550c72",
+  "cached_uncached_logits_identical": true,
+  "reports": [
+    {
+      "pass": true,
+      "git_sha": "d19bcea65c3fc52a99555f44269a4fdc8c727303",
+      "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+      "model_file_bytes": 26671328,
+      "binary_sha256": "8c820aa932a0de80547d2b27e9554371affb8f048461781ed0bddc77f9f9f57b",
+      "reference_binary_sha256": "8383941165a42225955b318d8773090e286bbe308d4af6c2f2b99314833e5147",
+      "reference_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+      "source_sha256": {
+        "native/src/streamed.cpp": "aaf8a474c6c4cc9897a9db5dfa082e6592509ed84736d3b9572777d30ea9ee40",
+        "crates/llmbridge-core/src/streamed.rs": "761692ba1ae91d49d256683c54aa2cafdadd889c8c389e1f37b4962c4a776b61",
+        "crates/llmbridge-core/src/read_cache.rs": "21d7682a040528bff507fba4710f980dfd4fc5447bc9b30e3586b05656a38c8e",
+        "crates/llmbridge-core/src/storage.rs": "24855e5ad44345ccd5a26a4f68c33ee7aa876373a76051abe1e505c0a164ff5d",
+        "crates/llmbridge-core/src/storage_auth.rs": "989574ce34116dfe647d94ccccf43e457aa8e06e412dd29f0326a48c16d1771b"
+      },
+      "working_tree_dirty": false,
+      "cache_budget_bytes": 0,
+      "address_space_limit_bytes": 25165824,
+      "host": "Linux-6.18.57-x86_64-with-glibc2.41",
+      "kv_precision": "FP32 on both paths; reference flash attention disabled",
+      "logit_tolerance": {
+        "atol": 0.01,
+        "rtol": 0.001
+      },
+      "trials": [
+        {
+          "prompt": "The sky is",
+          "pass": true,
+          "tokens_match": true,
+          "logits_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "memory_cap_pass": true,
+          "integrity_pass": true,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "2685",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "memory": {
+            "peak_rss_bytes": 13676544,
+            "rss_after_run_bytes": 11624448,
+            "pss_after_run_bytes": 10807296,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "reader_metrics": {
+            "source_bytes_read": 202595360,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 581046,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0
+          },
+          "raw_logits_sha256": "3e463b32868f5795be5211ffdf0703f6c02b64cfc5b56734329f31b377f564e8"
+        },
+        {
+          "prompt": "Once upon a time",
+          "pass": true,
+          "tokens_match": true,
+          "logits_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "memory_cap_pass": true,
+          "integrity_pass": true,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "2819",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "memory": {
+            "peak_rss_bytes": 13635584,
+            "rss_after_run_bytes": 11472896,
+            "pss_after_run_bytes": 10655744,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "reader_metrics": {
+            "source_bytes_read": 211373536,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 598915,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0
+          },
+          "raw_logits_sha256": "2e4b654b8395dd0b65ee43ca9ab483c268348ec8be5394d53afb47f7e396625a"
+        },
+        {
+          "prompt": "A little dog",
+          "pass": true,
+          "tokens_match": true,
+          "logits_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "memory_cap_pass": true,
+          "integrity_pass": true,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "2685",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "memory": {
+            "peak_rss_bytes": 13541376,
+            "rss_after_run_bytes": 11534336,
+            "pss_after_run_bytes": 10717184,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "reader_metrics": {
+            "source_bytes_read": 202595360,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 581046,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0
+          },
+          "raw_logits_sha256": "61e35b14962d31a65cbdf8473ea0faa0f1b620de1d246b6b834b09a9fd091c9d"
+        }
+      ]
+    },
+    {
+      "pass": true,
+      "git_sha": "d19bcea65c3fc52a99555f44269a4fdc8c727303",
+      "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+      "model_file_bytes": 26671328,
+      "binary_sha256": "8c820aa932a0de80547d2b27e9554371affb8f048461781ed0bddc77f9f9f57b",
+      "reference_binary_sha256": "8383941165a42225955b318d8773090e286bbe308d4af6c2f2b99314833e5147",
+      "reference_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+      "source_sha256": {
+        "native/src/streamed.cpp": "aaf8a474c6c4cc9897a9db5dfa082e6592509ed84736d3b9572777d30ea9ee40",
+        "crates/llmbridge-core/src/streamed.rs": "761692ba1ae91d49d256683c54aa2cafdadd889c8c389e1f37b4962c4a776b61",
+        "crates/llmbridge-core/src/read_cache.rs": "21d7682a040528bff507fba4710f980dfd4fc5447bc9b30e3586b05656a38c8e",
+        "crates/llmbridge-core/src/storage.rs": "24855e5ad44345ccd5a26a4f68c33ee7aa876373a76051abe1e505c0a164ff5d",
+        "crates/llmbridge-core/src/storage_auth.rs": "989574ce34116dfe647d94ccccf43e457aa8e06e412dd29f0326a48c16d1771b"
+      },
+      "working_tree_dirty": false,
+      "cache_budget_bytes": 1048576,
+      "address_space_limit_bytes": 25165824,
+      "host": "Linux-6.18.57-x86_64-with-glibc2.41",
+      "kv_precision": "FP32 on both paths; reference flash attention disabled",
+      "logit_tolerance": {
+        "atol": 0.01,
+        "rtol": 0.001
+      },
+      "trials": [
+        {
+          "prompt": "The sky is",
+          "pass": true,
+          "tokens_match": true,
+          "logits_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "memory_cap_pass": true,
+          "integrity_pass": true,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "2293",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "memory": {
+            "peak_rss_bytes": 14397440,
+            "rss_after_run_bytes": 11472896,
+            "pss_after_run_bytes": 10655744,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "reader_metrics": {
+            "source_bytes_read": 176925312,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2293,
+            "cache_allocated_bytes": 983376,
+            "cache_block_hits": 581003,
+            "cache_block_misses": 2293,
+            "cache_evictions": 2279
+          },
+          "raw_logits_sha256": "3e463b32868f5795be5211ffdf0703f6c02b64cfc5b56734329f31b377f564e8"
+        },
+        {
+          "prompt": "Once upon a time",
+          "pass": true,
+          "tokens_match": true,
+          "logits_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "memory_cap_pass": true,
+          "integrity_pass": true,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "2392",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "memory": {
+            "peak_rss_bytes": 14655488,
+            "rss_after_run_bytes": 11538432,
+            "pss_after_run_bytes": 10721280,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "reader_metrics": {
+            "source_bytes_read": 183411552,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2392,
+            "cache_allocated_bytes": 983376,
+            "cache_block_hits": 598869,
+            "cache_block_misses": 2392,
+            "cache_evictions": 2378
+          },
+          "raw_logits_sha256": "2e4b654b8395dd0b65ee43ca9ab483c268348ec8be5394d53afb47f7e396625a"
+        },
+        {
+          "prompt": "A little dog",
+          "pass": true,
+          "tokens_match": true,
+          "logits_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "memory_cap_pass": true,
+          "integrity_pass": true,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "2293",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "memory": {
+            "peak_rss_bytes": 14598144,
+            "rss_after_run_bytes": 11546624,
+            "pss_after_run_bytes": 10729472,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "reader_metrics": {
+            "source_bytes_read": 176925312,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2293,
+            "cache_allocated_bytes": 983376,
+            "cache_block_hits": 581003,
+            "cache_block_misses": 2293,
+            "cache_evictions": 2279
+          },
+          "raw_logits_sha256": "61e35b14962d31a65cbdf8473ea0faa0f1b620de1d246b6b834b09a9fd091c9d"
+        }
+      ]
+    }
+  ],
+  "local_checks": {
+    "native_release_tests": 160,
+    "rust_1_82_non_native_tests": 140,
+    "python_tests": 6,
+    "fmt": "pass",
+    "native_clippy": "pass",
+    "non_native_clippy": "pass",
+    "same_identity_late_mutation": "rejected by block hash in real-model contract",
+    "wrong_digest": "rejected before native callbacks",
+    "insufficient_budget": "rejected before native callbacks",
+    "sealed_metadata": "verified prefix and writes refused",
+    "physical_2gb_hardware": "not tested"
+  },
+  "contract_log_sha256": "b7de0a39d66c533434e2bdc4cd7f10ff56c5f7958ddd71341e86121d37d826ea",
+  "scope_note": "Linux metadata-only memfd kernel pages are included in component accounting but not process RSS/AS. No publisher signature or host-sandbox claim. Full logs and raw logit files are retained by the reproducible CI protocol."
+}

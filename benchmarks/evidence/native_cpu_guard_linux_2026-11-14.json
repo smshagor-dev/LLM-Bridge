@@ -1,0 +1,317 @@
+{
+  "schema": 1,
+  "date_utc": "2026-11-14",
+  "source_commit": "7f3c69f6dc5565c1aefd3582f34e0c151d1b2e7b",
+  "source_tree": "b0e86f33283cf1e98d56d668ce2b80fb92893e49",
+  "checks": {
+    "native_release_all_target_tests": 180,
+    "rust_1_82_non_native_tests": 154,
+    "python_tests": 13,
+    "fmt": "pass",
+    "native_clippy": "pass",
+    "non_native_clippy": "pass",
+    "planner_cli_cases": 16,
+    "planner_cli_pass": true
+  },
+  "cpu_emulation_protocol": {
+    "pass": true,
+    "source": {
+      "commit": "7f3c69f6dc5565c1aefd3582f34e0c151d1b2e7b",
+      "tree": "b0e86f33283cf1e98d56d668ce2b80fb92893e49",
+      "working_tree_dirty": false
+    },
+    "guest_cpu": "core2duo",
+    "cases": {
+      "doctor": {
+        "exit_code": 0,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "30103a60095534cd3197f45156033bdc50172f0a0262ab4799d00b447f5302bc",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "avx_without_os_state": {
+        "exit_code": 0,
+        "guest_cpu": "Haswell,-xsave",
+        "stdout_sha256": "f01ca23a8378ff39875ffb713eb0c7a5b0f683054f374bb7c743d80d2331ef5b",
+        "stderr_sha256": "1b975121e9fa414c908dd7e1053b54750eddd55b37ab9586fc738c16db2b4543"
+      },
+      "resident": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "821dfbeb766343bf95fa92ffd28d51f25421be851386ed1d56ca3114dee86c21"
+      },
+      "streamed": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "821dfbeb766343bf95fa92ffd28d51f25421be851386ed1d56ca3114dee86c21"
+      },
+      "verified_streamed": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "821dfbeb766343bf95fa92ffd28d51f25421be851386ed1d56ca3114dee86c21"
+      },
+      "plan": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "821dfbeb766343bf95fa92ffd28d51f25421be851386ed1d56ca3114dee86c21"
+      },
+      "ten_library_paths": {
+        "exit_code": 0,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e4e735b360ef31266d897e9ea5f695ca94c5565cb66efd0bde083710fc2c7546",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "note": "QEMU user-mode negative admission test; no inference speed, old physical CPU or 2GB-hardware claim.",
+    "binary_sha256": "bc9486b5ddf0dc8582866764c74851b16207960371e47e3a49f273b1cc6df962",
+    "contract_sha256": "1e1c77bf0fd7c5b27213f2530baf78f92bbd17e811bc47cc9940067a8a437a3c",
+    "emulator_sha256": "36d35ffe5363bd49bfa9c2b6a048e9fb2e798fea38285a5a45f52d34f9869089",
+    "emulator_version": "qemu-x86_64 version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)",
+    "emulated_cpu": {
+      "native_profile": "x86-avx2",
+      "architecture": "x86_64",
+      "native_compatible": false,
+      "capabilities": {
+        "sse42": false,
+        "avx": false,
+        "avx2": false,
+        "fma": false,
+        "f16c": false,
+        "bmi2": false
+      },
+      "missing_cpu_os_capabilities": [
+        "sse4.2",
+        "avx",
+        "avx2",
+        "fma",
+        "f16c",
+        "bmi2"
+      ],
+      "scalar_fallback_validated": false
+    },
+    "avx_without_os_state_cpu": {
+      "native_profile": "x86-avx2",
+      "architecture": "x86_64",
+      "native_compatible": false,
+      "capabilities": {
+        "sse42": true,
+        "avx": false,
+        "avx2": false,
+        "fma": false,
+        "f16c": true,
+        "bmi2": false
+      },
+      "missing_cpu_os_capabilities": [
+        "avx",
+        "avx2",
+        "fma",
+        "bmi2"
+      ],
+      "scalar_fallback_validated": false
+    }
+  },
+  "emulator_package": {
+    "Package": "qemu-user",
+    "Version": "1:10.0.13+ds-0+deb13u1",
+    "Filename": "pool/main/q/qemu/qemu-user_10.0.13+ds-0+deb13u1_amd64.deb",
+    "SHA256": "ca6ede739327a20ae5a3498230c8a3a9a072c586e131bc6bcc1201eb1725e336"
+  },
+  "compatible_host_doctor": {
+    "logical_cpus": 9,
+    "total_ram_bytes": 10451427328,
+    "available_ram_bytes": 5919752192,
+    "cpu": {
+      "native_profile": "x86-avx2",
+      "architecture": "x86_64",
+      "native_compatible": true,
+      "capabilities": {
+        "sse42": true,
+        "avx": true,
+        "avx2": true,
+        "fma": true,
+        "f16c": true,
+        "bmi2": true
+      },
+      "missing_cpu_os_capabilities": [],
+      "scalar_fallback_validated": false
+    }
+  },
+  "native_disabled_doctor": {
+    "logical_cpus": 9,
+    "total_ram_bytes": 10451427328,
+    "available_ram_bytes": 5811310592,
+    "cpu": {
+      "native_profile": "disabled",
+      "architecture": "x86_64",
+      "native_compatible": false,
+      "capabilities": {
+        "sse42": true,
+        "avx": true,
+        "avx2": true,
+        "fma": true,
+        "f16c": true,
+        "bmi2": true
+      },
+      "missing_cpu_os_capabilities": [],
+      "scalar_fallback_validated": false
+    }
+  },
+  "independent_reference": {
+    "pass": true,
+    "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+    "model_file_bytes": 26671328,
+    "binary_sha256": "bc9486b5ddf0dc8582866764c74851b16207960371e47e3a49f273b1cc6df962",
+    "reference_binary_sha256": "8383941165a42225955b318d8773090e286bbe308d4af6c2f2b99314833e5147",
+    "reference_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+    "working_tree_dirty": false,
+    "source_sha256": {
+      "native/src/streamed.cpp": "00a458df39318df01c1a5137bae9960240af4432a7a951fd152d74dc71fdda42",
+      "crates/llmbridge-core/src/streamed.rs": "bdb41da347964f4890d653cabd422192b587ecd270d4b9dd92149a1ab10e4249",
+      "crates/llmbridge-core/src/read_cache.rs": "b0c2e30c76b09437a50c7969e2bda53f22f8c697c6aedb16d71b113a4f10a26f",
+      "crates/llmbridge-core/src/storage.rs": "24855e5ad44345ccd5a26a4f68c33ee7aa876373a76051abe1e505c0a164ff5d",
+      "crates/llmbridge-core/src/storage_auth.rs": "989574ce34116dfe647d94ccccf43e457aa8e06e412dd29f0326a48c16d1771b"
+    },
+    "verified_session_requested": true,
+    "cache_budget_bytes": 1048576,
+    "address_space_limit_bytes": 25165824,
+    "host": "Linux-6.18.57-x86_64-with-glibc2.41",
+    "git_sha": "7f3c69f6dc5565c1aefd3582f34e0c151d1b2e7b",
+    "kv_precision": "FP32 on both paths; reference flash attention disabled",
+    "logit_tolerance": {
+      "atol": 0.01,
+      "rtol": 0.001
+    },
+    "note": "Experimental streamed Q8_0 path with pinned ggml dot kernels versus upstream graph; observed matching logits are checkpoint-specific. RLIMIT_AS is a Linux process address-space cap, not a portable RSS API.",
+    "trials": [
+      {
+        "streamed_exit": 0,
+        "reference_exit": 0,
+        "integrity_metrics": {
+          "verified": "1",
+          "accounted_bytes": "807712",
+          "blocks_verified": "2293",
+          "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+        },
+        "integrity_pass": true,
+        "reader_metrics": {
+          "source_bytes_read": 176925312,
+          "reader_buffer_bytes": 65536,
+          "source_read_calls": 2293,
+          "cache_allocated_bytes": 983376,
+          "cache_block_hits": 581003,
+          "cache_block_misses": 2293,
+          "cache_evictions": 2279
+        },
+        "wall_seconds_including_load": 1.513912978999997,
+        "memory": {
+          "peak_rss_bytes": 14979072,
+          "rss_after_run_bytes": 11915264,
+          "pss_after_run_bytes": 11094016,
+          "cgroup_current_after_run_bytes": null,
+          "cgroup_limit_bytes": null
+        },
+        "memory_cap_pass": true,
+        "tokens_match": true,
+        "logits_count": 256000,
+        "logits_max_abs_error": 0.0,
+        "logits_rmse": 0.0,
+        "logits_match": true,
+        "pass": true,
+        "prompt_sha256": "63460e4223f8a4b261087a8d8133f25ac5fe640d21f9ffbe2fcef4c3f8719c19",
+        "streamed_text_sha256": "f4f18cc561041c240e9f5da9cb7c508360be81641cf6e0ec48c1a2e7cc976c18",
+        "reference_text_sha256": "b0829dfe85cb88e6c82ffc14248d38f7e15819d675d7fee4ba6dd0151666490d",
+        "streamed_stderr_sha256": "aebe140cdc7a7170a1119a8e3c0cf563a574d32d604f729c17ad5e7a1310a49a",
+        "reference_stderr_sha256": "3fcedc01f9d375dd9c89b05dca6f34db2d166ab9c21ee7b1de5e07bedf29bbe0"
+      },
+      {
+        "streamed_exit": 0,
+        "reference_exit": 0,
+        "integrity_metrics": {
+          "verified": "1",
+          "accounted_bytes": "807712",
+          "blocks_verified": "2392",
+          "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+        },
+        "integrity_pass": true,
+        "reader_metrics": {
+          "source_bytes_read": 183411552,
+          "reader_buffer_bytes": 65536,
+          "source_read_calls": 2392,
+          "cache_allocated_bytes": 983376,
+          "cache_block_hits": 598869,
+          "cache_block_misses": 2392,
+          "cache_evictions": 2378
+        },
+        "wall_seconds_including_load": 1.5686498629997914,
+        "memory": {
+          "peak_rss_bytes": 15138816,
+          "rss_after_run_bytes": 12075008,
+          "pss_after_run_bytes": 11253760,
+          "cgroup_current_after_run_bytes": null,
+          "cgroup_limit_bytes": null
+        },
+        "memory_cap_pass": true,
+        "tokens_match": true,
+        "logits_count": 256000,
+        "logits_max_abs_error": 0.0,
+        "logits_rmse": 0.0,
+        "logits_match": true,
+        "pass": true,
+        "prompt_sha256": "e286222c229ec73b1bc520d88583191572ae0cbbaa66ea68053994a5e50ac87a",
+        "streamed_text_sha256": "b6a73596905e09047d5e42f90a6fb08cf3c1693ff5f77140857bc683d7b32b51",
+        "reference_text_sha256": "1525ac0a5669601447dfea094cd245db5a9c0c2dae866c618bd935c53ffaea81",
+        "streamed_stderr_sha256": "89601bd524f2f67d0f6505edd18aa52d55f9b4f24e884633c16c429090d44cc7",
+        "reference_stderr_sha256": "7f171c3a5e76243d6b39307ca952b0cc5bdda44d5393d37c3483c670a4f90e97"
+      },
+      {
+        "streamed_exit": 0,
+        "reference_exit": 0,
+        "integrity_metrics": {
+          "verified": "1",
+          "accounted_bytes": "807712",
+          "blocks_verified": "2293",
+          "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+        },
+        "integrity_pass": true,
+        "reader_metrics": {
+          "source_bytes_read": 176925312,
+          "reader_buffer_bytes": 65536,
+          "source_read_calls": 2293,
+          "cache_allocated_bytes": 983376,
+          "cache_block_hits": 581003,
+          "cache_block_misses": 2293,
+          "cache_evictions": 2279
+        },
+        "wall_seconds_including_load": 1.5296603900001173,
+        "memory": {
+          "peak_rss_bytes": 14905344,
+          "rss_after_run_bytes": 11915264,
+          "pss_after_run_bytes": 11094016,
+          "cgroup_current_after_run_bytes": null,
+          "cgroup_limit_bytes": null
+        },
+        "memory_cap_pass": true,
+        "tokens_match": true,
+        "logits_count": 256000,
+        "logits_max_abs_error": 0.0,
+        "logits_rmse": 0.0,
+        "logits_match": true,
+        "pass": true,
+        "prompt_sha256": "1a2b1757a9c8f417e0591c1a96b413ea7ad629316f2c0106f7c533f11dd0999a",
+        "streamed_text_sha256": "329f7d34792c637658ed8af9efb54ee951ee6c879c067e3e72314e6e20b2392f",
+        "reference_text_sha256": "a3ce7ebbe809af04dbd52cb9a3e544818e4c66335b55b6f379379010977d6337",
+        "streamed_stderr_sha256": "c751427f4ebfcc2524adb2cf2797c4d1f11b5aca9c1a11723c2be8aab5008728",
+        "reference_stderr_sha256": "d241d03a0c42e5189ec33ebd5a5c62047a02c0f294b740d55f4df334ced70df2"
+      }
+    ]
+  },
+  "limitations": [
+    "Negative-path CPU emulation, not successful pre-AVX2/ARM inference or physical old-CPU/2GB validation.",
+    "Rust guards cover supported Rust native entry paths. Direct C ABI callers need independent CPU/OS admission.",
+    "Custom Rust compiler flags raising the binary ISA can execute unsupported instructions before this guard.",
+    "Pinned tiny-model reference validation only; no larger-model feasibility or SIMD dispatch claim."
+  ]
+}

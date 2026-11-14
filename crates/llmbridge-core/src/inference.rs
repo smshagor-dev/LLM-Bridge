@@ -96,6 +96,7 @@ pub fn generate<F: FnMut(&[u8]) -> bool>(
     let model = CString::new(model).map_err(|_| "invalid model path")?;
     let prompt = CString::new(prompt).map_err(|_| "prompt contains NUL byte")?;
     // SAFETY: ABI version is constant and the function has no input pointers.
+    crate::native_cpu::ensure_compatible()?;
     let abi = unsafe { llmbridge_abi_version() };
     if abi != 1 {
         return Err(format!("native ABI mismatch: expected 1, found {abi}"));
@@ -228,6 +229,7 @@ pub fn generate_polled<F: FnMut(&[u8]) -> bool>(
     let model = CString::new(model.to_str().ok_or("non-UTF8 model path")?)
         .map_err(|_| "invalid model path")?;
     let prompt = CString::new(prompt).map_err(|_| "prompt contains NUL")?;
+    crate::native_cpu::ensure_compatible()?;
     let abi = unsafe { llmbridge_abi_version() };
     if abi != 1 {
         return Err(format!("native ABI mismatch: expected 1, found {abi}"));
@@ -356,6 +358,7 @@ pub fn probe_indexed_gguf(
     index: &GgufTensorIndex,
     reader: &mut BoundedLocalReader,
 ) -> Result<NativeGgufProbe, String> {
+    crate::native_cpu::ensure_compatible()?;
     if reader.identity() != &index.source_identity {
         return Err("source identity changed between GGUF indexing and native probe".to_string());
     }
@@ -573,6 +576,7 @@ fn q8_0_matvec_internal(
     workspace_budget_bytes: usize,
     expected_sha256: Option<&str>,
 ) -> Result<Vec<f32>, String> {
+    crate::native_cpu::ensure_compatible()?;
     if reader.identity() != &index.source_identity {
         return Err("indexed model source identity changed".to_string());
     }

@@ -1,0 +1,346 @@
+{
+  "schema": 1,
+  "date_utc": "2026-11-14",
+  "source_commit": "3385b877896491aa5594720b306a93c0efe8b75a",
+  "source_tree": "1c3f8aaa6dac82339b3c1aa03355fbc109d3f51e",
+  "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+  "binary_sha256": "8e15f669103de2fb2d3030250e9a5c6c9febee9b5919ec2240cf851a22fd6d5a",
+  "checks": {
+    "release_native_tests": 168,
+    "rust_1_82_non_native_tests": 146,
+    "python_tests": 6,
+    "rustfmt": "pass",
+    "native_clippy_warnings_denied": "pass",
+    "non_native_clippy_warnings_denied": "pass"
+  },
+  "exact_workspace_contract": {
+    "pass": true,
+    "plan": {
+      "backend": "streamed_cpu",
+      "native_inspection_metadata_only": true,
+      "model_integrity": "not_verified_by_plan",
+      "requested_context": 128,
+      "selected_context": 96,
+      "context_reduced": true,
+      "training_context": 128,
+      "native_workspace_bytes": 1545840,
+      "workspace_fixed_bytes": 218352,
+      "workspace_per_token_bytes": 13828,
+      "workspace_budget_bytes": 1545840,
+      "kv_bytes": 1327104,
+      "kv_bytes_per_token": 13824,
+      "cache_budget_bytes": 0,
+      "verification_budget_bytes": 0,
+      "runtime_reserve_bytes": 33554432,
+      "metadata_reserve_bytes": 1454272,
+      "reader_buffer_bytes": 65536,
+      "estimated_additional_bytes": 36620080,
+      "effective_additional_budget_bytes": 536870912,
+      "available_after_os_reserve_bytes": 536870912,
+      "file_bytes": 26671328,
+      "tensor_payload_bytes": 25944192,
+      "layers": 6,
+      "embedding": 288,
+      "query_heads": 6,
+      "kv_heads": 6,
+      "feed_forward": 768,
+      "vocabulary": 32000,
+      "logical_cpus": 2,
+      "selected_threads": 1,
+      "process_limit_enforced_by_plan": false
+    },
+    "generation_at_budget": "pass",
+    "one_byte_below_budget": "refused before token/logit callback",
+    "hardware_profile": "synthetic two-core/2GB; not physical hardware evidence"
+  },
+  "cli_protocol": {
+    "pass": true,
+    "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+    "binary_sha256": "8e15f669103de2fb2d3030250e9a5c6c9febee9b5919ec2240cf851a22fd6d5a",
+    "git_sha": "3385b877896491aa5594720b306a93c0efe8b75a",
+    "working_tree_dirty": false,
+    "native_plan": {
+      "backend": "streamed_cpu",
+      "native_inspection_metadata_only": true,
+      "model_integrity": "not_verified_by_plan",
+      "requested_context": 128,
+      "selected_context": 128,
+      "context_reduced": false,
+      "training_context": 128,
+      "native_workspace_bytes": 1988336,
+      "workspace_fixed_bytes": 218352,
+      "workspace_per_token_bytes": 13828,
+      "workspace_budget_bytes": 8388608,
+      "kv_bytes": 1769472,
+      "kv_bytes_per_token": 13824,
+      "cache_budget_bytes": 0,
+      "verification_budget_bytes": 0,
+      "runtime_reserve_bytes": 33554432,
+      "metadata_reserve_bytes": 1454272,
+      "reader_buffer_bytes": 65536,
+      "estimated_additional_bytes": 37062576,
+      "effective_additional_budget_bytes": 67108864,
+      "available_after_os_reserve_bytes": 7580246016,
+      "file_bytes": 26671328,
+      "tensor_payload_bytes": 25944192,
+      "layers": 6,
+      "embedding": 288,
+      "query_heads": 6,
+      "kv_heads": 6,
+      "feed_forward": 768,
+      "vocabulary": 32000,
+      "logical_cpus": 9,
+      "selected_threads": 1,
+      "process_limit_enforced_by_plan": false
+    },
+    "applied_plan": {
+      "backend": "streamed_cpu",
+      "native_inspection_metadata_only": true,
+      "model_integrity": "not_verified_by_plan",
+      "requested_context": 256,
+      "selected_context": 128,
+      "context_reduced": true,
+      "training_context": 128,
+      "native_workspace_bytes": 1988336,
+      "workspace_fixed_bytes": 218352,
+      "workspace_per_token_bytes": 13828,
+      "workspace_budget_bytes": 8388608,
+      "kv_bytes": 1769472,
+      "kv_bytes_per_token": 13824,
+      "cache_budget_bytes": 0,
+      "verification_budget_bytes": 0,
+      "runtime_reserve_bytes": 33554432,
+      "metadata_reserve_bytes": 1454272,
+      "reader_buffer_bytes": 65536,
+      "estimated_additional_bytes": 37062576,
+      "effective_additional_budget_bytes": 51089408,
+      "available_after_os_reserve_bytes": 7595356160,
+      "file_bytes": 26671328,
+      "tensor_payload_bytes": 25944192,
+      "layers": 6,
+      "embedding": 288,
+      "query_heads": 6,
+      "kv_heads": 6,
+      "feed_forward": 768,
+      "vocabulary": 32000,
+      "logical_cpus": 9,
+      "selected_threads": 1,
+      "process_limit_enforced_by_plan": false
+    },
+    "cases": {
+      "plan": {
+        "exit_code": 0,
+        "stdout": "{\"backend\":\"streamed_cpu\",\"native_inspection_metadata_only\":true,\"model_integrity\":\"not_verified_by_plan\",\"requested_context\":128,\"selected_context\":128,\"context_reduced\":false,\"training_context\":128,\"native_workspace_bytes\":1988336,\"workspace_fixed_bytes\":218352,\"workspace_per_token_bytes\":13828,\"workspace_budget_bytes\":8388608,\"kv_bytes\":1769472,\"kv_bytes_per_token\":13824,\"cache_budget_bytes\":0,\"verification_budget_bytes\":0,\"runtime_reserve_bytes\":33554432,\"metadata_reserve_bytes\":1454272,\"reader_buffer_bytes\":65536,\"estimated_additional_bytes\":37062576,\"effective_additional_budget_bytes\":67108864,\"available_after_os_reserve_bytes\":7580246016,\"file_bytes\":26671328,\"tensor_payload_bytes\":25944192,\"layers\":6,\"embedding\":288,\"query_heads\":6,\"kv_heads\":6,\"feed_forward\":768,\"vocabulary\":32000,\"logical_cpus\":9,\"selected_threads\":1,\"process_limit_enforced_by_plan\":false}\n",
+        "stderr": ""
+      },
+      "adaptive_plan": {
+        "exit_code": 0,
+        "stdout": "{\"backend\":\"streamed_cpu\",\"native_inspection_metadata_only\":true,\"model_integrity\":\"not_verified_by_plan\",\"requested_context\":256,\"selected_context\":128,\"context_reduced\":true,\"training_context\":128,\"native_workspace_bytes\":1988336,\"workspace_fixed_bytes\":218352,\"workspace_per_token_bytes\":13828,\"workspace_budget_bytes\":8388608,\"kv_bytes\":1769472,\"kv_bytes_per_token\":13824,\"cache_budget_bytes\":0,\"verification_budget_bytes\":0,\"runtime_reserve_bytes\":33554432,\"metadata_reserve_bytes\":1454272,\"reader_buffer_bytes\":65536,\"estimated_additional_bytes\":37062576,\"effective_additional_budget_bytes\":7580246016,\"available_after_os_reserve_bytes\":7580246016,\"file_bytes\":26671328,\"tensor_payload_bytes\":25944192,\"layers\":6,\"embedding\":288,\"query_heads\":6,\"kv_heads\":6,\"feed_forward\":768,\"vocabulary\":32000,\"logical_cpus\":9,\"selected_threads\":1,\"process_limit_enforced_by_plan\":false}\n",
+        "stderr": ""
+      },
+      "context_refusal": {
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "error: requested context does not fit model/budget; at most 128 tokens fit (explicit auto-context required)\n"
+      },
+      "workspace_refusal": {
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "error: minimum 64-token streamed context does not fit budget\n"
+      },
+      "reserve_refusal": {
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "error: streamed reserves exceed available budget\n"
+      },
+      "manual_generation": {
+        "exit_code": 0,
+        "stdout": " blue and the sun is shining.\n",
+        "stderr": "llama_model_loader: loaded meta data with 20 key-value pairs and 57 tensors from /workspace/scratch/a5faddc1dce8/llm-bridge-review/models/stories15M-q8_0.gguf (version GGUF V3 (latest))\nllama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\nllama_model_loader: - kv   0:                      tokenizer.ggml.tokens arr[str,32000]   = [\"<unk>\", \"<s>\", \"</s>\", \"<0x00>\", \"<...\nllama_model_loader: - kv   1:                      tokenizer.ggml.scores arr[f32,32000]   = [0.000000, 0.000000, 0.000000, 0.0000...\nllama_model_loader: - kv   2:                  tokenizer.ggml.token_type arr[i32,32000]   = [2, 3, 3, 6, 6, 6, 6, 6, 6, 6, 6, 6, ...\nllama_model_loader: - kv   3:                       tokenizer.ggml.model str              = llama\nllama_model_loader: - kv   4:                       general.architecture str              = llama\nllama_model_loader: - kv   5:                               general.name str              = llama\nllama_model_loader: - kv   6:            tokenizer.ggml.unknown_token_id u32              = 0\nllama_model_loader: - kv   7:                tokenizer.ggml.bos_token_id u32              = 1\nllama_model_loader: - kv   8:                tokenizer.ggml.eos_token_id u32              = 2\nllama_model_loader: - kv   9:          tokenizer.ggml.seperator_token_id u32              = 4294967295\nllama_model_loader: - kv  10:            tokenizer.ggml.padding_token_id u32              = 4294967295\nllama_model_loader: - kv  11:                       llama.context_length u32              = 128\nllama_model_loader: - kv  12:                     llama.embedding_length u32              = 288\nllama_model_loader: - kv  13:                  llama.feed_forward_length u32              = 768\nllama_model_loader: - kv  14:                 llama.attention.head_count u32              = 6\nllama_model_loader: - kv  15:                          llama.block_count u32              = 6\nllama_model_loader: - kv  16:                 llama.rope.dimension_count u32              = 48\nllama_model_loader: - kv  17:     llama.attention.layer_norm_rms_epsilon f32              = 0.000010\nllama_model_loader: - kv  18:               general.quantization_version u32              = 2\nllama_model_loader: - kv  19:                          general.file_type u32              = 7\nllama_model_loader: - type  f32:   13 tensors\nllama_model_loader: - type q8_0:   44 tensors\nprint_info: file format = GGUF V3 (latest)\nprint_info: file type   = Q8_0\nprint_info: file size   = 24.74 MiB (8.50 BPW) \ninit_tokenizer: initializing tokenizer for type 1\nload: bad special token: 'tokenizer.ggml.seperator_token_id' = 4294967295, using default id -1\nload: bad special token: 'tokenizer.ggml.padding_token_id' = 4294967295, using default id -1\nload: 0 unused tokens\nload: control token:      1 '<s>' is not marked as EOG\nload: printing all EOG tokens:\nload:   - 2 ('</s>')\nload: special tokens cache size = 3\nload: token to piece cache size = 0.1684 MB\nprint_info: arch                  = llama\nprint_info: vocab_only            = 1\nprint_info: no_alloc              = 0\nprint_info: vocab type            = SPM\nprint_info: n_vocab               = 32000\nprint_info: n_merges              = 0\nprint_info: BOS token             = 1 '<s>'\nprint_info: EOS token             = 2 '</s>'\nprint_info: UNK token             = 0 '<unk>'\nprint_info: LF token              = 13 '<0x0A>'\nprint_info: EOG token             = 2 '</s>'\nprint_info: max token length      = 48\nllama_model_load: vocab only - skipping tensors\n"
+      },
+      "adaptive_generation": {
+        "exit_code": 0,
+        "stdout": " blue and the sun is shining.\n",
+        "stderr": "LLMBRIDGE_PLAN {\"backend\":\"streamed_cpu\",\"native_inspection_metadata_only\":true,\"model_integrity\":\"not_verified_by_plan\",\"requested_context\":256,\"selected_context\":128,\"context_reduced\":true,\"training_context\":128,\"native_workspace_bytes\":1988336,\"workspace_fixed_bytes\":218352,\"workspace_per_token_bytes\":13828,\"workspace_budget_bytes\":8388608,\"kv_bytes\":1769472,\"kv_bytes_per_token\":13824,\"cache_budget_bytes\":0,\"verification_budget_bytes\":0,\"runtime_reserve_bytes\":33554432,\"metadata_reserve_bytes\":1454272,\"reader_buffer_bytes\":65536,\"estimated_additional_bytes\":37062576,\"effective_additional_budget_bytes\":51089408,\"available_after_os_reserve_bytes\":7595356160,\"file_bytes\":26671328,\"tensor_payload_bytes\":25944192,\"layers\":6,\"embedding\":288,\"query_heads\":6,\"kv_heads\":6,\"feed_forward\":768,\"vocabulary\":32000,\"logical_cpus\":9,\"selected_threads\":1,\"process_limit_enforced_by_plan\":false}\nllama_model_loader: loaded meta data with 20 key-value pairs and 57 tensors from /workspace/scratch/a5faddc1dce8/llm-bridge-review/models/stories15M-q8_0.gguf (version GGUF V3 (latest))\nllama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\nllama_model_loader: - kv   0:                      tokenizer.ggml.tokens arr[str,32000]   = [\"<unk>\", \"<s>\", \"</s>\", \"<0x00>\", \"<...\nllama_model_loader: - kv   1:                      tokenizer.ggml.scores arr[f32,32000]   = [0.000000, 0.000000, 0.000000, 0.0000...\nllama_model_loader: - kv   2:                  tokenizer.ggml.token_type arr[i32,32000]   = [2, 3, 3, 6, 6, 6, 6, 6, 6, 6, 6, 6, ...\nllama_model_loader: - kv   3:                       tokenizer.ggml.model str              = llama\nllama_model_loader: - kv   4:                       general.architecture str              = llama\nllama_model_loader: - kv   5:                               general.name str              = llama\nllama_model_loader: - kv   6:            tokenizer.ggml.unknown_token_id u32              = 0\nllama_model_loader: - kv   7:                tokenizer.ggml.bos_token_id u32              = 1\nllama_model_loader: - kv   8:                tokenizer.ggml.eos_token_id u32              = 2\nllama_model_loader: - kv   9:          tokenizer.ggml.seperator_token_id u32              = 4294967295\nllama_model_loader: - kv  10:            tokenizer.ggml.padding_token_id u32              = 4294967295\nllama_model_loader: - kv  11:                       llama.context_length u32              = 128\nllama_model_loader: - kv  12:                     llama.embedding_length u32              = 288\nllama_model_loader: - kv  13:                  llama.feed_forward_length u32              = 768\nllama_model_loader: - kv  14:                 llama.attention.head_count u32              = 6\nllama_model_loader: - kv  15:                          llama.block_count u32              = 6\nllama_model_loader: - kv  16:                 llama.rope.dimension_count u32              = 48\nllama_model_loader: - kv  17:     llama.attention.layer_norm_rms_epsilon f32              = 0.000010\nllama_model_loader: - kv  18:               general.quantization_version u32              = 2\nllama_model_loader: - kv  19:                          general.file_type u32              = 7\nllama_model_loader: - type  f32:   13 tensors\nllama_model_loader: - type q8_0:   44 tensors\nprint_info: file format = GGUF V3 (latest)\nprint_info: file type   = Q8_0\nprint_info: file size   = 24.74 MiB (8.50 BPW) \ninit_tokenizer: initializing tokenizer for type 1\nload: bad special token: 'tokenizer.ggml.seperator_token_id' = 4294967295, using default id -1\nload: bad special token: 'tokenizer.ggml.padding_token_id' = 4294967295, using default id -1\nload: 0 unused tokens\nload: control token:      1 '<s>' is not marked as EOG\nload: printing all EOG tokens:\nload:   - 2 ('</s>')\nload: special tokens cache size = 3\nload: token to piece cache size = 0.1684 MB\nprint_info: arch                  = llama\nprint_info: vocab_only            = 1\nprint_info: no_alloc              = 0\nprint_info: vocab type            = SPM\nprint_info: n_vocab               = 32000\nprint_info: n_merges              = 0\nprint_info: BOS token             = 1 '<s>'\nprint_info: EOS token             = 2 '</s>'\nprint_info: UNK token             = 0 '<unk>'\nprint_info: LF token              = 13 '<0x0A>'\nprint_info: EOG token             = 2 '</s>'\nprint_info: max token length      = 48\nllama_model_load: vocab only - skipping tensors\n"
+      },
+      "verified_adaptive_generation": {
+        "exit_code": 0,
+        "stdout": " blue and the sun is shining.\n",
+        "stderr": "LLMBRIDGE_PLAN {\"backend\":\"streamed_cpu\",\"native_inspection_metadata_only\":true,\"model_integrity\":\"not_verified_by_plan\",\"requested_context\":256,\"selected_context\":128,\"context_reduced\":true,\"training_context\":128,\"native_workspace_bytes\":1988336,\"workspace_fixed_bytes\":218352,\"workspace_per_token_bytes\":13828,\"workspace_budget_bytes\":8388608,\"kv_bytes\":1769472,\"kv_bytes_per_token\":13824,\"cache_budget_bytes\":0,\"verification_budget_bytes\":8388608,\"runtime_reserve_bytes\":33554432,\"metadata_reserve_bytes\":1454272,\"reader_buffer_bytes\":65536,\"estimated_additional_bytes\":45451184,\"effective_additional_budget_bytes\":67108864,\"available_after_os_reserve_bytes\":7602741248,\"file_bytes\":26671328,\"tensor_payload_bytes\":25944192,\"layers\":6,\"embedding\":288,\"query_heads\":6,\"kv_heads\":6,\"feed_forward\":768,\"vocabulary\":32000,\"logical_cpus\":9,\"selected_threads\":1,\"process_limit_enforced_by_plan\":false}\nllama_model_loader: loaded meta data with 20 key-value pairs and 57 tensors from /proc/self/fd/4 (version GGUF V3 (latest))\nllama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\nllama_model_loader: - kv   0:                      tokenizer.ggml.tokens arr[str,32000]   = [\"<unk>\", \"<s>\", \"</s>\", \"<0x00>\", \"<...\nllama_model_loader: - kv   1:                      tokenizer.ggml.scores arr[f32,32000]   = [0.000000, 0.000000, 0.000000, 0.0000...\nllama_model_loader: - kv   2:                  tokenizer.ggml.token_type arr[i32,32000]   = [2, 3, 3, 6, 6, 6, 6, 6, 6, 6, 6, 6, ...\nllama_model_loader: - kv   3:                       tokenizer.ggml.model str              = llama\nllama_model_loader: - kv   4:                       general.architecture str              = llama\nllama_model_loader: - kv   5:                               general.name str              = llama\nllama_model_loader: - kv   6:            tokenizer.ggml.unknown_token_id u32              = 0\nllama_model_loader: - kv   7:                tokenizer.ggml.bos_token_id u32              = 1\nllama_model_loader: - kv   8:                tokenizer.ggml.eos_token_id u32              = 2\nllama_model_loader: - kv   9:          tokenizer.ggml.seperator_token_id u32              = 4294967295\nllama_model_loader: - kv  10:            tokenizer.ggml.padding_token_id u32              = 4294967295\nllama_model_loader: - kv  11:                       llama.context_length u32              = 128\nllama_model_loader: - kv  12:                     llama.embedding_length u32              = 288\nllama_model_loader: - kv  13:                  llama.feed_forward_length u32              = 768\nllama_model_loader: - kv  14:                 llama.attention.head_count u32              = 6\nllama_model_loader: - kv  15:                          llama.block_count u32              = 6\nllama_model_loader: - kv  16:                 llama.rope.dimension_count u32              = 48\nllama_model_loader: - kv  17:     llama.attention.layer_norm_rms_epsilon f32              = 0.000010\nllama_model_loader: - kv  18:               general.quantization_version u32              = 2\nllama_model_loader: - kv  19:                          general.file_type u32              = 7\nllama_model_loader: - type  f32:   13 tensors\nllama_model_loader: - type q8_0:   44 tensors\nprint_info: file format = GGUF V3 (latest)\nprint_info: file type   = Q8_0\nprint_info: file size   = 24.74 MiB (8.50 BPW) \ninit_tokenizer: initializing tokenizer for type 1\nload: bad special token: 'tokenizer.ggml.seperator_token_id' = 4294967295, using default id -1\nload: bad special token: 'tokenizer.ggml.padding_token_id' = 4294967295, using default id -1\nload: 0 unused tokens\nload: control token:      1 '<s>' is not marked as EOG\nload: printing all EOG tokens:\nload:   - 2 ('</s>')\nload: special tokens cache size = 3\nload: token to piece cache size = 0.1684 MB\nprint_info: arch                  = llama\nprint_info: vocab_only            = 1\nprint_info: no_alloc              = 0\nprint_info: vocab type            = SPM\nprint_info: n_vocab               = 32000\nprint_info: n_merges              = 0\nprint_info: BOS token             = 1 '<s>'\nprint_info: EOS token             = 2 '</s>'\nprint_info: UNK token             = 0 '<unk>'\nprint_info: LF token              = 13 '<0x0A>'\nprint_info: EOG token             = 2 '</s>'\nprint_info: max token length      = 48\nllama_model_load: vocab only - skipping tensors\nLLMBRIDGE_INTEGRITY verified=1 accounted_bytes=807712 blocks_verified=2685 sha256=2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6\nLLMBRIDGE_STREAMED source_bytes_read=202595360 reader_buffer_bytes=65536 source_read_calls=581046 cache_allocated_bytes=0 cache_block_hits=0 cache_block_misses=0 cache_evictions=0\nLLMBRIDGE_MEMORY {\"peak_rss_bytes\":13484032,\"rss_after_run_bytes\":12562432,\"pss_after_run_bytes\":11720704,\"cgroup_current_after_run_bytes\":null,\"cgroup_limit_bytes\":null}\n"
+      },
+      "bad_hash_adaptive_generation": {
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "error: SHA-256 mismatch; native execution not admitted\n"
+      },
+      "infeasible_adaptive_generation": {
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "error: minimum 64-token streamed context does not fit budget\n"
+      }
+    },
+    "note": "Admission budgets are incremental estimates, not total process RSS. Synthetic 2GB profiles are not real hardware tests."
+  },
+  "independent_reference_protocol": {
+    "pass": true,
+    "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+    "model_file_bytes": 26671328,
+    "binary_sha256": "8e15f669103de2fb2d3030250e9a5c6c9febee9b5919ec2240cf851a22fd6d5a",
+    "reference_binary_sha256": "8383941165a42225955b318d8773090e286bbe308d4af6c2f2b99314833e5147",
+    "reference_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+    "working_tree_dirty": false,
+    "source_sha256": {
+      "native/src/streamed.cpp": "00a458df39318df01c1a5137bae9960240af4432a7a951fd152d74dc71fdda42",
+      "crates/llmbridge-core/src/streamed.rs": "761692ba1ae91d49d256683c54aa2cafdadd889c8c389e1f37b4962c4a776b61",
+      "crates/llmbridge-core/src/read_cache.rs": "21d7682a040528bff507fba4710f980dfd4fc5447bc9b30e3586b05656a38c8e",
+      "crates/llmbridge-core/src/storage.rs": "24855e5ad44345ccd5a26a4f68c33ee7aa876373a76051abe1e505c0a164ff5d",
+      "crates/llmbridge-core/src/storage_auth.rs": "989574ce34116dfe647d94ccccf43e457aa8e06e412dd29f0326a48c16d1771b"
+    },
+    "verified_session_requested": true,
+    "cache_budget_bytes": 1048576,
+    "address_space_limit_bytes": 25165824,
+    "host": "Linux-6.18.57-x86_64-with-glibc2.41",
+    "git_sha": "3385b877896491aa5594720b306a93c0efe8b75a",
+    "kv_precision": "FP32 on both paths; reference flash attention disabled",
+    "logit_tolerance": {
+      "atol": 0.01,
+      "rtol": 0.001
+    },
+    "note": "Experimental streamed Q8_0 path with pinned ggml dot kernels versus upstream graph; observed matching logits are checkpoint-specific. RLIMIT_AS is a Linux process address-space cap, not a portable RSS API.",
+    "trials": [
+      {
+        "prompt": "The sky is",
+        "streamed_exit": 0,
+        "reference_exit": 0,
+        "streamed_text": " blue and the sun is shining.\n",
+        "reference_text": "<s> The sky is blue and the sun is shining.\n",
+        "integrity_metrics": {
+          "verified": "1",
+          "accounted_bytes": "807712",
+          "blocks_verified": "2293",
+          "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+        },
+        "integrity_pass": true,
+        "reader_metrics": {
+          "source_bytes_read": 176925312,
+          "reader_buffer_bytes": 65536,
+          "source_read_calls": 2293,
+          "cache_allocated_bytes": 983376,
+          "cache_block_hits": 581003,
+          "cache_block_misses": 2293,
+          "cache_evictions": 2279
+        },
+        "wall_seconds_including_load": 1.439964228000008,
+        "memory": {
+          "peak_rss_bytes": 14757888,
+          "rss_after_run_bytes": 11694080,
+          "pss_after_run_bytes": 10851328,
+          "cgroup_current_after_run_bytes": null,
+          "cgroup_limit_bytes": null
+        },
+        "memory_cap_pass": true,
+        "tokens_match": true,
+        "logits_count": 256000,
+        "logits_max_abs_error": 0.0,
+        "logits_rmse": 0.0,
+        "logits_match": true,
+        "pass": true,
+        "streamed_stderr_sha256": "bc36b036025dfe63c3375b833c382fab809f382b8f53d736949ba694fe33f55e",
+        "streamed_stderr_bytes": 3989,
+        "reference_stderr_sha256": "deee153725a94f8bb85ef8ac010e9d09dddd1fb795fd6ae1cb1a25902b9f4c11",
+        "reference_stderr_bytes": 54056
+      },
+      {
+        "prompt": "Once upon a time",
+        "streamed_exit": 0,
+        "reference_exit": 0,
+        "streamed_text": ", there was a little girl named L\n",
+        "reference_text": "<s> Once upon a time, there was a little girl named L\n",
+        "integrity_metrics": {
+          "verified": "1",
+          "accounted_bytes": "807712",
+          "blocks_verified": "2392",
+          "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+        },
+        "integrity_pass": true,
+        "reader_metrics": {
+          "source_bytes_read": 183411552,
+          "reader_buffer_bytes": 65536,
+          "source_read_calls": 2392,
+          "cache_allocated_bytes": 983376,
+          "cache_block_hits": 598869,
+          "cache_block_misses": 2392,
+          "cache_evictions": 2378
+        },
+        "wall_seconds_including_load": 1.4326737010001125,
+        "memory": {
+          "peak_rss_bytes": 14733312,
+          "rss_after_run_bytes": 11743232,
+          "pss_after_run_bytes": 10900480,
+          "cgroup_current_after_run_bytes": null,
+          "cgroup_limit_bytes": null
+        },
+        "memory_cap_pass": true,
+        "tokens_match": true,
+        "logits_count": 256000,
+        "logits_max_abs_error": 0.0,
+        "logits_rmse": 0.0,
+        "logits_match": true,
+        "pass": true,
+        "streamed_stderr_sha256": "40438990db4452c4fe6034f7183a16738208dd3b7ae7195ace3bcd8d7bef1687",
+        "streamed_stderr_bytes": 3989,
+        "reference_stderr_sha256": "90fe45680b6bce84ca3a1c94671fab18fcc4fa7782b5f8c7e0b8bc1a0b52c771",
+        "reference_stderr_bytes": 54056
+      },
+      {
+        "prompt": "A little dog",
+        "streamed_exit": 0,
+        "reference_exit": 0,
+        "streamed_text": " named Max was very excited. He was\n",
+        "reference_text": "<s> A little dog named Max was very excited. He was\n",
+        "integrity_metrics": {
+          "verified": "1",
+          "accounted_bytes": "807712",
+          "blocks_verified": "2293",
+          "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+        },
+        "integrity_pass": true,
+        "reader_metrics": {
+          "source_bytes_read": 176925312,
+          "reader_buffer_bytes": 65536,
+          "source_read_calls": 2293,
+          "cache_allocated_bytes": 983376,
+          "cache_block_hits": 581003,
+          "cache_block_misses": 2293,
+          "cache_evictions": 2279
+        },
+        "wall_seconds_including_load": 1.4299363289999292,
+        "memory": {
+          "peak_rss_bytes": 14700544,
+          "rss_after_run_bytes": 11636736,
+          "pss_after_run_bytes": 10793984,
+          "cgroup_current_after_run_bytes": null,
+          "cgroup_limit_bytes": null
+        },
+        "memory_cap_pass": true,
+        "tokens_match": true,
+        "logits_count": 256000,
+        "logits_max_abs_error": 0.0,
+        "logits_rmse": 0.0,
+        "logits_match": true,
+        "pass": true,
+        "streamed_stderr_sha256": "d107e84a17369c480442b9c42a4ed169b1fadee500759a801ee6fa2575f662f7",
+        "streamed_stderr_bytes": 3989,
+        "reference_stderr_sha256": "7d8ce089f457f88385a067d853a967953ef126ff00ec7066e01fd2c40f281b6b",
+        "reference_stderr_bytes": 54056
+      }
+    ]
+  },
+  "limitations": [
+    "Only the pinned tiny model was exercised.",
+    "Admission budgets estimate additional allocations; they are not total RSS limits.",
+    "Separate Linux RLIMIT_AS enforced the reference protocol at 24 MiB.",
+    "Full adaptive scheduling and physical 2GB/large-model validation remain incomplete."
+  ],
+  "log_storage_note": "Verbose upstream stderr is represented by SHA-256 and length. Reproduce full logs with documented protocol; numerical results and output retained."
+}

@@ -47,6 +47,24 @@ int32_t llmbridge_generate_streamed_cpu(const char *path, const char *prompt,
     uint64_t workspace_budget, llmbridge_range_callback reader,
     llmbridge_token_callback emit, llmbridge_logits_callback logits,
     llmbridge_cancel_poll poll, void *userdata, char *error, size_t capacity);
+/* Additive entry: nonzero tokenizer prefix must match authenticated GGUF metadata.
+ * Caller owns sealed vocabulary file and verified weight reader for the call. */
+int32_t llmbridge_generate_streamed_cpu_v2(const char *path, const char *prompt,
+    uint32_t context, uint32_t max_tokens, uint64_t file_bytes, size_t max_chunk,
+    uint64_t workspace_budget, uint64_t tokenizer_prefix_bytes, llmbridge_range_callback reader,
+    llmbridge_token_callback emit, llmbridge_logits_callback logits,
+    llmbridge_cancel_poll poll, void *userdata, char *error, size_t capacity);
+
+/* Reuses decoder validation without allocating activations, KV or weights.
+ * Workspace is the native admission requirement, not process RSS. */
+typedef struct llmbridge_streamed_shape_v1 {
+    uint64_t workspace_fixed_bytes, workspace_per_token_bytes, kv_bytes_per_token;
+    uint64_t file_bytes, tensor_payload_bytes, metadata_prefix_bytes, training_context;
+    uint64_t embedding, heads, kv_heads, layers, feed_forward, vocabulary, chunk_bytes;
+} llmbridge_streamed_shape_v1;
+int32_t llmbridge_inspect_streamed_plan_v1(uint64_t file_bytes, size_t chunk,
+    llmbridge_range_callback reader, llmbridge_cancel_poll poll, void *userdata,
+    llmbridge_streamed_shape_v1 *out, char *error, size_t capacity);
 
 /* Parses GGUF metadata via caller-supplied range reads, no tensor weight allocation.
  * NOT an inference graph adapter and NOT a hard process RSS limit.

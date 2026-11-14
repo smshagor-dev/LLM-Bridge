@@ -23,3 +23,15 @@ pub mod tensor_layout;
 
 #[cfg(feature = "native")]
 pub mod streamed;
+
+pub mod read_cache;
+
+pub mod streamed_plan;
+
+#[cfg(feature = "native")]
+pub mod session_performance;
+
+pub mod native_cpu;
+
+#[cfg(target_os = "linux")]
+mod cgroup_memory;

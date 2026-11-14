@@ -6,7 +6,7 @@ Implemented: embedding lookup, RMS normalization, Q/K/V projection, normal full-
 
 ## Supported scope
 
-Only dense `llama` GGUF models with F32/Q8_0 weights, standard full-head RoPE and the implemented tensor inventory are accepted. Unknown Llama metadata options, extra tensors, unsupported quantization, oversized context and infeasible workspace fail explicitly. `--logits path.f32` creates a new file and refuses to overwrite an existing model, trace or symlink.
+Only dense `llama` GGUF models with F32/Q8_0/Q4_0 weights, standard full-head RoPE and the implemented tensor inventory are accepted. Unknown Llama metadata options, extra tensors, unsupported quantization, oversized context and infeasible workspace fail explicitly. `--logits path.f32` creates a new file and refuses to overwrite an existing model, trace or symlink.
 
 Only the pinned **stories15M-q8_0.gguf** has completed the end-to-end golden protocol. Other compatible shapes are experimental, not advertised as verified. Output is raw continuation, not chat-template processing. GPU/MoE/remote inference are not implemented here.
 
@@ -52,7 +52,7 @@ On 13 November 2026 the 26,671,328-byte checkpoint completed all three eight-tok
 
 ## Remaining work
 
-Integrate verified immutable model sessions, cache/prefetch and graph-wide scheduling; expand independent prompts/context and error injection; add numerical/quality and cold/warm I/O benchmarks; validate additional models/hardware; implement portable worker limits and native fuzz/sanitizer coverage. Production API, desktop, remote storage, MoE and GPU adapters remain pending. M2 is an experimental end-to-end checkpoint rather than a declaration that the whole milestone/product is finished.
+Extend Linux verified sessions and session caches to portable workers, asynchronous prefetch and graph-wide scheduling; expand independent prompts/context and error injection; add numerical/quality and cold/warm I/O benchmarks; validate additional models/hardware; implement portable worker limits and native fuzz/sanitizer coverage. Production API, desktop, remote storage, MoE and GPU adapters remain pending. M2 is an experimental end-to-end checkpoint rather than a declaration that the whole milestone/product is finished.
 
 ## Local checks on this implementation
 
@@ -64,3 +64,5 @@ Integrate verified immutable model sessions, cache/prefetch and graph-wide sched
 - Real streamed cancellation, tiny-workspace rejection, oversized-prompt rejection and logits-consumer cancellation contracts passed.
 
 CI on this branch is a separate check and must be observed before merging.
+
+The Q4_0 numerical-alignment checkpoint uses pinned FP32 attention/SwiGLU primitives, matching AVX2/FMA wrapper compilation and incremental normal-RoPE angles. Score/value scratch includes two fixed padding tails and is reflected in the native-derived workspace coefficients. Q4 proof scope, default-repacking mismatch and exact derived fixture are documented in [Q4 validation](STREAMED_Q4_VALIDATION.md). Earlier measurements below retain their original source hashes and protocol.
