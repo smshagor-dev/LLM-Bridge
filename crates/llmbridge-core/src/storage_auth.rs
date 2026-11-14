@@ -207,6 +207,9 @@ impl BoundedLocalReader {
     ) -> io::Result<&[u8]> {
         self.validate_source()?;
         let auth = self.auth.as_mut().expect("authenticated reader");
+        // A previous read may have verified this block before an in-place rewrite.
+        // Rehash on each public range request, even when file identity is unchanged.
+        auth.cached_block = None;
         let chunk = self.buffer.len();
         let mut copied = 0;
         while copied < count {
