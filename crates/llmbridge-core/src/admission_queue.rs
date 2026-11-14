@@ -34,6 +34,7 @@ struct Pending {
 #[derive(Debug, Default)]
 struct QueueState {
     paused: bool,
+    policy_paused: bool,
     next: u64,
     pending: VecDeque<Pending>,
 }
@@ -112,13 +113,22 @@ impl AdmissionQueue {
         self.state.lock().unwrap_or_else(|e| e.into_inner()).paused
     }
 
+    /// Independent internal gate: pressure recovery must not undo a manual pause.
+    #[cfg(any(feature = "native", test))]
+    pub(crate) fn set_policy_paused(&self, paused: bool) {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .policy_paused = paused;
+    }
+
     /// Nonblocking poll. Only the oldest live ticket can acquire a reservation.
     /// None means wait/retry; an unknown or cancelled ticket is an error.
     /// Reservation acquisition and head removal occur under the same lock.
     pub fn try_admit(&self, ticket: Ticket) -> Result<Option<Reservation>, AdmissionError> {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if state.pending.front().is_some_and(|p| p.ticket == ticket) {
-            if state.paused {
+            if state.paused || state.policy_paused {
                 return Ok(None);
             }
             let bytes = state.pending.front().expect("front checked").bytes;

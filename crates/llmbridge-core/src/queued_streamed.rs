@@ -81,11 +81,27 @@ pub fn generate_streamed_queued<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> boo
     on_piece: F,
     on_logits: L,
 ) -> Result<QueuedStreamedMetrics, String> {
+    generate_streamed_queued_with_poll(queue, request, cancelled, on_piece, on_logits, || {})
+}
+
+pub(crate) fn generate_streamed_queued_with_poll<
+    F: FnMut(&[u8]) -> bool,
+    L: FnMut(&[f32]) -> bool,
+    P: FnMut(),
+>(
+    queue: &AdmissionQueue,
+    request: QueuedStreamedRequest<'_>,
+    cancelled: &AtomicBool,
+    on_piece: F,
+    on_logits: L,
+    mut before_poll: P,
+) -> Result<QueuedStreamedMetrics, String> {
     if cancelled.load(Ordering::Acquire) {
         return Err("queued generation cancelled before admission".into());
     }
     crate::native_cpu::ensure_compatible()?;
     let charge = request.reservation_bytes()?;
+    before_poll();
     let start = Instant::now();
     let mut pending = queue
         .request(charge)
@@ -94,6 +110,7 @@ pub fn generate_streamed_queued<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> boo
         if cancelled.load(Ordering::Acquire) {
             return Err("queued generation cancelled while waiting".into());
         }
+        before_poll();
         if let Some(reservation) = pending
             .try_admit()
             .map_err(|e| format!("streamed queue polling: {e:?}"))?

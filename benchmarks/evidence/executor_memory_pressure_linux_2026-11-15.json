@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "client_date": "2026-11-15",
+  "client_timezone": "Europe/Moscow",
+  "recorded_at_utc": "2026-11-14T21:47:28.276179+00:00",
+  "scope": "Sampled cooperative executor admission; real tiny-model numerical correctness with controlled pressure signals and production OS sampler path",
+  "source_commit": "178b8f0f77d8b8a9d5bc414737f7e8b92c2ef317",
+  "source_tree": "2df43c8333622b916dc664581b620d67f7ad93d1",
+  "source_worktree_clean": true,
+  "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+  "contract_binary_sha256": "df05d221f1cfb9891bdd5af3cdf854ed3eee2aec0822ab8cb9e79579f473eb51",
+  "validation": {
+    "native_rust_tests": 242,
+    "non_native_rust_tests": 206,
+    "msrv_1_82_non_native_tests": 206,
+    "python_tests": 23,
+    "release_clippy_native_and_non_native": "passed with -D warnings",
+    "format_and_diff_checks": "passed",
+    "clean_source_fresh_process_real_model_runs": 2
+  },
+  "protocol": [
+    "Unknown custom headroom keeps two bounded FIFO requests pending without reservations",
+    "Waiting poll automatically recovers after high signal",
+    "First admitted native logits callback lowers headroom and refreshes policy while retaining one full slot",
+    "Head completes identical output/allFP32logits and tail remains pending",
+    "Hysteresis-band signal cannot recover a closed gate",
+    "High signal recovers policy without clearing manual pause",
+    "Manual resume allows tail to finish with identical direct hashes",
+    "Default OS/cgroup sampler with intentionally unattainable thresholds holds missing-model request before open",
+    "Cancellation removes pending OS-sampled request with zero charge"
+  ],
+  "logs": {
+    "native": {
+      "sha256": "a58b3d513fc0223968dd3c8e3bfc2e3838c53c4c9f02a0afce429869bb24e2ce",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 9.68s",
+        "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 229 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    "nonnative": {
+      "sha256": "eeedbe8218561b39ca9a322ed67d97746a0fd398f41230f28b72cf47e5ecbbf5",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 5.81s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 195 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    "msrv": {
+      "sha256": "7cc83cff69bfbc6137540c58bf09fdbf5440752733400af19520ec82f16da999",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 5.95s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 195 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    "python": {
+      "sha256": "f955af7b770e7c2e5fe57d133c2c6f762d0641d9bb222baec60d9761b0e8682d",
+      "result_lines": [
+        "Ran 23 tests in 0.099s"
+      ]
+    },
+    "clippy-native": {
+      "sha256": "1b538cc62e6aa398b250268474b28ad0903b86d65a4c63ba038a754192be79eb",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 1.82s"
+      ]
+    },
+    "clippy-nonnative": {
+      "sha256": "bc0f077b444857c1082867fc0246bd51c7571d23a7d985e5d3f2bad8ff490eef",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 1.44s"
+      ]
+    },
+    "clean-1": {
+      "sha256": "567b03eadb1007f4cc306e2565f3236d541dad26a25905380f110de800f9fcc7",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 3.58s",
+        "production_os_sample_available_bytes=Some(8144527360) samples=1",
+        "executor pressure: unknown refusal, active-slot retention, automatic queued recovery, hysteresis, independent manual pause, OS sampling/cancellation and exact bytes/logits: PASS",
+        "slot_bytes=67108864 output_sha256=76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89 logits_sha256=f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb"
+      ]
+    },
+    "clean-2": {
+      "sha256": "f0a4d9374141fc028c168532162c542585d61420aa5dc6777f4b1787524a94cc",
+      "result_lines": [
+        "production_os_sample_available_bytes=Some(8150908928) samples=1",
+        "executor pressure: unknown refusal, active-slot retention, automatic queued recovery, hysteresis, independent manual pause, OS sampling/cancellation and exact bytes/logits: PASS",
+        "slot_bytes=67108864 output_sha256=76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89 logits_sha256=f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb"
+      ]
+    }
+  },
+  "limitations": [
+    "Deterministic custom pressure signals are not physical pressure stress",
+    "Production OS sampler path was exercised, not physical low-RAM load/reaction time",
+    "Throttled shared cached observations; no background monitor for idle or active-only execution",
+    "No forced reclamation, worker replanning, RSS or complete outstanding-allocation guarantee",
+    "No physical2GB, large-model, throughput or race-detector claim",
+    "Custom sampler must be quick, non-panicking, trustworthy and non-reentrant"
+  ]
+}
