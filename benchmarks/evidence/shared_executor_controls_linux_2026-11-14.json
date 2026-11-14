@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "date_utc": "2026-11-14",
+  "scope": "Shared executor cooperative admission control integration; pinned tiny-model correctness only",
+  "source_commit": "5eb898dd33bd4d8a889c28fe2c2d669525bf451f",
+  "source_tree": "0478276145c26d1eb9fadfb82d74208543ca3f37",
+  "clean_source_worktree": true,
+  "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+  "contract_binary_sha256": "dae5b9493acc0e54a79873ec29c177698f823ad68dd180ffbb7bffb6b6e30529",
+  "validation": {
+    "native_rust_tests": 238,
+    "non_native_rust_tests": 203,
+    "msrv_1_82_non_native_tests": 203,
+    "python_tests": 23,
+    "format_diff_checks": "passed",
+    "release_clippy_native_and_non_native": "passed with -D warnings",
+    "clean_source_fresh_process_real_contract_runs": 2
+  },
+  "protocol": [
+    "Queue two real sessions while paused with zero reserved bytes",
+    "Resume head; pause and shrink to zero from its native first-logits callback",
+    "Retain a full active slot and over-capacity debt until head finishes",
+    "Keep tail pending after head releases at zero capacity",
+    "Grow capacity without resuming pause; resume cannot admit a partial slot",
+    "Restore full slot to finish tail",
+    "Refuse above-plan growth without state change",
+    "Cancel paused missing-model work after shrink without model opening or leaked charges",
+    "Refuse new zero-capacity request before model opening",
+    "Restore capacity and complete a third executor generation",
+    "Compare all three complete output and every FP32 logit hashes to direct native execution"
+  ],
+  "logs": {
+    "native-final": {
+      "sha256": "741444360fad24c13af52333444a5491c6e11665a0d63e93670005929c70a19c",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 0.03s",
+        "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 225 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    "msrv": {
+      "sha256": "ffb0cbf2afbe0afd9bdea529356e15157a8cf2c2006068331bf380790f919126",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 14.26s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 192 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    "no-default": {
+      "sha256": "cffd2a8425ca8dd90b19e9c19572eb1e2582405b75395f4c26b12f2a4e648596",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 6.45s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 192 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    "python": {
+      "sha256": "912abe5762888a3f26cf409f3f4c81b20c2abce2f662437b4f1e3538abddfce0",
+      "result_lines": [
+        "Ran 23 tests in 0.087s"
+      ]
+    },
+    "clippy-native": {
+      "sha256": "e0587f50086bf8fcec9dcb843b9d2d9823453f2296f8a8c6d9772c7a19dcb4d8",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 1m 47s"
+      ]
+    },
+    "clippy-nonnative": {
+      "sha256": "3e6120a80a48510340135a594f2e0746567044f82bc7023343b5d4b53d25f596",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 3.20s"
+      ]
+    },
+    "clean-1": {
+      "sha256": "4899ed24dc8fafbe67bf9cbfe466df8f019cdac622be9e1c4a91ab0180b179af",
+      "result_lines": [
+        "executor controls: pause, retained running slot, shrink/growth, ceiling refusal, pending cancellation and exact bytes/logits: PASS",
+        "slot_bytes=67108864 output_sha256=76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89 logits_sha256=f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb"
+      ]
+    },
+    "clean-2": {
+      "sha256": "4899ed24dc8fafbe67bf9cbfe466df8f019cdac622be9e1c4a91ab0180b179af",
+      "result_lines": [
+        "executor controls: pause, retained running slot, shrink/growth, ceiling refusal, pending cancellation and exact bytes/logits: PASS",
+        "slot_bytes=67108864 output_sha256=76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89 logits_sha256=f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb"
+      ]
+    }
+  },
+  "limitations": [
+    "Explicit manual controls; no automatic OS-pressure sampler or hysteresis policy",
+    "Worker count/maximum are construction-time plan; no plan expansion",
+    "Cooperative byte accounting is not RSS enforcement or native memory reclamation",
+    "No physical2GB, large-model, throughput or race-detector evidence",
+    "Pause and capacity setters are independent; multiple controllers must coordinate"
+  ]
+}

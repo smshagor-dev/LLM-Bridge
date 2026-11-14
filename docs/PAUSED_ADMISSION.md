@@ -8,7 +8,7 @@ While paused, the existing pending-slot limit, validation, FIFO order, cancellat
 
 `generate_streamed_queued` already polls `try_admit`, so the control gates actual native generation without adding a thread or a new FFI entry point. Waiting still checks the caller's cancellation flag and parks between polls. Resume latency depends on that polling/OS scheduling; there is no wake-up deadline. An external application can use this API when it decides to stop accepting more memory-intensive work, but this change adds no automatic pressure sampling, CLI pause command or global process/RSS enforcement. Separate queues keep separate pause states. Controllers must coordinate pause ownership; the latest explicit state setter wins.
 
-This independent change targets main's public queued-generation API. The worker executor in #84 owns a private queue; exposing equivalent controller methods there is separate integration work.
+The shared [StreamedExecutor](STREAMED_EXECUTOR.md) also exposes these pause controls through its private FIFO, alongside bounded capacity resizing.
 
 ## Real validation
 

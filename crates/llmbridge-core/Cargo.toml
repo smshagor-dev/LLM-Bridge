@@ -63,3 +63,7 @@ required-features = ["native"]
 [[example]]
 name = "resized_budget_contract"
 required-features = ["native"]
+
+[[example]]
+name = "executor_controls_contract"
+required-features = ["native"]

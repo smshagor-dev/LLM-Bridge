@@ -107,3 +107,7 @@ M3 now has native-derived CLI/context admission, not a complete adaptive schedul
 - A shared `StreamedExecutor` now applies CPU/RAM worker planning to actual queued generation. Full fixed session slots enforce both accounted capacity and simultaneous-session count even for smaller requests; oversized charges fail before enqueue/model I/O.
 - Existing FIFO/cancellation/authentication and reservation cleanup are forwarded without new native numerical code or ABI. Callers own threads and output handling; construction uses a point-in-time memory snapshot and estimates, not a process RSS limit or live pressure scheduler.
 - Real cold-start overlapping sessions, direct full-output/all-logit comparison, smaller-request waiting/cancellation and zero-final-charge protocols are required. See `docs/STREAMED_EXECUTOR.md`.
+
+## Shared executor admission controls checkpoint
+
+- The executor now exposes explicit pause/resume, live capacity resizing and a consistent budget snapshot. Increases cannot exceed its construction-time CPU/RAM plan. Shrinking retains active slots and pending cancellation, while zero capacity refuses new enqueue work; growth and resume are independent. No automatic pressure sampling, worker-plan expansion, forced reclamation or RSS guarantee is implied. See `docs/STREAMED_EXECUTOR.md`.
