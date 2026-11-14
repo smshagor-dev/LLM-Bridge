@@ -1,0 +1,462 @@
+{
+  "schema": 1,
+  "date_utc": "2026-11-14",
+  "source_commit": "53d47b48657991dc26a3b9a245f5d66d5ee4589f",
+  "source_tree": "44e3a934ce7bfe4d38cf57529251bba267b2cabc",
+  "platform": {
+    "system": "Linux",
+    "release": "6.18.57",
+    "machine": "x86_64"
+  },
+  "checks": {
+    "native_release_all_target_tests": 172,
+    "rust_1_82_non_native_tests": 146,
+    "python_tests": 13,
+    "fmt": "pass",
+    "native_clippy": "pass",
+    "non_native_clippy": "pass"
+  },
+  "cpu_build_profile": {
+    "GGML_NATIVE": "OFF",
+    "SSE42_AVX_AVX2_FMA_F16C_BMI2": "ON",
+    "reference_matches_engine": true,
+    "generic_pre_avx2_verified": false
+  },
+  "performance_reports": {
+    "uncached": {
+      "schema": 1,
+      "pass": true,
+      "source": {
+        "commit": "53d47b48657991dc26a3b9a245f5d66d5ee4589f",
+        "tree": "44e3a934ce7bfe4d38cf57529251bba267b2cabc",
+        "working_tree_dirty": false
+      },
+      "binary_sha256": "36067fa85ba36ec941fcecc4f9611d8c9cd1ca1f9e2da4c87786be4e16538d17",
+      "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+      "prompt_sha256": "63460e4223f8a4b261087a8d8133f25ac5fe640d21f9ffbe2fcef4c3f8719c19",
+      "configuration": {
+        "context": 128,
+        "max_tokens": 8,
+        "cache_mb": 0,
+        "address_space_mb": 24,
+        "authenticated": false
+      },
+      "targets": {
+        "decode_steps_per_second": null,
+        "first_piece_ms": null
+      },
+      "note": "Observed workload only; page-cache state uncontrolled; range-callback time includes identity checks, cache work and block authentication. Decode intervals include consumer callbacks. No physical disk bandwidth, isolated compute, cold-start or larger-model claim.",
+      "trials": [
+        {
+          "run": 1,
+          "valid": true,
+          "target_met": true,
+          "exit_code": 0,
+          "output_sha256": "f4f18cc561041c240e9f5da9cb7c508360be81641cf6e0ec48c1a2e7cc976c18",
+          "stderr_sha256": "2292996c4b135065f2552e76258c3c3c1bd16f331c4326c8a72c5c8e586c927c",
+          "performance": {
+            "total_ns": 1680118892,
+            "first_logits_ready_ns": 790667653,
+            "first_piece_ns": 790696717,
+            "sampling_steps": 8,
+            "emitted_pieces": 8,
+            "emitted_bytes": 29,
+            "decode_intervals": 7,
+            "decode_elapsed_ns": 887764321,
+            "decode_steps_per_second": 7.884975589146255,
+            "range_callback_ns": 1459801227,
+            "consumer_callback_ns": 154160,
+            "includes_admission_and_authentication": true,
+            "decode_includes_consumer_callbacks": true,
+            "physical_storage_time_measured": false
+          },
+          "child_wall_ns": 1684364319
+        },
+        {
+          "run": 2,
+          "valid": true,
+          "target_met": true,
+          "exit_code": 0,
+          "output_sha256": "f4f18cc561041c240e9f5da9cb7c508360be81641cf6e0ec48c1a2e7cc976c18",
+          "stderr_sha256": "6092bdcdf660392353efb0c52716ab9493727866c49a7a4761b7228844b39160",
+          "performance": {
+            "total_ns": 1583188017,
+            "first_logits_ready_ns": 683313698,
+            "first_piece_ns": 683343152,
+            "sampling_steps": 8,
+            "emitted_pieces": 8,
+            "emitted_bytes": 29,
+            "decode_intervals": 7,
+            "decode_elapsed_ns": 898241572,
+            "decode_steps_per_second": 7.793003817908352,
+            "range_callback_ns": 1433116363,
+            "consumer_callback_ns": 148361,
+            "includes_admission_and_authentication": true,
+            "decode_includes_consumer_callbacks": true,
+            "physical_storage_time_measured": false
+          },
+          "child_wall_ns": 1587673058
+        },
+        {
+          "run": 3,
+          "valid": true,
+          "target_met": true,
+          "exit_code": 0,
+          "output_sha256": "f4f18cc561041c240e9f5da9cb7c508360be81641cf6e0ec48c1a2e7cc976c18",
+          "stderr_sha256": "3f8e95e6a0db581b7f9695d109a6c863d349877fe29821c2c54f1c1b8006d269",
+          "performance": {
+            "total_ns": 1730616991,
+            "first_logits_ready_ns": 812569477,
+            "first_piece_ns": 812599332,
+            "sampling_steps": 8,
+            "emitted_pieces": 8,
+            "emitted_bytes": 29,
+            "decode_intervals": 7,
+            "decode_elapsed_ns": 913795952,
+            "decode_steps_per_second": 7.660353479000747,
+            "range_callback_ns": 1482440441,
+            "consumer_callback_ns": 216333,
+            "includes_admission_and_authentication": true,
+            "decode_includes_consumer_callbacks": true,
+            "physical_storage_time_measured": false
+          },
+          "child_wall_ns": 1737862754
+        }
+      ],
+      "uninstrumented_validation": {
+        "valid": true,
+        "exit_code": 0,
+        "output_sha256": "f4f18cc561041c240e9f5da9cb7c508360be81641cf6e0ec48c1a2e7cc976c18"
+      },
+      "outputs_identical": true,
+      "uninstrumented_output_matches": true
+    },
+    "cached": {
+      "schema": 1,
+      "pass": true,
+      "source": {
+        "commit": "53d47b48657991dc26a3b9a245f5d66d5ee4589f",
+        "tree": "44e3a934ce7bfe4d38cf57529251bba267b2cabc",
+        "working_tree_dirty": false
+      },
+      "binary_sha256": "36067fa85ba36ec941fcecc4f9611d8c9cd1ca1f9e2da4c87786be4e16538d17",
+      "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+      "prompt_sha256": "63460e4223f8a4b261087a8d8133f25ac5fe640d21f9ffbe2fcef4c3f8719c19",
+      "configuration": {
+        "context": 128,
+        "max_tokens": 8,
+        "cache_mb": 1,
+        "address_space_mb": 24,
+        "authenticated": true
+      },
+      "targets": {
+        "decode_steps_per_second": null,
+        "first_piece_ms": null
+      },
+      "note": "Observed workload only; page-cache state uncontrolled; range-callback time includes identity checks, cache work and block authentication. Decode intervals include consumer callbacks. No physical disk bandwidth, isolated compute, cold-start or larger-model claim.",
+      "trials": [
+        {
+          "run": 1,
+          "valid": true,
+          "target_met": true,
+          "exit_code": 0,
+          "output_sha256": "f4f18cc561041c240e9f5da9cb7c508360be81641cf6e0ec48c1a2e7cc976c18",
+          "stderr_sha256": "3ef821eb07dee546eab987ec13db9abda7847932e977b526acfa1ba0d6310757",
+          "performance": {
+            "total_ns": 1495267026,
+            "first_logits_ready_ns": 679999385,
+            "first_piece_ns": 680210902,
+            "sampling_steps": 8,
+            "emitted_pieces": 8,
+            "emitted_bytes": 29,
+            "decode_intervals": 7,
+            "decode_elapsed_ns": 810892354,
+            "decode_steps_per_second": 8.632465166886996,
+            "range_callback_ns": 1293815733,
+            "consumer_callback_ns": 205689,
+            "includes_admission_and_authentication": true,
+            "decode_includes_consumer_callbacks": true,
+            "physical_storage_time_measured": false
+          },
+          "child_wall_ns": 1504251694
+        },
+        {
+          "run": 2,
+          "valid": true,
+          "target_met": true,
+          "exit_code": 0,
+          "output_sha256": "f4f18cc561041c240e9f5da9cb7c508360be81641cf6e0ec48c1a2e7cc976c18",
+          "stderr_sha256": "6efc93ecc6eaec58ceaf429043f469e28b7fa45e603e8d080d113e582b75486b",
+          "performance": {
+            "total_ns": 1475557334,
+            "first_logits_ready_ns": 670619429,
+            "first_piece_ns": 670648713,
+            "sampling_steps": 8,
+            "emitted_pieces": 8,
+            "emitted_bytes": 29,
+            "decode_intervals": 7,
+            "decode_elapsed_ns": 803528984,
+            "decode_steps_per_second": 8.711571255530467,
+            "range_callback_ns": 1284673391,
+            "consumer_callback_ns": 146089,
+            "includes_admission_and_authentication": true,
+            "decode_includes_consumer_callbacks": true,
+            "physical_storage_time_measured": false
+          },
+          "child_wall_ns": 1481247952
+        },
+        {
+          "run": 3,
+          "valid": true,
+          "target_met": true,
+          "exit_code": 0,
+          "output_sha256": "f4f18cc561041c240e9f5da9cb7c508360be81641cf6e0ec48c1a2e7cc976c18",
+          "stderr_sha256": "55d4e0893614d850ce94bf883431c64a02038096c9aea2c0b6d82c9f01d739af",
+          "performance": {
+            "total_ns": 1546303808,
+            "first_logits_ready_ns": 700981428,
+            "first_piece_ns": 701010642,
+            "sampling_steps": 8,
+            "emitted_pieces": 8,
+            "emitted_bytes": 29,
+            "decode_intervals": 7,
+            "decode_elapsed_ns": 843869743,
+            "decode_steps_per_second": 8.29511907266001,
+            "range_callback_ns": 1331456060,
+            "consumer_callback_ns": 139840,
+            "includes_admission_and_authentication": true,
+            "decode_includes_consumer_callbacks": true,
+            "physical_storage_time_measured": false
+          },
+          "child_wall_ns": 1553298581
+        }
+      ],
+      "uninstrumented_validation": {
+        "valid": true,
+        "exit_code": 0,
+        "output_sha256": "f4f18cc561041c240e9f5da9cb7c508360be81641cf6e0ec48c1a2e7cc976c18"
+      },
+      "outputs_identical": true,
+      "uninstrumented_output_matches": true
+    },
+    "impossible-target": {
+      "schema": 1,
+      "pass": false,
+      "source": {
+        "commit": "53d47b48657991dc26a3b9a245f5d66d5ee4589f",
+        "tree": "44e3a934ce7bfe4d38cf57529251bba267b2cabc",
+        "working_tree_dirty": false
+      },
+      "binary_sha256": "36067fa85ba36ec941fcecc4f9611d8c9cd1ca1f9e2da4c87786be4e16538d17",
+      "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+      "prompt_sha256": "63460e4223f8a4b261087a8d8133f25ac5fe640d21f9ffbe2fcef4c3f8719c19",
+      "configuration": {
+        "context": 128,
+        "max_tokens": 8,
+        "cache_mb": 0,
+        "address_space_mb": 24,
+        "authenticated": false
+      },
+      "targets": {
+        "decode_steps_per_second": 1000000000000.0,
+        "first_piece_ms": null
+      },
+      "note": "Observed workload only; page-cache state uncontrolled; range-callback time includes identity checks, cache work and block authentication. Decode intervals include consumer callbacks. No physical disk bandwidth, isolated compute, cold-start or larger-model claim.",
+      "trials": [
+        {
+          "run": 1,
+          "valid": true,
+          "target_met": false,
+          "exit_code": 0,
+          "output_sha256": "f4f18cc561041c240e9f5da9cb7c508360be81641cf6e0ec48c1a2e7cc976c18",
+          "stderr_sha256": "7e4506bf92acf02fc9b615e376346500385e0d19306253559972ada73462561a",
+          "performance": {
+            "total_ns": 1644431398,
+            "first_logits_ready_ns": 736264015,
+            "first_piece_ns": 736293088,
+            "sampling_steps": 8,
+            "emitted_pieces": 8,
+            "emitted_bytes": 29,
+            "decode_intervals": 7,
+            "decode_elapsed_ns": 906644651,
+            "decode_steps_per_second": 7.720775711056393,
+            "range_callback_ns": 1472340144,
+            "consumer_callback_ns": 127058,
+            "includes_admission_and_authentication": true,
+            "decode_includes_consumer_callbacks": true,
+            "physical_storage_time_measured": false
+          },
+          "child_wall_ns": 1650329912
+        }
+      ],
+      "uninstrumented_validation": {
+        "valid": true,
+        "exit_code": 0,
+        "output_sha256": "f4f18cc561041c240e9f5da9cb7c508360be81641cf6e0ec48c1a2e7cc976c18"
+      },
+      "outputs_identical": true,
+      "uninstrumented_output_matches": true
+    }
+  },
+  "independent_reference": {
+    "pass": true,
+    "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+    "model_file_bytes": 26671328,
+    "binary_sha256": "36067fa85ba36ec941fcecc4f9611d8c9cd1ca1f9e2da4c87786be4e16538d17",
+    "reference_binary_sha256": "8383941165a42225955b318d8773090e286bbe308d4af6c2f2b99314833e5147",
+    "reference_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+    "working_tree_dirty": false,
+    "source_sha256": {
+      "native/src/streamed.cpp": "00a458df39318df01c1a5137bae9960240af4432a7a951fd152d74dc71fdda42",
+      "crates/llmbridge-core/src/streamed.rs": "86d4021070d641d26870c957c0aaefdb1e7c287cd2e1da4c9e77d3b61431ece7",
+      "crates/llmbridge-core/src/read_cache.rs": "21d7682a040528bff507fba4710f980dfd4fc5447bc9b30e3586b05656a38c8e",
+      "crates/llmbridge-core/src/storage.rs": "24855e5ad44345ccd5a26a4f68c33ee7aa876373a76051abe1e505c0a164ff5d",
+      "crates/llmbridge-core/src/storage_auth.rs": "989574ce34116dfe647d94ccccf43e457aa8e06e412dd29f0326a48c16d1771b"
+    },
+    "verified_session_requested": true,
+    "cache_budget_bytes": 1048576,
+    "address_space_limit_bytes": 25165824,
+    "host": "Linux-6.18.57-x86_64-with-glibc2.41",
+    "git_sha": "53d47b48657991dc26a3b9a245f5d66d5ee4589f",
+    "kv_precision": "FP32 on both paths; reference flash attention disabled",
+    "logit_tolerance": {
+      "atol": 0.01,
+      "rtol": 0.001
+    },
+    "note": "Experimental streamed Q8_0 path with pinned ggml dot kernels versus upstream graph; observed matching logits are checkpoint-specific. RLIMIT_AS is a Linux process address-space cap, not a portable RSS API. Text/verbose diagnostics retained only as hashes in this summary; use documented protocol to regenerate.",
+    "trials": [
+      {
+        "streamed_exit": 0,
+        "reference_exit": 0,
+        "integrity_metrics": {
+          "verified": "1",
+          "accounted_bytes": "807712",
+          "blocks_verified": "2293",
+          "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+        },
+        "integrity_pass": true,
+        "reader_metrics": {
+          "source_bytes_read": 176925312,
+          "reader_buffer_bytes": 65536,
+          "source_read_calls": 2293,
+          "cache_allocated_bytes": 983376,
+          "cache_block_hits": 581003,
+          "cache_block_misses": 2293,
+          "cache_evictions": 2279
+        },
+        "wall_seconds_including_load": 1.6082295500000328,
+        "memory": {
+          "peak_rss_bytes": 15028224,
+          "rss_after_run_bytes": 12128256,
+          "pss_after_run_bytes": 9655296,
+          "cgroup_current_after_run_bytes": null,
+          "cgroup_limit_bytes": null
+        },
+        "memory_cap_pass": true,
+        "tokens_match": true,
+        "logits_count": 256000,
+        "logits_max_abs_error": 0.0,
+        "logits_rmse": 0.0,
+        "logits_match": true,
+        "pass": true,
+        "streamed_stderr_sha256": "d20bf3d00dbb7e498b703741ba70b981314ec6aaf3fdfc367b0c25a9bbcbd52d",
+        "reference_stderr_sha256": "96ba1882a05094bccde4741b66689eca58a9ba5369b8c08fdae5f669d16768c7",
+        "prompt_sha256": "63460e4223f8a4b261087a8d8133f25ac5fe640d21f9ffbe2fcef4c3f8719c19",
+        "streamed_text_sha256": "f4f18cc561041c240e9f5da9cb7c508360be81641cf6e0ec48c1a2e7cc976c18",
+        "reference_text_sha256": "b0829dfe85cb88e6c82ffc14248d38f7e15819d675d7fee4ba6dd0151666490d"
+      },
+      {
+        "streamed_exit": 0,
+        "reference_exit": 0,
+        "integrity_metrics": {
+          "verified": "1",
+          "accounted_bytes": "807712",
+          "blocks_verified": "2392",
+          "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+        },
+        "integrity_pass": true,
+        "reader_metrics": {
+          "source_bytes_read": 183411552,
+          "reader_buffer_bytes": 65536,
+          "source_read_calls": 2392,
+          "cache_allocated_bytes": 983376,
+          "cache_block_hits": 598869,
+          "cache_block_misses": 2392,
+          "cache_evictions": 2378
+        },
+        "wall_seconds_including_load": 1.6921271309997792,
+        "memory": {
+          "peak_rss_bytes": 15110144,
+          "rss_after_run_bytes": 12046336,
+          "pss_after_run_bytes": 9538560,
+          "cgroup_current_after_run_bytes": null,
+          "cgroup_limit_bytes": null
+        },
+        "memory_cap_pass": true,
+        "tokens_match": true,
+        "logits_count": 256000,
+        "logits_max_abs_error": 0.0,
+        "logits_rmse": 0.0,
+        "logits_match": true,
+        "pass": true,
+        "streamed_stderr_sha256": "7b751a63c669a2afa3d13dc933614fc58256c45280c7faccb595697e98acfe52",
+        "reference_stderr_sha256": "5a1ba35f6035d2f51cbe64bb9394ebd303160a671addbbf586eee6da26c0ed91",
+        "prompt_sha256": "e286222c229ec73b1bc520d88583191572ae0cbbaa66ea68053994a5e50ac87a",
+        "streamed_text_sha256": "b6a73596905e09047d5e42f90a6fb08cf3c1693ff5f77140857bc683d7b32b51",
+        "reference_text_sha256": "1525ac0a5669601447dfea094cd245db5a9c0c2dae866c618bd935c53ffaea81"
+      },
+      {
+        "streamed_exit": 0,
+        "reference_exit": 0,
+        "integrity_metrics": {
+          "verified": "1",
+          "accounted_bytes": "807712",
+          "blocks_verified": "2293",
+          "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+        },
+        "integrity_pass": true,
+        "reader_metrics": {
+          "source_bytes_read": 176925312,
+          "reader_buffer_bytes": 65536,
+          "source_read_calls": 2293,
+          "cache_allocated_bytes": 983376,
+          "cache_block_hits": 581003,
+          "cache_block_misses": 2293,
+          "cache_evictions": 2279
+        },
+        "wall_seconds_including_load": 1.6347561500001575,
+        "memory": {
+          "peak_rss_bytes": 14802944,
+          "rss_after_run_bytes": 11812864,
+          "pss_after_run_bytes": 10991616,
+          "cgroup_current_after_run_bytes": null,
+          "cgroup_limit_bytes": null
+        },
+        "memory_cap_pass": true,
+        "tokens_match": true,
+        "logits_count": 256000,
+        "logits_max_abs_error": 0.0,
+        "logits_rmse": 0.0,
+        "logits_match": true,
+        "pass": true,
+        "streamed_stderr_sha256": "00387c7a38cbdb9c26aca63b0f5dc2243040721ae78f6b6b0b6186ae5cb0954e",
+        "reference_stderr_sha256": "469e59b0f7315015bb2335f292037f231def16f7dcf5f519d3690f0b3ba6fd2b",
+        "prompt_sha256": "1a2b1757a9c8f417e0591c1a96b413ea7ad629316f2c0106f7c533f11dd0999a",
+        "streamed_text_sha256": "329f7d34792c637658ed8af9efb54ee951ee6c879c067e3e72314e6e20b2392f",
+        "reference_text_sha256": "a3ce7ebbe809af04dbd52cb9a3e544818e4c66335b55b6f379379010977d6337"
+      }
+    ]
+  },
+  "prior_ci_investigation": {
+    "run_url": "https://github.com/smshagor-dev/LLM-Bridge/actions/runs/43542738816",
+    "failure": "Cached generation under unchanged 24 MiB RLIMIT_AS failed with std::bad_alloc in host-native CI build. Local old build passed.",
+    "repair": "Pin matching AVX2 engine/reference flags; CI confirmation pending. No raised cap or relaxed tolerance.",
+    "scalar_trial": "Generated output matched but one prompt exceeded existing logits tolerance (max absolute error 0.10489082336425781); scalar profile remains unvalidated."
+  },
+  "limitations": [
+    "This host and pinned tiny model only; no physical 2GB/large-model validation.",
+    "Instrumentation adds overhead; filesystem caches uncontrolled and may be warm.",
+    "Range-callback time is not physical disk time; decode intervals include consumer work.",
+    "No universal speedup, isolated compute rate or full adaptive scheduler claim."
+  ]
+}
