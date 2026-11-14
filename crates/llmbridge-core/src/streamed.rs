@@ -3,11 +3,13 @@
 use crate::{
     gguf_index::GgufTensorIndex,
     read_cache::{CachedLocalReader, ReadCacheMetrics},
+    session_performance::{PerformanceClock, SessionPerformance},
     storage::BoundedLocalReader,
 };
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 #[derive(Debug, Clone, Copy)]
 pub struct StreamedConfig {
@@ -17,6 +19,8 @@ pub struct StreamedConfig {
     pub workspace_bytes: u64,
     pub cache_bytes: usize,
     pub authentication_budget_bytes: usize,
+    /// Adds constant-space wall-clock observations; disabled by default.
+    pub collect_performance: bool,
 }
 impl Default for StreamedConfig {
     fn default() -> Self {
@@ -27,6 +31,7 @@ impl Default for StreamedConfig {
             workspace_bytes: 8 * 1024 * 1024,
             cache_bytes: 0,
             authentication_budget_bytes: 8 * 1024 * 1024,
+            collect_performance: false,
         }
     }
 }
@@ -36,6 +41,7 @@ pub struct StreamedMetrics {
     pub reader_buffer_bytes: usize,
     pub cache: ReadCacheMetrics,
     pub authentication: Option<crate::storage::AuthenticationMetrics>,
+    pub performance: Option<SessionPerformance>,
 }
 
 extern "C" {
@@ -64,6 +70,7 @@ struct State<'a, F, L> {
     emit: F,
     logits: L,
     failure: Option<String>,
+    performance: Option<PerformanceClock>,
 }
 fn contained<T: Default>(call: impl FnOnce() -> T) -> T {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)).unwrap_or_default()
@@ -91,7 +98,8 @@ extern "C" fn read<F, L>(
         // SAFETY: sole mutable synchronous callback; C++ supplies length writable bytes.
         let state = unsafe { &mut *(state.cast::<State<'_, F, L>>()) };
         let flag = state.cancelled;
-        match state
+        let start = state.performance.as_ref().map(|_| Instant::now());
+        let copied = (|| match state
             .reader
             .read_range_cancellable(offset, length, || flag.load(Ordering::Acquire))
         {
@@ -108,7 +116,11 @@ extern "C" fn read<F, L>(
                 state.failure = Some(error.to_string());
                 0
             }
+        })();
+        if let (Some(clock), Some(start)) = (&mut state.performance, start) {
+            clock.range(start.elapsed());
         }
+        copied
     })
 }
 extern "C" fn emit<F: FnMut(&[u8]) -> bool, L>(
@@ -125,7 +137,15 @@ extern "C" fn emit<F: FnMut(&[u8]) -> bool, L>(
             return 0;
         }
         let piece = unsafe { std::slice::from_raw_parts(bytes.cast(), count) };
-        i32::from((state.emit)(piece) && !state.cancelled.load(Ordering::Acquire))
+        if let Some(clock) = state.performance.as_mut() {
+            clock.piece(count);
+        }
+        let start = state.performance.as_ref().map(|_| Instant::now());
+        let accepted = (state.emit)(piece);
+        if let (Some(clock), Some(start)) = (&mut state.performance, start) {
+            clock.consumer(start.elapsed());
+        }
+        i32::from(accepted && !state.cancelled.load(Ordering::Acquire))
     })
 }
 extern "C" fn logits<F, L: FnMut(&[f32]) -> bool>(
@@ -142,7 +162,15 @@ extern "C" fn logits<F, L: FnMut(&[f32]) -> bool>(
             return 0;
         }
         let values = unsafe { std::slice::from_raw_parts(values, count) };
-        i32::from((state.logits)(values) && !state.cancelled.load(Ordering::Acquire))
+        if let Some(clock) = state.performance.as_mut() {
+            clock.logits();
+        }
+        let start = state.performance.as_ref().map(|_| Instant::now());
+        let accepted = (state.logits)(values);
+        if let (Some(clock), Some(start)) = (&mut state.performance, start) {
+            clock.consumer(start.elapsed());
+        }
+        i32::from(accepted && !state.cancelled.load(Ordering::Acquire))
     })
 }
 
@@ -191,6 +219,7 @@ fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>
     on_piece: F,
     on_logits: L,
 ) -> Result<StreamedMetrics, String> {
+    let performance = config.collect_performance.then(PerformanceClock::start);
     if cancelled.load(Ordering::Acquire) {
         return Err("streamed generation cancelled before admission".into());
     }
@@ -243,6 +272,7 @@ fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>
         emit: on_piece,
         logits: on_logits,
         failure: None,
+        performance,
     };
     let mut error = [0 as c_char; 1024];
     let status = unsafe {
@@ -279,6 +309,7 @@ fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>
         reader_buffer_bytes: config.chunk_bytes,
         cache: state.reader.metrics(),
         authentication: state.reader.authentication_metrics(),
+        performance: state.performance.map(PerformanceClock::finish),
     })
 }
 

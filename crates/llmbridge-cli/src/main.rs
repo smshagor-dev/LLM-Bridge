@@ -503,6 +503,7 @@ fn chat(args: &[String]) -> Result<(), String> {
         let config = llmbridge_core::streamed::StreamedConfig {
             context_tokens: ctx,
             max_tokens,
+            collect_performance: show_metrics,
             cache_bytes: cache_mb * 1024 * 1024,
             authentication_budget_bytes: verification_mb * 1024 * 1024,
             workspace_bytes: workspace_mb
@@ -533,6 +534,9 @@ fn chat(args: &[String]) -> Result<(), String> {
         execution
         .map(|metrics| {
             if show_metrics {
+                if let Some(performance) = metrics.performance.as_ref() {
+                    eprintln!("LLMBRIDGE_PERFORMANCE {}", performance.to_json());
+                }
                 if let Some(authentication) = metrics.authentication.as_ref() {
                     eprintln!("LLMBRIDGE_INTEGRITY verified=1 accounted_bytes={} blocks_verified={} sha256={}", authentication.accounted_bytes, authentication.blocks_verified, authentication.expected_sha256);
                 } else { eprintln!("LLMBRIDGE_INTEGRITY verified=0"); }
