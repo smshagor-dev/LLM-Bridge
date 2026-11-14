@@ -19,6 +19,13 @@ fn main() {
     if env::var_os("CARGO_FEATURE_NATIVE").is_none() {
         return;
     }
+    let architecture = env::var("CARGO_CFG_TARGET_ARCH").expect("Cargo target architecture");
+    let profile = if matches!(architecture.as_str(), "x86" | "x86_64") {
+        "x86-avx2"
+    } else {
+        "unvalidated"
+    };
+    println!("cargo:rustc-env=LLMBRIDGE_NATIVE_CPU_PROFILE={profile}");
     let native = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../native");
     println!("cargo:rerun-if-changed={}", native.join("src").display());
     println!(

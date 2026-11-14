@@ -283,6 +283,7 @@ mod native {
         if !(34..=1024 * 1024).contains(&chunk) {
             return Err("invalid plan chunk".into());
         }
+        crate::native_cpu::ensure_compatible()?;
         let index = GgufTensorIndex::inspect(model).map_err(|e| e.to_string())?;
         let mut reader =
             BoundedLocalReader::open(model, chunk, chunk * 2).map_err(|e| e.to_string())?;

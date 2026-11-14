@@ -103,6 +103,17 @@ jobs:
       - name: Measure authenticated cached session timing under the same cap
         run: python3 scripts/benchmark_streamed.py --binary ./target/release/llmbridge --model models/stories15M-q8_0.gguf --output benchmarks/results/streamed_performance_verified_cached.json --repetitions 3 --cache-mb 1 --address-space-mb 24 --sha256 2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6
 
+      - name: Install CPU emulator for unsupported-host admission checks
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-user
+
+      - name: Build native CPU compatibility contract
+        run: cargo build --release -p llmbridge-core --features native --example cpu_guard_contract
+
+      - name: Reject native calls on an emulated pre-AVX2 CPU
+        run: python3 scripts/check_native_cpu.py --binary ./target/release/llmbridge --contract ./target/release/examples/cpu_guard_contract --emulator /usr/bin/qemu-x86_64 --output benchmarks/results/native_cpu_guard.json
+
       - name: Save raw parity evidence
         if: always()
         uses: actions/upload-artifact@v4

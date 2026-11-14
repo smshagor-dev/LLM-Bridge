@@ -35,3 +35,7 @@ required-features = ["native"]
 [[example]]
 name = "streamed_plan_contract"
 required-features = ["native"]
+
+[[example]]
+name = "cpu_guard_contract"
+required-features = ["native"]

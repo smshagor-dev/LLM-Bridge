@@ -241,6 +241,7 @@ fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>
     {
         return Err("expected SHA-256 must be 64 hex digits".into());
     }
+    crate::native_cpu::ensure_compatible()?;
     let prompt = CString::new(prompt).map_err(|_| "NUL in prompt")?;
     let index = GgufTensorIndex::inspect(model).map_err(|e| e.to_string())?;
     let mut reader = BoundedLocalReader::open(model, config.chunk_bytes, config.chunk_bytes * 2)
