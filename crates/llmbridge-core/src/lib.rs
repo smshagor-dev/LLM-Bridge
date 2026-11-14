@@ -20,6 +20,7 @@ pub mod storage;
 pub mod tensor_batch;
 pub mod tensor_cache;
 pub mod tensor_layout;
+pub mod token_window;
 
 #[cfg(feature = "native")]
 pub mod streamed;
