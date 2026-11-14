@@ -16,7 +16,7 @@ fn main() {
     }
 }
 fn usage() -> &'static str {
-    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge plan <path.gguf> [--ctx 128] [--workspace-mb 8] [--max-ram-mb 64] [--auto-context] [--json]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--sha256 trusted-digest] [--verification-mb 8] [--address-space-mb 24] [--auto-context] [--max-ram-mb 64] [--logits path.f32]\n  Planning max-ram-mb is an incremental estimate budget; address-space-mb enforces a separate Linux process limit."
+    "Usage:\n  llmbridge doctor\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge plan <path.gguf> [--ctx 128] [--workspace-mb 8] [--max-ram-mb 64] [--auto-context] [--auto-cache] [--json]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--sha256 trusted-digest] [--verification-mb 8] [--address-space-mb 24] [--auto-context] [--auto-cache] [--max-ram-mb 64] [--logits path.f32]\n  Planning max-ram-mb is an incremental estimate budget; address-space-mb enforces a separate Linux process limit."
 }
 fn json_number(value: Option<u64>) -> String {
     value.map_or_else(|| "null".to_string(), |x| x.to_string())
@@ -192,11 +192,17 @@ fn plan(args: &[String]) -> Result<(), String> {
     let mut request = StreamedPlanRequest::default();
     let mut verification_mb = 8u64;
     let mut reserve_verification = false;
+    let mut cache_specified = false;
     let mut pos = 1;
     while pos < args.len() {
         match args[pos].as_str() {
             "--auto-context" => {
                 request.allow_context_reduction = true;
+                pos += 1;
+                continue;
+            }
+            "--auto-cache" => {
+                request.adapt_cache = true;
                 pos += 1;
                 continue;
             }
@@ -220,7 +226,10 @@ fn plan(args: &[String]) -> Result<(), String> {
         match args[pos].as_str() {
             "--ctx" => request.context_tokens = value.parse().map_err(|_| "invalid ctx")?,
             "--workspace-mb" => request.workspace_budget_bytes = mb(value)?,
-            "--cache-mb" => request.cache_budget_bytes = mb(value)?,
+            "--cache-mb" => {
+                request.cache_budget_bytes = mb(value)?;
+                cache_specified = true;
+            }
             "--max-ram-mb" => request.max_additional_bytes = Some(mb(value)?),
             "--os-reserve-mb" => request.os_reserve_bytes = mb(value)?,
             "--runtime-reserve-mb" => request.runtime_reserve_bytes = mb(value)?,
@@ -231,6 +240,9 @@ fn plan(args: &[String]) -> Result<(), String> {
             _ => return Err("unknown/unsupported plan option".into()),
         }
         pos += 2;
+    }
+    if request.adapt_cache && !cache_specified {
+        request.cache_budget_bytes = 1024 * 1024;
     }
     if reserve_verification {
         if !(1..=64).contains(&verification_mb) {
@@ -309,6 +321,8 @@ fn chat(args: &[String]) -> Result<(), String> {
     let mut cache_mb = 0usize;
     let mut verification_mb = 8usize;
     let mut auto_context = false;
+    let mut auto_cache = false;
+    let mut cache_specified = false;
     let mut max_admission_mb: Option<u64> = None;
     let mut expected_hash: Option<String> = None;
     let mut address_space_mb: Option<u64> = None;
@@ -317,6 +331,11 @@ fn chat(args: &[String]) -> Result<(), String> {
     while pos < args.len() {
         if args[pos] == "--auto-context" {
             auto_context = true;
+            pos += 1;
+            continue;
+        }
+        if args[pos] == "--auto-cache" {
+            auto_cache = true;
             pos += 1;
             continue;
         }
@@ -343,7 +362,10 @@ fn chat(args: &[String]) -> Result<(), String> {
             "--verification-mb" => {
                 verification_mb = value.parse().map_err(|_| "invalid verification-mb")?
             }
-            "--cache-mb" => cache_mb = value.parse().map_err(|_| "invalid cache-mb")?,
+            "--cache-mb" => {
+                cache_mb = value.parse().map_err(|_| "invalid cache-mb")?;
+                cache_specified = true;
+            }
             "--address-space-mb" => {
                 address_space_mb = Some(value.parse().map_err(|_| "invalid address-space-mb")?)
             }
@@ -358,6 +380,9 @@ fn chat(args: &[String]) -> Result<(), String> {
         }
         pos += 2;
     }
+    if auto_cache && !cache_specified {
+        cache_mb = 1;
+    }
     let prompt = prompt.ok_or("--prompt is required")?;
     if prompt.is_empty() {
         return Err("empty prompt".to_string());
@@ -371,8 +396,8 @@ fn chat(args: &[String]) -> Result<(), String> {
     if backend != "resident" && backend != "streamed" {
         return Err("backend must be resident or streamed".into());
     }
-    if backend != "streamed" && (auto_context || max_admission_mb.is_some()) {
-        return Err("auto-context/admission budgeting requires streamed backend".into());
+    if backend != "streamed" && (auto_context || auto_cache || max_admission_mb.is_some()) {
+        return Err("auto-context/auto-cache/admission budgeting requires streamed backend".into());
     }
     if verification_mb == 0
         || verification_mb > 64
@@ -389,6 +414,7 @@ fn chat(args: &[String]) -> Result<(), String> {
     if cache_mb > 32 || (backend == "resident" && cache_mb != 0) {
         return Err("cache-mb requires streamed backend and must be 0..32".into());
     }
+    let mut cache_bytes = cache_mb * 1024 * 1024;
     if backend == "resident" && logits_path.is_some() {
         return Err("--logits requires streamed backend".into());
     }
@@ -415,7 +441,7 @@ fn chat(args: &[String]) -> Result<(), String> {
                 .checked_mul(1024 * 1024)
                 .and_then(|n| {
                     n.checked_add(
-                        (32 + cache_mb as u64
+                        (32 + if auto_cache { 0 } else { cache_mb as u64 }
                             + if expected_hash.is_some() {
                                 verification_mb as u64
                             } else {
@@ -440,7 +466,7 @@ fn chat(args: &[String]) -> Result<(), String> {
     let stop = Arc::clone(&cancelled);
     ctrlc::set_handler(move || stop.store(true, Ordering::SeqCst))
         .map_err(|e| format!("unable to install cancellation handler: {e}"))?;
-    if backend == "streamed" && (auto_context || max_admission_mb.is_some()) {
+    if backend == "streamed" && (auto_context || auto_cache || max_admission_mb.is_some()) {
         use llmbridge_core::streamed_plan::{
             inspect_streamed_shape, inspect_streamed_shape_verified, plan_streamed_shape,
             StreamedPlanRequest,
@@ -487,11 +513,14 @@ fn chat(args: &[String]) -> Result<(), String> {
                 0
             },
             allow_context_reduction: auto_context,
+            adapt_cache: auto_cache,
             ..Default::default()
         };
         let plan = plan_streamed_shape(shape, &hardware::profile(), request)?;
         eprintln!("LLMBRIDGE_PLAN {}", plan.to_json(&shape, &request));
         ctx = plan.selected_context;
+        cache_bytes =
+            usize::try_from(plan.cache_budget_bytes).map_err(|_| "cache budget overflow")?;
     }
     let stdout = io::stdout();
     let mut handle = stdout.lock();
@@ -504,7 +533,7 @@ fn chat(args: &[String]) -> Result<(), String> {
             context_tokens: ctx,
             max_tokens,
             collect_performance: show_metrics,
-            cache_bytes: cache_mb * 1024 * 1024,
+            cache_bytes,
             authentication_budget_bytes: verification_mb * 1024 * 1024,
             workspace_bytes: workspace_mb
                 .checked_mul(1024 * 1024)

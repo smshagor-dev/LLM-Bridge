@@ -45,6 +45,13 @@ Local checks: Python regression suite; workspace non-native tests; release nativ
 - A real child-process benchmark compares complete instrumented/uninstrumented output hashes, validates counters and optionally gates every trial against requested decode/readiness targets. Reports retain all failures and no raw prompt/response text. CI measures uncached and authenticated cached runs under the existing 24 MiB Linux address-space cap.
 - Filesystem page caches are uncontrolled. These measurements are not physical storage bandwidth, isolated CPU compute, a cold-start test or a universal speed guarantee. Full adaptive scheduling remains incomplete. See `docs/STREAMED_PERFORMANCE.md`.
 
+## M3 — adaptive cache admission checkpoint
+
+- Optional `--auto-cache` allocates complete cache slots only after admitting context/workspace and all required reserves. The CLI defaults to a 1 MiB ceiling; explicit zero disables it. Low cache headroom selects zero without reducing context.
+- Planner and cache construction share exact allocation geometry; selected byte budgets are used by execution and reported separately from requested ceilings. Manual caches remain mandatory reservations. Required integrity buffers are not sacrificed.
+- Pure budget-boundary tests plus real-model zero/minimum/larger cache boundary executions validate context preservation, exact allocations and unchanged output. The CLI protocol includes authenticated adaptive cache and resident-backend refusal.
+- This is deterministic admission, not runtime cache resizing or a measured speed optimizer. Full prefetch/thread/compute scheduling remains incomplete.
+
 ## M3–M11
 
 M3 now has native-derived CLI/context admission, not a complete adaptive scheduler. M4 remote providers, M5 MoE, M6 GPU, M7 API/SDK, M8 desktop, M9 full robustness/benchmarks, M10 format/plugin extensibility and M11 large-model feasibility remain incomplete. No 70B/550B or real 2GB-machine result is claimed.

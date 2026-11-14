@@ -49,6 +49,25 @@ def main():
     assert 'SHA-256 mismatch' in cases['bad_hash_adaptive_generation']['stderr']
     cases['infeasible_adaptive_generation']=run(*base,'--workspace-mb','1','--auto-context')
     assert cases['infeasible_adaptive_generation']['exit_code']!=0 and not cases['infeasible_adaptive_generation']['stdout'].strip()
+    cases['auto_cache_plan']=run('plan',model,'--auto-cache','--max-ram-mb','64','--json')
+    cache_plan=json.loads(cases['auto_cache_plan']['stdout'])
+    assert cases['auto_cache_plan']['exit_code']==0 and cache_plan['cache_adaptive']
+    assert cache_plan['selected_context']==128 and 0 < cache_plan['cache_budget_bytes'] <= 1024*1024
+    cases['auto_cache_zero']=run('plan',model,'--auto-cache','--cache-mb','0','--json')
+    assert json.loads(cases['auto_cache_zero']['stdout'])['cache_budget_bytes']==0
+    cases['auto_cache_generation']=run(*base,'--ctx','128','--auto-cache','--max-ram-mb','64','--metrics')
+    measured=cases['auto_cache_generation']
+    assert measured['exit_code']==0 and measured['stdout']==cases['manual_generation']['stdout']
+    applied_cache=json.loads(next(x.removeprefix('LLMBRIDGE_PLAN ') for x in measured['stderr'].splitlines() if x.startswith('LLMBRIDGE_PLAN ')))
+    assert f"cache_allocated_bytes={applied_cache['cache_budget_bytes']} " in measured['stderr']
+    cases['verified_auto_cache_generation']=run(*base,'--auto-cache','--max-ram-mb','64','--sha256',digest,'--metrics')
+    assert cases['verified_auto_cache_generation']['exit_code']==0
+    assert cases['verified_auto_cache_generation']['stdout']==cases['manual_generation']['stdout']
+    assert 'LLMBRIDGE_INTEGRITY verified=1' in cases['verified_auto_cache_generation']['stderr']
+    cases['auto_cache_cannot_reduce_context']=run('plan',model,'--ctx','256','--auto-cache')
+    assert cases['auto_cache_cannot_reduce_context']['exit_code']!=0
+    cases['auto_cache_resident_refusal']=run('chat',model,'--prompt','The sky is','--auto-cache')
+    assert cases['auto_cache_resident_refusal']['exit_code']!=0 and not cases['auto_cache_resident_refusal']['stdout'].strip()
     report={'pass':True,'model_sha256':digest,'binary_sha256':hashlib.sha256(args.binary.read_bytes()).hexdigest(),
             'git_sha':subprocess.run(['git','rev-parse','HEAD'],capture_output=True,text=True,check=True).stdout.strip(),
             'working_tree_dirty':bool(subprocess.run(['git','status','--porcelain'],capture_output=True,text=True,check=True).stdout.strip()),

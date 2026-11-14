@@ -46,21 +46,29 @@ fn allocate<T: Default + Clone>(count: usize) -> io::Result<Vec<T>> {
     values.resize(count, T::default());
     Ok(values)
 }
+/// Exact cache-owned allocation, shared by planning and execution. A nonzero
+/// manual budget must hold staging plus one block; adaptive callers may use zero.
+pub fn cache_allocated_bytes(chunk: usize, budget: usize) -> io::Result<usize> {
+    if budget > 32 * 1024 * 1024 || chunk == 0 || chunk > 1024 * 1024 {
+        return Err(invalid("invalid cache chunk/budget"));
+    }
+    let count = (budget.saturating_sub(chunk) / (chunk + std::mem::size_of::<Slot>())).min(512);
+    if budget != 0 && count == 0 {
+        return Err(invalid("cache budget cannot hold staging and one block"));
+    }
+    Ok(if count == 0 {
+        0
+    } else {
+        chunk + count * (chunk + std::mem::size_of::<Slot>())
+    })
+}
 impl CachedLocalReader {
     pub fn new(source: BoundedLocalReader, cache_budget: usize) -> io::Result<Self> {
-        if cache_budget > 32 * 1024 * 1024 {
-            return Err(invalid("cache budget exceeds 32 MiB policy"));
-        }
         let chunk = source.allocated_chunk_bytes();
-        let count = cache_budget.saturating_sub(chunk) / (chunk + std::mem::size_of::<Slot>());
-        if cache_budget != 0 && count == 0 {
-            return Err(invalid("cache budget cannot hold staging and one block"));
-        }
-        // Bound lookup work/metadata even with tiny chunks from a library caller.
-        let count = count.min(512);
+        let allocated_bytes = cache_allocated_bytes(chunk, cache_budget)?;
+        let count = allocated_bytes.saturating_sub(chunk) / (chunk + std::mem::size_of::<Slot>());
         let payload_bytes = count * chunk;
         let staging_bytes = if count == 0 { 0 } else { chunk };
-        let allocated_bytes = payload_bytes + staging_bytes + count * std::mem::size_of::<Slot>();
         Ok(Self {
             source,
             payload: allocate(payload_bytes)?,
