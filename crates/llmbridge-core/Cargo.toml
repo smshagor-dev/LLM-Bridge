@@ -14,6 +14,10 @@ sha2 = "=0.10.9"
 cmake = "0.1.54"
 
 [[example]]
+name = "queued_streamed_contract"
+required-features = ["native"]
+
+[[example]]
 name = "model_contract"
 required-features = ["native"]
 

@@ -5,6 +5,7 @@ pub mod hardware;
 pub mod inference;
 pub mod models;
 
+pub mod admission_queue;
 pub mod f32_chain;
 pub mod f32_residual;
 pub mod f32_stream;
@@ -20,6 +21,9 @@ pub mod storage;
 pub mod tensor_batch;
 pub mod tensor_cache;
 pub mod tensor_layout;
+
+#[cfg(feature = "native")]
+pub mod queued_streamed;
 
 #[cfg(feature = "native")]
 pub mod streamed;
