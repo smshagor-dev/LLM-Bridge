@@ -39,3 +39,4 @@ pub mod native_cpu;
 
 #[cfg(target_os = "linux")]
 mod cgroup_memory;
+pub mod worker_plan;
