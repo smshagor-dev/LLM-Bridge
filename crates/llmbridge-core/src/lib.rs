@@ -5,12 +5,12 @@ pub mod hardware;
 pub mod inference;
 pub mod models;
 
+pub mod admission_queue;
 pub mod f32_chain;
 pub mod f32_residual;
 pub mod f32_stream;
 pub mod f32_swiglu;
 pub mod memory_budget;
-pub mod admission_queue;
 pub mod memory_plan;
 #[cfg(feature = "native")]
 pub mod q8_batch;

@@ -63,7 +63,10 @@ impl AdmissionQueue {
         if state.pending.len() >= self.max_pending {
             return Err(AdmissionError::QueueFull);
         }
-        let next = state.next.checked_add(1).ok_or(AdmissionError::TicketExhausted)?;
+        let next = state
+            .next
+            .checked_add(1)
+            .ok_or(AdmissionError::TicketExhausted)?;
         state.next = next;
         let ticket = Ticket(next);
         state.pending.push_back(Pending { ticket, bytes });
@@ -104,7 +107,11 @@ impl AdmissionQueue {
     }
 
     pub fn pending(&self) -> usize {
-        self.state.lock().unwrap_or_else(|e| e.into_inner()).pending.len()
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .pending
+            .len()
     }
 }
 
@@ -138,7 +145,10 @@ mod tests {
         let tail = queue.enqueue(20).unwrap();
         assert!(queue.cancel(head));
         assert!(!queue.cancel(head));
-        assert_eq!(queue.try_admit(head).unwrap_err(), AdmissionError::UnknownTicket);
+        assert_eq!(
+            queue.try_admit(head).unwrap_err(),
+            AdmissionError::UnknownTicket
+        );
         let reservation = queue.try_admit(tail).unwrap().unwrap();
         assert_eq!(queue.pending(), 0);
         assert!(!queue.cancel(tail));
@@ -149,10 +159,19 @@ mod tests {
     #[test]
     fn rejects_invalid_and_unserviceable_requests() {
         let budget = MemoryBudget::new(10).unwrap();
-        assert_eq!(AdmissionQueue::new(Arc::clone(&budget), 0).unwrap_err(), AdmissionError::InvalidRequest);
+        assert_eq!(
+            AdmissionQueue::new(Arc::clone(&budget), 0).unwrap_err(),
+            AdmissionError::InvalidRequest
+        );
         let queue = AdmissionQueue::new(budget, 1).unwrap();
-        assert_eq!(queue.enqueue(0).unwrap_err(), AdmissionError::InvalidRequest);
-        assert_eq!(queue.enqueue(11).unwrap_err(), AdmissionError::InsufficientCapacity);
+        assert_eq!(
+            queue.enqueue(0).unwrap_err(),
+            AdmissionError::InvalidRequest
+        );
+        assert_eq!(
+            queue.enqueue(11).unwrap_err(),
+            AdmissionError::InsufficientCapacity
+        );
         let ticket = queue.enqueue(10).unwrap();
         assert_eq!(queue.enqueue(1).unwrap_err(), AdmissionError::QueueFull);
         assert!(queue.cancel(ticket));
@@ -175,7 +194,10 @@ mod tests {
             }));
         }
         gate.wait();
-        let admitted: Vec<_> = workers.into_iter().filter_map(|w| w.join().unwrap()).collect();
+        let admitted: Vec<_> = workers
+            .into_iter()
+            .filter_map(|w| w.join().unwrap())
+            .collect();
         assert_eq!(admitted.len(), 1);
         assert_eq!(budget.reserved(), 10);
         drop(admitted);
