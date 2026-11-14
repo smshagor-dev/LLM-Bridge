@@ -15,11 +15,31 @@ from pathlib import Path
 from check_m1_parity import compare
 
 
+CHECKPOINTS = {
+    'stories15M-q8_0': '2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6',
+    'stories15M-derived-q4_0': 'b5cd77bb0d1a785a82d7a8a2bcb4170dfe6e43e881b9cbb0d1c8184a6dd99839',
+}
+
+
+def validate_checkpoint(name, digest):
+    if name not in CHECKPOINTS or digest != CHECKPOINTS[name]:
+        raise ValueError('golden protocol requires the exact explicitly selected pinned checkpoint')
+
+
+def validate_proof_cap(megabytes, file_bytes, system):
+    if megabytes < 0:
+        raise ValueError('address-space limit must be nonnegative')
+    if megabytes and (system != 'linux' or file_bytes <= megabytes * 1024 * 1024):
+        raise ValueError('constrained proof requires Linux and a model larger than the address-space cap')
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--binary', type=Path, required=True)
     p.add_argument('--reference', type=Path, required=True)
     p.add_argument('--model', type=Path, required=True)
+    p.add_argument('--checkpoint', choices=CHECKPOINTS, default='stories15M-q8_0')
+    p.add_argument('--reference-no-repack', action='store_true', help='Explicitly disable reference extra weight buffer/repacking kernels')
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--verify', action='store_true')
     p.add_argument('--cache-mb', type=int, default=0)
@@ -28,13 +48,16 @@ def main():
     if sys.byteorder != 'little':
         p.error('reference raw float dump currently requires little endian')
     digest = hashlib.sha256(args.model.read_bytes()).hexdigest()
-    if digest != '2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6':
-        p.error('this golden protocol requires the pinned stories15M Q8_0 checkpoint')
+    try:
+        validate_checkpoint(args.checkpoint, digest)
+        validate_proof_cap(args.max_address_space_mb, args.model.stat().st_size, sys.platform)
+    except ValueError as error:
+        p.error(str(error))
     limit_bytes = args.max_address_space_mb * 1024 * 1024
-    if args.max_address_space_mb < 0:
-        p.error('address-space limit must be nonnegative')
-    if limit_bytes and (sys.platform != 'linux' or args.model.stat().st_size <= limit_bytes):
-        p.error('constrained proof requires Linux and a model larger than the address-space cap')
+    reference_env = {**os.environ, 'LLMBRIDGE_REFERENCE_F32_KV': '1'}
+    reference_env.pop('LLMBRIDGE_REFERENCE_NO_REPACK', None)
+    if args.reference_no_repack:
+        reference_env['LLMBRIDGE_REFERENCE_NO_REPACK'] = '1'
     def apply_limit():
         import resource
         resource.setrlimit(resource.RLIMIT_AS, (limit_bytes, limit_bytes))
@@ -57,7 +80,7 @@ def main():
         wall_seconds = time.monotonic() - started
         expected = subprocess.run([str(args.reference.resolve()), '-m', str(args.model.resolve()),
                                    '-n', '8', '-ngl', '0', prompt], capture_output=True, timeout=240,
-                                  env={**os.environ, 'LLMBRIDGE_REFERENCE_LOGITS': str(reference_logits.resolve()), 'LLMBRIDGE_REFERENCE_F32_KV': '1'})
+                                  env={**reference_env, 'LLMBRIDGE_REFERENCE_LOGITS': str(reference_logits.resolve())})
         result = {'prompt': prompt, 'streamed_exit': actual.returncode, 'reference_exit': expected.returncode,
                   'streamed_text': actual.stdout.decode(errors='replace'),
                   'reference_text': expected.stdout.decode(errors='replace'),
@@ -86,9 +109,12 @@ def main():
         result['logits_rmse'] = math.sqrt(sum(e*e for e in errors)/len(errors)) if errors else None
         result['logits_match'] = bool(a) and len(a) == len(b) and all(
             math.isfinite(x) and math.isfinite(y) and abs(x-y) <= 0.01 + 0.001*abs(y) for x,y in zip(a,b))
-        result['pass'] = result['tokens_match'] and result['logits_match'] and result['memory_cap_pass'] and result['integrity_pass']
+        result['reference_repacking_observed'] = 'repack tensor ' in result['reference_stderr']
+        result['reference_configuration_pass'] = not args.reference_no_repack or not result['reference_repacking_observed']
+        result['pass'] = result['reference_configuration_pass'] and result['tokens_match'] and result['logits_match'] and result['memory_cap_pass'] and result['integrity_pass']
         trials.append(result)
-    report = {'pass': all(t['pass'] for t in trials), 'model_sha256': digest, 'model_file_bytes': args.model.stat().st_size,
+    report = {'pass': all(t['pass'] for t in trials), 'checkpoint': args.checkpoint,
+              'reference_weight_repacking': 'explicitly_disabled' if args.reference_no_repack else 'upstream_default', 'model_sha256': digest, 'model_file_bytes': args.model.stat().st_size,
               'binary_sha256': binary_digest, 'reference_binary_sha256': reference_digest,
               'reference_revision': 'cd959bae99ff4bed22bef2604f45241c09bbb8c8',
               'working_tree_dirty': bool(subprocess.run(['git', 'status', '--porcelain'], capture_output=True, text=True, check=True).stdout.strip()),
@@ -99,7 +125,7 @@ def main():
               'git_sha': subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True, check=True).stdout.strip(),
               'kv_precision': 'FP32 on both paths; reference flash attention disabled',
               'logit_tolerance': {'atol': 0.01, 'rtol': 0.001},
-              'note': 'Experimental streamed Q8_0 path with pinned ggml dot kernels versus upstream graph; observed matching logits are checkpoint-specific. RLIMIT_AS is a Linux process address-space cap, not a portable RSS API.',
+              'note': 'Checkpoint-specific experimental streamed path with pinned ggml dot kernels versus upstream graph; observed matching logits are checkpoint-specific. RLIMIT_AS is a Linux process address-space cap, not a portable RSS API.',
               'trials': trials}
     (args.output / 'streamed_parity.json').write_text(json.dumps(report, indent=2))
     print(json.dumps({k:v for k,v in report.items() if k != 'trials'}))

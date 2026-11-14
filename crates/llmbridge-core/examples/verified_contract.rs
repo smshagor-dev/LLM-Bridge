@@ -5,10 +5,22 @@ fn main() {
     use std::io::{Read, Seek, SeekFrom, Write};
     use std::path::{Path, PathBuf};
     use std::sync::atomic::AtomicBool;
-    const SHA: &str = "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6";
+    const DEFAULT_SHA: &str = "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6";
     let model_arg = std::env::args()
         .nth(1)
-        .expect("usage: verified_contract <pinned-stories15M-q8_0.gguf>");
+        .expect("usage: verified_contract <pinned.gguf> [trusted-sha256]");
+    let expected = std::env::args()
+        .nth(2)
+        .unwrap_or_else(|| DEFAULT_SHA.into());
+    assert!(
+        matches!(
+            expected.as_str(),
+            "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+                | "b5cd77bb0d1a785a82d7a8a2bcb4170dfe6e43e881b9cbb0d1c8184a6dd99839"
+        ),
+        "contract requires a pinned checkpoint digest"
+    );
+    let sha = expected.as_str();
     let model = Path::new(&model_arg);
     let config = StreamedConfig {
         max_tokens: 2,
@@ -33,7 +45,7 @@ fn main() {
         "The sky is",
         tiny,
         &AtomicBool::new(false),
-        SHA,
+        sha,
         |_| panic!("token before integrity admission"),
         |_| true
     )
@@ -45,7 +57,7 @@ fn main() {
         "The sky is",
         config,
         &AtomicBool::new(false),
-        SHA,
+        sha,
         |_| {
             pieces += 1;
             false
@@ -81,7 +93,7 @@ fn main() {
         "The sky is",
         config,
         &AtomicBool::new(false),
-        SHA,
+        sha,
         |_| true,
         |_| {
             if first {

@@ -14,6 +14,11 @@
 #include <string>
 #include <vector>
 
+// Pinned ggml CPU primitive; keep this signature tied to the locked revision.
+extern "C" void ggml_vec_dot_f32(int n, float *out, size_t bs, const float *x, size_t bx, const float *y, size_t by, int nrc);
+extern "C" double ggml_vec_soft_max_f32(int n, float *out, const float *x, float maximum);
+extern "C" void ggml_vec_swiglu_f32(int n, float *y, const float *x, const float *gate);
+
 namespace {
 struct Cancelled {};
 void require(bool condition, const char *message) {
@@ -54,7 +59,7 @@ struct Decoder {
     Tensor embedding, final_norm, output;
     std::vector<Layer> blocks;
     std::vector<uint8_t> packed;
-    std::vector<float> row, quantized, x, norm, q, k, v, att, projected, gate, up, logits, keys, values, scores;
+    std::vector<float> row, quantized, x, norm, q, k, v, att, projected, gate, up, logits, keys, values, scores, attention_values;
 
     void alive() { if (poll(userdata) == 0) throw Cancelled{}; }
     Tensor tensor(const std::string &name, size_t columns, size_t rows) {
@@ -62,11 +67,12 @@ struct Decoder {
         require(id >= 0, "required streamed tensor missing");
         auto ne = gguf_get_tensor_ne(g, id);
         auto type = gguf_get_tensor_type(g, id);
-        require((type == GGML_TYPE_F32 || type == GGML_TYPE_Q8_0) &&
+        require((type == GGML_TYPE_F32 || type == GGML_TYPE_Q8_0 || type == GGML_TYPE_Q4_0) &&
                 ne[0] == static_cast<int64_t>(columns) && ne[1] == static_cast<int64_t>(rows) &&
                 ne[2] == 1 && ne[3] == 1, "unsupported streamed tensor type/shape");
-        require(type != GGML_TYPE_Q8_0 || columns % 32 == 0, "invalid Q8_0 block geometry");
-        size_t rb = type == GGML_TYPE_F32 ? checked_mul(columns, 4) : checked_mul(columns / 32, 34);
+        require(type == GGML_TYPE_F32 || columns % 32 == 0, "invalid streamed quantized block geometry");
+        // Keep packed row bytes consistent with the pinned ggml dot/type traits.
+        size_t rb = static_cast<size_t>(ggml_row_size(type, columns));
         uint64_t base = gguf_get_data_offset(g), relative = gguf_get_tensor_offset(g, id);
         require(relative <= UINT64_MAX - base, "tensor offset overflow");
         uint64_t offset = base + relative;
@@ -106,7 +112,7 @@ struct Decoder {
         // Fixed workspace: O(layers * context * KV width), no weight-matrix allocation.
         auto kvcount = checked_mul(checked_mul(layers, context), kvdim);
         auto floats = checked_mul(kvcount, 2) + checked_mul(dim, 7) + checked_mul(kvdim, 2) +
-                      checked_mul(hidden, 2) + vocab + context + 2 * std::max(dim, hidden);
+                      checked_mul(hidden, 2) + vocab + 2 * (context + 255) + 2 * std::max(dim, hidden);
         auto bytes = checked_mul(floats, sizeof(float));
         kv_bytes = checked_mul(kvcount, 2 * sizeof(float));
         workspace_required = bytes + chunk + checked_mul(layers, sizeof(Layer));
@@ -132,7 +138,7 @@ struct Decoder {
         packed.resize(chunk); row.resize(std::max(dim, hidden)); quantized.resize(std::max(dim, hidden));
         x.resize(dim); norm.resize(dim); q.resize(dim); k.resize(kvdim); v.resize(kvdim);
         att.resize(dim); projected.resize(dim); gate.resize(hidden); up.resize(hidden);
-        logits.resize(vocab); keys.resize(kvcount); values.resize(kvcount); scores.resize(context);
+        logits.resize(vocab); keys.resize(kvcount); values.resize(kvcount); scores.resize(context + 255); attention_values.resize(context + 255);
     }
     void read_row(const Tensor &t, size_t index, float *destination) {
         alive();
@@ -172,18 +178,24 @@ struct Decoder {
 
     void rms(const Tensor &weight) {
         read_row(weight, 0, row.data());
+        // Upstream rounds each square to FP32 before double accumulation.
         double sum = 0;
-        for (auto z : x) { require(std::isfinite(z), "nonfinite RMS input"); sum += static_cast<double>(z) * z; }
+        for (auto z : x) { require(std::isfinite(z), "nonfinite RMS input"); sum += static_cast<double>(z * z); }
         float scale = 1.f / std::sqrt(static_cast<float>(sum / dim) + epsilon);
         for (size_t i = 0; i < dim; ++i) { norm[i] = x[i] * scale * row[i]; require(std::isfinite(norm[i]), "RMS overflow"); }
     }
     void rope(std::vector<float> &vector, size_t count, size_t pos) {
-        for (size_t h = 0; h < count; ++h) for (size_t i = 0; i < head_dim; i += 2) {
-            float angle = static_cast<float>(pos) / std::pow(rope_base, static_cast<float>(i) / head_dim);
-            float c = std::cos(angle), s = std::sin(angle);
-            size_t a = h * head_dim + i;
-            float first = vector[a], second = vector[a+1];
-            vector[a] = first*c - second*s; vector[a+1] = first*s + second*c;
+        // Match the pinned normal-RoPE incremental FP32 angle sequence.
+        const float theta_scale = std::pow(rope_base, -2.0f / head_dim);
+        for (size_t h = 0; h < count; ++h) {
+            float angle = static_cast<float>(pos);
+            for (size_t i = 0; i < head_dim; i += 2) {
+                float c = std::cos(angle), s = std::sin(angle);
+                size_t a = h * head_dim + i;
+                float first = vector[a], second = vector[a+1];
+                vector[a] = first*c - second*s; vector[a+1] = first*s + second*c;
+                angle *= theta_scale;
+            }
         }
     }
     void forward(llama_token token, size_t pos, bool need_logits) {
@@ -195,34 +207,37 @@ struct Decoder {
             rope(q, heads, pos); rope(k, kvheads, pos);
             auto base = (l * context + pos) * kvdim;
             std::copy(k.begin(), k.end(), keys.begin() + base);
-            std::copy(v.begin(), v.end(), values.begin() + base);
+            for (size_t i = 0; i < kvdim; ++i) values[(l * kvdim + i) * context + pos] = v[i];
+            // Match the pinned non-flash graph's padded FP32 attention operations.
+            const size_t n_att = ((pos + 1 + 255) / 256) * 256;
+            const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
             for (size_t h = 0; h < heads; ++h) {
                 auto kh = h / (heads / kvheads);
                 float maximum = -std::numeric_limits<float>::infinity();
                 for (size_t t = 0; t <= pos; ++t) {
-                    double sum = 0;
                     auto ki = (l * context + t) * kvdim + kh * head_dim;
-                    for (size_t i = 0; i < head_dim; ++i) sum += static_cast<double>(q[h*head_dim+i]) * keys[ki+i];
-                    scores[t] = static_cast<float>(sum / std::sqrt(static_cast<double>(head_dim)));
+                    float dot = 0;
+                    ggml_vec_dot_f32(static_cast<int>(head_dim), &dot, 0, q.data() + h * head_dim, 0, keys.data() + ki, 0, 1);
+                    scores[t] = dot * scale;
                     require(std::isfinite(scores[t]), "attention score overflow");
                     maximum = std::max(maximum, scores[t]);
                 }
-                double denominator = 0;
-                for (size_t t = 0; t <= pos; ++t) { scores[t] = std::exp(scores[t] - maximum); denominator += scores[t]; }
+                std::fill(scores.begin() + pos + 1, scores.begin() + n_att, -std::numeric_limits<float>::infinity());
+                double denominator = ggml_vec_soft_max_f32(static_cast<int>(n_att), scores.data(), scores.data(), maximum);
                 require(std::isfinite(denominator) && denominator > 0, "streamed attention softmax overflow");
+                float inverse = static_cast<float>(1.0 / denominator);
+                for (size_t t = 0; t < n_att; ++t) scores[t] *= inverse;
                 for (size_t i = 0; i < head_dim; ++i) {
-                    double sum = 0;
-                    for (size_t t = 0; t <= pos; ++t) {
-                        auto vi = (l * context + t) * kvdim + kh * head_dim + i;
-                        sum += (scores[t] / denominator) * values[vi];
-                    }
-                    att[h*head_dim+i] = static_cast<float>(sum);
+                    auto vi = (l * kvdim + kh * head_dim + i) * context;
+                    std::copy(values.begin() + vi, values.begin() + vi + pos + 1, attention_values.begin());
+                    std::fill(attention_values.begin() + pos + 1, attention_values.begin() + n_att, 0.0f);
+                    ggml_vec_dot_f32(static_cast<int>(n_att), &att[h*head_dim+i], 0, attention_values.data(), 0, scores.data(), 0, 1);
                 }
             }
             matvec(b.o, att, projected);
             for (size_t i = 0; i < dim; ++i) x[i] += projected[i];
             rms(b.fn); matvec(b.gate, norm, gate); matvec(b.up, norm, up);
-            for (size_t i = 0; i < hidden; ++i) gate[i] = (gate[i] / (1.f + std::exp(-gate[i]))) * up[i];
+            ggml_vec_swiglu_f32(static_cast<int>(hidden), gate.data(), gate.data(), up.data());
             matvec(b.down, gate, projected);
             for (size_t i = 0; i < dim; ++i) { x[i] += projected[i]; require(std::isfinite(x[i]), "streamed residual overflow"); }
         }
@@ -320,7 +335,7 @@ extern "C" int32_t llmbridge_inspect_streamed_plan_v1(
             require(size <= UINT64_MAX - payload, "planned tensor payload overflow"); payload += size;
         }
         uint64_t kv_per_token = d.kv_bytes / 64;
-        uint64_t workspace_per_token = kv_per_token + sizeof(float);
+        uint64_t workspace_per_token = kv_per_token + 2 * sizeof(float);
         *out = {d.workspace_required - 64*workspace_per_token, workspace_per_token, kv_per_token,
             file_bytes, payload, gguf_get_data_offset(g), number(g, "llama.context_length"),
             d.dim, d.heads, d.kvheads, d.layers, d.hidden, vocab, chunk};

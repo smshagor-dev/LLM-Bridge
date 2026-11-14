@@ -81,7 +81,7 @@ pub fn plan_streamed_shape(
         || request.verification_budget_bytes > 64 * 1024 * 1024
         || request.max_additional_bytes == Some(0)
         || shape.kv_bytes_per_token == 0
-        || shape.kv_bytes_per_token.checked_add(4) != Some(shape.workspace_per_token_bytes)
+        || shape.kv_bytes_per_token.checked_add(8) != Some(shape.workspace_per_token_bytes)
         || shape.training_context < 64
         || shape.chunk_bytes == 0
         || shape.metadata_prefix_bytes > shape.file_bytes
@@ -396,7 +396,7 @@ mod tests {
         StreamedShape {
             workspace_fixed_bytes: 100,
             workspace_per_token_bytes: 10,
-            kv_bytes_per_token: 6,
+            kv_bytes_per_token: 2,
             training_context: 512,
             file_bytes: 10000,
             metadata_prefix_bytes: 16,
@@ -429,7 +429,7 @@ mod tests {
         let p = plan_streamed_shape(shape(), &hw(Some(5000)), r).unwrap();
         assert_eq!(p.selected_context, 96);
         assert_eq!(p.native_workspace_bytes, 1060);
-        assert_eq!(p.kv_bytes, 576);
+        assert_eq!(p.kv_bytes, 192);
         assert!(shape().workspace_for_context(97).unwrap() > r.workspace_budget_bytes);
     }
     #[test]

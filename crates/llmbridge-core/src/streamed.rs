@@ -1,4 +1,4 @@
-//! Experimental complete Llama F32/Q8_0 decoder backed by bounded local reads.
+//! Experimental complete Llama F32/Q8_0/Q4_0 decoder backed by bounded local reads.
 //! The explicit workspace budget is not an enforced process RSS limit.
 use crate::{
     gguf_index::GgufTensorIndex,

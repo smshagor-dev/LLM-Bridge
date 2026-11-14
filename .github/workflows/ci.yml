@@ -35,6 +35,7 @@ jobs:
       - name: Build pinned independent upstream reference example
         run: |
           git clone --depth 1 --branch v0.9.0 https://github.com/ggml-org/llama.cpp.git reference
+          test "$(git -C reference rev-parse HEAD)" = cd959bae99ff4bed22bef2604f45241c09bbb8c8
           python3 scripts/prepare_reference_logits.py reference/examples/simple/simple.cpp
           cmake -S reference -B reference-build -DGGML_OPENMP=OFF -DGGML_NATIVE=OFF -DGGML_SSE42=ON -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_BMI2=ON -DLLAMA_BUILD_EXAMPLES=ON -DLLAMA_BUILD_SERVER=OFF -DLLAMA_BUILD_TESTS=OFF
           cmake --build reference-build --target llama-simple --parallel 2
@@ -113,6 +114,28 @@ jobs:
 
       - name: Reject native calls on an emulated pre-AVX2 CPU
         run: python3 scripts/check_native_cpu.py --binary ./target/release/llmbridge --contract ./target/release/examples/cpu_guard_contract --emulator /usr/bin/qemu-x86_64 --output benchmarks/results/native_cpu_guard.json
+
+      - name: Derive pinned pure Q4 checkpoints with the independent quantizer
+        run: |
+          cmake --build reference-build --target llama-quantize --parallel 2
+          ./reference-build/bin/llama-quantize --allow-requantize --pure models/stories15M-q8_0.gguf models/stories15M-derived-q4_0.gguf Q4_0 1
+          echo "b5cd77bb0d1a785a82d7a8a2bcb4170dfe6e43e881b9cbb0d1c8184a6dd99839  models/stories15M-derived-q4_0.gguf" | sha256sum --check -
+          ./reference-build/bin/llama-quantize --allow-requantize --pure models/stories15M-q8_0.gguf models/stories15M-derived-q4_1.gguf Q4_1 1
+
+      - name: Compare Q4_0 output and logits against explicit unpacked reference kernels
+        run: python3 scripts/check_streamed_parity.py --binary ./target/release/llmbridge --reference ./reference-build/bin/llama-simple --model models/stories15M-derived-q4_0.gguf --checkpoint stories15M-derived-q4_0 --reference-no-repack --verify --output benchmarks/results/q4-uncached
+
+      - name: Compare authenticated cached Q4_0 against the same reference
+        run: python3 scripts/check_streamed_parity.py --binary ./target/release/llmbridge --reference ./reference-build/bin/llama-simple --model models/stories15M-derived-q4_0.gguf --checkpoint stories15M-derived-q4_0 --reference-no-repack --verify --cache-mb 1 --output benchmarks/results/q4-cached
+
+      - name: Require cache-transparent Q4_0 logits and measured range-read reduction
+        run: python3 scripts/compare_cache_results.py --uncached benchmarks/results/q4-uncached/streamed_parity.json --cached benchmarks/results/q4-cached/streamed_parity.json --output benchmarks/results/q4-cache-comparison.json
+
+      - name: Reject unsupported Q4_1 and validate real Q4_0 tensor inventory
+        run: python3 scripts/check_q4_contract.py --binary ./target/release/llmbridge --model models/stories15M-derived-q4_0.gguf --unsupported-model models/stories15M-derived-q4_1.gguf --output benchmarks/results/q4-contract.json
+
+      - name: Reject same-identity Q4_0 mutation after authenticated admission
+        run: cargo run --release -p llmbridge-core --features native --example verified_contract -- models/stories15M-derived-q4_0.gguf b5cd77bb0d1a785a82d7a8a2bcb4170dfe6e43e881b9cbb0d1c8184a6dd99839
 
       - name: Save raw parity evidence
         if: always()

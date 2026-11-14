@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Instrument pinned upstream example to dump raw logits; no inference changes."""
+"""Add logits export and explicit numerical configuration to a pinned example."""
 import argparse
 from pathlib import Path
 
@@ -25,6 +25,13 @@ def main():
     context = '    llama_context_params ctx_params = llama_context_default_params();'
     if text.count(context) != 1:
         raise SystemExit('Pinned reference context site changed')
+    model = '    llama_model_params model_params = llama_model_default_params();'
+    if text.count(model) != 1:
+        raise SystemExit('Pinned reference model site changed')
+    text = text.replace(model, model + '\n' + '''    if (std::getenv("LLMBRIDGE_REFERENCE_NO_REPACK")) {
+        model_params.use_extra_bufts = false;
+    }
+''')
     text = text.replace(context, context + '\n' + """    if (std::getenv("LLMBRIDGE_REFERENCE_F32_KV")) {
         ctx_params.type_k = GGML_TYPE_F32;
         ctx_params.type_v = GGML_TYPE_F32;

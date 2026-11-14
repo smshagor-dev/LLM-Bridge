@@ -182,3 +182,7 @@ For architecture questions, prefer concrete proposals specifying tensor flow, bu
 ### CPU compatibility
 
 Run `llmbridge doctor --json` before using this build on another PC. The measured x86 native profile requires SSE4.2/AVX/AVX2/FMA/F16C/BMI2 and OS AVX state support. Rust native entry paths reject incompatible CPUs before FFI instead of selecting an unvalidated scalar fallback. CPU capability is separate from core count and RAM. [Admission and emulated-host validation](docs/NATIVE_CPU_COMPATIBILITY.md).
+
+### Experimental Q4_0 streamed execution
+
+The dense Llama streamed path also accepts Q4_0 tensors through bounded row reads and pinned ggml CPU primitives. A reproducible Q8-to-Q4 fixture and explicit reference numerical profile test execution agreement; this does not measure model quality or prove larger-model/2GB feasibility. [Derivation, configuration and validation](docs/STREAMED_Q4_VALIDATION.md).

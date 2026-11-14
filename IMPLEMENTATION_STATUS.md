@@ -59,6 +59,14 @@ Local checks: Python regression suite; workspace non-native tests; release nativ
 - Actual binaries run under QEMU Core 2 Duo CPUID: doctor reports incompatibility, CLI native requests fail normally, and ten direct Rust library paths reject before FFI with no operator range reads. This is negative-path emulation, not physical old-CPU inference or a 2GB-hardware measurement.
 - Direct C ABI consumers and custom higher-ISA Rust compiler flags remain outside this Rust admission guard. Generic pre-AVX2/ARM numerical validation and dynamic dispatch remain incomplete. See `docs/NATIVE_CPU_COMPATIBILITY.md`.
 
+## Q4_0 numerical execution and main integration checkpoint
+
+- Dense Llama streamed execution accepts F32/Q8_0/Q4_0 rows using pinned ggml geometry and CPU traits; Q4_1 remains rejected. The pure Q4 fixture is derived reproducibly from the pinned lossy Q8 checkpoint and is not a quality evaluation.
+- Align wrapper AVX2/FMA compilation, FP32-square/double-accumulate RMS, normal-RoPE angle iteration, padded FP32 attention and SwiGLU CPU primitives with the pinned numerical configuration. Attention score/value scratch is budgeted explicitly (KV + 8 bytes per context token plus two fixed padding tails).
+- Preserve checkpoint hash gates, complete-output/logit comparisons and the original Q8 model-larger-than-24-MiB cap proof. Q4 trials use no cap because their file is smaller than 24 MiB. Reference extra weight buffers/repacking are an explicit, recorded option; tolerance is unchanged.
+- Prior #72–#77 merges targeted intermediate branches; main still contained only #71 when inspected. The next integration PR targets main directly and includes these already-reviewed cache/authentication/planning/performance/CPU-admission milestones.
+- Other Q4 models, K-quant formats, larger-model/physical-2GB validation and complete adaptive scheduling remain pending. See `docs/STREAMED_Q4_VALIDATION.md`.
+
 ## M3–M11
 
 M3 now has native-derived CLI/context admission, not a complete adaptive scheduler. M4 remote providers, M5 MoE, M6 GPU, M7 API/SDK, M8 desktop, M9 full robustness/benchmarks, M10 format/plugin extensibility and M11 large-model feasibility remain incomplete. No 70B/550B or real 2GB-machine result is claimed.
