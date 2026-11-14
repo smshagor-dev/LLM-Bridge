@@ -122,7 +122,9 @@ impl CachedLocalReader {
         length: usize,
         mut cancelled: impl FnMut() -> bool,
     ) -> io::Result<&[u8]> {
-        if self.slots.is_empty() {
+        // Authenticated sessions must not serve stale payload from this LRU.
+        // The source re-verifies its SHA-256 block manifest on every range call.
+        if self.slots.is_empty() || self.source.authentication_metrics().is_some() {
             increment(&mut self.metrics.source_read_calls)?;
             return self
                 .source
