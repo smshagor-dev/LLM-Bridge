@@ -11,6 +11,9 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
+/// Maximum UTF-8 prompt bytes accepted by the streamed native wrapper.
+pub const MAX_STREAMED_PROMPT_BYTES: usize = 65536;
+
 /// One cooperative release signal per session; repeated requests coalesce.
 /// This never grows a cache or bypasses source/integrity checks.
 #[derive(Debug, Default)]
@@ -346,7 +349,7 @@ fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>
         || config.workspace_bytes == 0
         || config.workspace_bytes > 1024 * 1024 * 1024
         || prompt.is_empty()
-        || prompt.len() > 65536
+        || prompt.len() > MAX_STREAMED_PROMPT_BYTES
     {
         return Err("invalid streamed generation configuration".into());
     }

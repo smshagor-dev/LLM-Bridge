@@ -196,3 +196,7 @@ The dense Llama streamed path also accepts Q4_0 tensors through bounded row read
 `chat --backend streamed --cache-mb 1 --cache-pressure-mb 512 --metrics` can release optional cache allocations when effective available RAM drops below the floor. KV/context and authentication remain intact. The library also exposes a cooperative per-session release signal; no cache regrowth or RSS guarantee is implied. [Semantics and forced-signal validation](docs/RUNTIME_CACHE_PRESSURE.md).
 
 Linux memory admission includes headroom from every visible cgroup-v2 ancestor, including sibling usage. [Discovery, regression coverage and namespace limits](docs/CGROUP_MEMORY_ADMISSION.md).
+
+### Streamed batch jobs
+
+Run newline-delimited UTF-8 prompts with `llmbridge batch model.gguf --input prompts.txt --output-dir new-results --workers 2 --sha256 TRUSTED_SHA256`. A shared planned executor processes bounded input per worker and streams each response to its own file. Existing outputs are protected; admission timeout and optional pressure hysteresis are available. See [batch CLI](docs/BATCH_CLI.md) for defaults, cancellation and accounting limits.
