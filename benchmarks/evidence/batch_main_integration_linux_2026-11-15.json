@@ -1,0 +1,176 @@
+{
+  "schema_version": 1,
+  "client_date": "2026-11-15",
+  "client_timezone": "Europe/Moscow",
+  "recorded_at_utc": "2026-11-15T00:17:52.765213+00:00",
+  "scope": "Direct-main integration of batch CLI plus shared native prompt staging ceiling; real tiny-model subprocess functionality and byte parity",
+  "source_commit": "a7fcee35bf08ced48bd6e8eae3e9c68a33194ee9",
+  "source_tree": "7f4a423ad2d6bbf96681bb39c6f43c470231e11f",
+  "source_worktree_clean": true,
+  "parent_main": "ee8e95d43bdb479a478058f3b709e4f6746820f0",
+  "main_is_ancestor": true,
+  "imported_batch_merge": {
+    "pr": 90,
+    "commit": "6032bd4900ca263ef25782da2bf85425b2a6b63a",
+    "target": "bound-queued-admission-wait",
+    "note": "Batch was absent from main after this intermediate-branch merge; historical evidence remains unchanged."
+  },
+  "native_prompt_ceiling_bytes": 65536,
+  "validation": {
+    "native_rust_tests": 246,
+    "non_native_rust_tests": 206,
+    "msrv_1_82_non_native_tests": 206,
+    "python_tests": 23,
+    "release_clippy_native_and_non_native": "passed with -D warnings",
+    "format_and_diff_checks": "passed",
+    "clean_source_fresh_process_batch_protocol_runs": 2
+  },
+  "logs": {
+    "native": {
+      "sha256": "7c67b0adb97e3f939b2aea52fbc3f22b4520366f50835a3a662d155c291ad8bd",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 21.17s",
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 231 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    "nonnative": {
+      "sha256": "915aeaa549e852662e4211478ae51d85d80d552c958519276f6f5a6bae12555d",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 5.92s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 195 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    "msrv": {
+      "sha256": "a627f1bfced49286bafa333bb2219d2e65ee9d15a5c9239082573f9702a5a055",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 13.12s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 195 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    "python": {
+      "sha256": "1ce9a6f95696b3b8b31609f72a32243669c850a4af802336115fce9609350fe7",
+      "result_lines": [
+        "Ran 23 tests in 0.078s"
+      ]
+    },
+    "clippy-native": {
+      "sha256": "1691979ba3cb51c2313e2dcdad494dc9a5ac9b16b037d549d235d7896626ad42",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 2.05s"
+      ]
+    },
+    "clippy-nonnative": {
+      "sha256": "2d0947aa3662e8353dd034afa47af0095a7398bee97aa148de5bff7945d4f3b1",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 6.40s"
+      ]
+    }
+  },
+  "batch_protocols": [
+    {
+      "report_sha256": "12f968b60d951f7775af26bdd94c4d11ff36973d301c1643956ea54ba7d27889",
+      "report": {
+        "pass": true,
+        "binary_sha256": "63200a5a8c8829f7eea6cce2945cba4718d27147bcf447de0167541f08e93440",
+        "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+        "cases": {
+          "two_jobs_match_direct_bytes": {
+            "pass": true,
+            "output_sha256": [
+              "76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89",
+              "915cb26176032ac2881bc2dbed98f2bfe575e92f1c0370b818cbbf125111f9c0"
+            ],
+            "summary": "completed=2 workers=2 pending=0 reserved_bytes=0"
+          },
+          "existing_outputs_preserved": {
+            "pass": true
+          },
+          "oversized_input_fails_cleanly": {
+            "pass": true
+          },
+          "native_prompt_limit_rejected_before_output_creation": {
+            "pass": true
+          },
+          "untrusted_model_publishes_no_result": {
+            "pass": true
+          },
+          "pressure_timeout_cleanup": {
+            "pass": true
+          },
+          "sigint_cleanup": {
+            "pass": true
+          }
+        },
+        "note": "Real tiny-model CLI byte parity and failure cleanup, not measured physical memory/concurrency overlap or throughput."
+      }
+    },
+    {
+      "report_sha256": "12f968b60d951f7775af26bdd94c4d11ff36973d301c1643956ea54ba7d27889",
+      "report": {
+        "pass": true,
+        "binary_sha256": "63200a5a8c8829f7eea6cce2945cba4718d27147bcf447de0167541f08e93440",
+        "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+        "cases": {
+          "two_jobs_match_direct_bytes": {
+            "pass": true,
+            "output_sha256": [
+              "76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89",
+              "915cb26176032ac2881bc2dbed98f2bfe575e92f1c0370b818cbbf125111f9c0"
+            ],
+            "summary": "completed=2 workers=2 pending=0 reserved_bytes=0"
+          },
+          "existing_outputs_preserved": {
+            "pass": true
+          },
+          "oversized_input_fails_cleanly": {
+            "pass": true
+          },
+          "native_prompt_limit_rejected_before_output_creation": {
+            "pass": true
+          },
+          "untrusted_model_publishes_no_result": {
+            "pass": true
+          },
+          "pressure_timeout_cleanup": {
+            "pass": true
+          },
+          "sigint_cleanup": {
+            "pass": true
+          }
+        },
+        "note": "Real tiny-model CLI byte parity and failure cleanup, not measured physical memory/concurrency overlap or throughput."
+      }
+    }
+  ],
+  "limitations": [
+    "No new native math or FFI path",
+    "No current-turn QEMU rerun; historical CPU evidence keeps its original source context",
+    "Architecturally bounded prompt buffers, not measured RSS/throughput or native overlap",
+    "No physical2GB or large-model viability result",
+    "Hard-link publication and cooperative timeout/cancellation limitations remain as documented"
+  ]
+}
