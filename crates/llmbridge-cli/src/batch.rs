@@ -1,7 +1,7 @@
 use llmbridge_core::{
     hardware,
     memory_pressure::MemoryPressurePolicy,
-    queued_streamed::QueuedStreamedRequest,
+    queued_streamed::{QueuedExecutionLimits, QueuedStreamedRequest},
     streamed_executor::{ExecutorConfig, StreamedExecutor},
 };
 use std::{
@@ -23,6 +23,7 @@ struct Options {
     slot: u64,
     reserve: u64,
     wait: Duration,
+    deadline_ms: Option<u64>,
     line_bytes: usize,
     tokens: u32,
     context: u32,
@@ -37,6 +38,7 @@ fn options(args: &[String]) -> Result<Options, String> {
     let mut slot = 64;
     let mut reserve = 512;
     let mut wait = 30_000;
+    let mut deadline_ms = None;
     let mut line_bytes = llmbridge_core::streamed::MAX_STREAMED_PROMPT_BYTES;
     let mut tokens = 16;
     let mut context = 128;
@@ -57,6 +59,7 @@ fn options(args: &[String]) -> Result<Options, String> {
             "--slot-mb" => slot = number()?,
             "--os-reserve-mb" => reserve = number()?,
             "--wait-timeout-ms" => wait = number()?,
+            "--deadline-ms" => deadline_ms = Some(number()?),
             "--max-prompt-bytes" => {
                 line_bytes = usize::try_from(number()?).map_err(|_| "prompt limit too large")?
             }
@@ -107,6 +110,7 @@ fn options(args: &[String]) -> Result<Options, String> {
         slot: mb(slot)?,
         reserve: mb(reserve)?,
         wait: Duration::from_millis(wait),
+        deadline_ms,
         line_bytes,
         tokens,
         context,
@@ -214,10 +218,14 @@ pub fn run(args: &[String]) -> Result<(), String> {
                             let mut request = template;
                             request.prompt = &prompt;
                             let mut write_error = None;
-                            let generated = executor.generate_with_timeout(
+                            let limits = QueuedExecutionLimits {
+                                wait_timeout: Some(options.wait),
+                                deadline: super::execution_deadline(options.deadline_ms)?,
+                            };
+                            let generated = executor.generate_with_limits(
                                 request,
                                 &cancelled,
-                                options.wait,
+                                limits,
                                 |bytes| match output.write_all(bytes) {
                                     Ok(()) => true,
                                     Err(error) => {
@@ -329,6 +337,8 @@ mod tests {
             vec!["--max-prompt-bytes", "0"],
             vec!["--max-prompt-bytes", "65537"],
             vec!["--ctx", "1"],
+            vec!["--deadline-ms", "-1"],
+            vec!["--deadline-ms", "18446744073709551616"],
         ] {
             assert!(options(&args(&flags)).is_err());
         }

@@ -92,6 +92,9 @@ jobs:
       - name: Streamed decoder cancellation and refusal contracts
         run: cargo run --release -p llmbridge-core --features native --example streamed_contract -- models/stories15M-q8_0.gguf
 
+      - name: Validate chat and batch execution deadline options
+        run: python3 scripts/check_cli_deadlines.py --binary target/release/llmbridge --model models/stories15M-q8_0.gguf --output benchmarks/results/cli_execution_deadlines.json
+
       - name: Validate bounded batch CLI with real streamed generation
         run: python3 scripts/check_batch.py --binary target/release/llmbridge --model models/stories15M-q8_0.gguf --output benchmarks/results/batch_cli.json
 

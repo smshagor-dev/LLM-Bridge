@@ -19,7 +19,7 @@ fn main() {
     }
 }
 fn usage() -> &'static str {
-    "Usage:\n  llmbridge batch <model.gguf> --input prompts.txt --output-dir new-results [--workers 2] [--wait-timeout-ms 30000] [--sha256 digest]\n  llmbridge doctor [--json]\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge plan <path.gguf> [--ctx 128] [--workspace-mb 8] [--max-ram-mb 64] [--auto-context] [--auto-cache] [--json]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--cache-pressure-mb floor] [--sha256 trusted-digest] [--verification-mb 8] [--address-space-mb 24] [--auto-context] [--auto-cache] [--max-ram-mb 64] [--logits path.f32]\n  Planning max-ram-mb is an incremental estimate budget; address-space-mb enforces a separate Linux process limit."
+    "Usage:\n  llmbridge batch <model.gguf> --input prompts.txt --output-dir new-results [--workers 2] [--wait-timeout-ms 30000] [--deadline-ms milliseconds] [--sha256 digest]\n  llmbridge doctor [--json]\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge plan <path.gguf> [--ctx 128] [--workspace-mb 8] [--max-ram-mb 64] [--auto-context] [--auto-cache] [--json]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--cache-pressure-mb floor] [--sha256 trusted-digest] [--verification-mb 8] [--address-space-mb 24] [--auto-context] [--auto-cache] [--max-ram-mb 64] [--logits path.f32] [--deadline-ms milliseconds]\n  Planning max-ram-mb is an incremental estimate budget; address-space-mb enforces a separate Linux process limit."
 }
 fn json_number(value: Option<u64>) -> String {
     value.map_or_else(|| "null".to_string(), |x| x.to_string())
@@ -325,6 +325,25 @@ fn cache_pressure_requires_release(available: Option<u64>, floor: u64) -> bool {
 }
 
 #[cfg(feature = "native")]
+fn execution_deadline(milliseconds: Option<u64>) -> Result<Option<std::time::Instant>, String> {
+    milliseconds
+        .map(|milliseconds| {
+            std::time::Instant::now()
+                .checked_add(std::time::Duration::from_millis(milliseconds))
+                .ok_or_else(|| "deadline-ms exceeds the monotonic clock range".to_string())
+        })
+        .transpose()
+}
+
+#[cfg(feature = "native")]
+fn check_execution_deadline(deadline: Option<std::time::Instant>) -> Result<(), String> {
+    if deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
+        return Err("streamed generation deadline expired".into());
+    }
+    Ok(())
+}
+
+#[cfg(feature = "native")]
 fn chat(args: &[String]) -> Result<(), String> {
     if args.is_empty() {
         return Err(usage().to_owned());
@@ -347,6 +366,7 @@ fn chat(args: &[String]) -> Result<(), String> {
     let mut expected_hash: Option<String> = None;
     let mut address_space_mb: Option<u64> = None;
     let mut logits_path: Option<String> = None;
+    let mut deadline_ms: Option<u64> = None;
     let mut pos = 1usize;
     while pos < args.len() {
         if args[pos] == "--auto-context" {
@@ -374,6 +394,9 @@ fn chat(args: &[String]) -> Result<(), String> {
             .ok_or_else(|| format!("missing value for {flag}"))?;
         match flag {
             "--prompt" => prompt = Some(value.clone()),
+            "--deadline-ms" => {
+                deadline_ms = Some(value.parse().map_err(|_| "invalid deadline-ms")?)
+            }
             "--backend" => backend = value.clone(),
             "--max-ram-mb" => {
                 max_admission_mb = Some(value.parse().map_err(|_| "invalid max-ram-mb")?)
@@ -419,6 +442,9 @@ fn chat(args: &[String]) -> Result<(), String> {
     if backend != "resident" && backend != "streamed" {
         return Err("backend must be resident or streamed".into());
     }
+    if backend != "streamed" && deadline_ms.is_some() {
+        return Err("--deadline-ms requires streamed backend".into());
+    }
     if backend != "streamed" && (auto_context || auto_cache || max_admission_mb.is_some()) {
         return Err("auto-context/auto-cache/admission budgeting requires streamed backend".into());
     }
@@ -453,6 +479,8 @@ fn chat(args: &[String]) -> Result<(), String> {
     if backend == "resident" && logits_path.is_some() {
         return Err("--logits requires streamed backend".into());
     }
+    let deadline = execution_deadline(deadline_ms)?;
+    check_execution_deadline(deadline)?;
     llmbridge_core::native_cpu::ensure_compatible()?;
     if let Some(megabytes) = address_space_mb {
         restrict_address_space(
@@ -502,6 +530,7 @@ fn chat(args: &[String]) -> Result<(), String> {
     let stop = Arc::clone(&cancelled);
     ctrlc::set_handler(move || stop.store(true, Ordering::SeqCst))
         .map_err(|e| format!("unable to install cancellation handler: {e}"))?;
+    check_execution_deadline(deadline)?;
     if backend == "streamed" && (auto_context || auto_cache || max_admission_mb.is_some()) {
         use llmbridge_core::streamed_plan::{
             inspect_streamed_shape, inspect_streamed_shape_verified, plan_streamed_shape,
@@ -558,6 +587,7 @@ fn chat(args: &[String]) -> Result<(), String> {
         cache_bytes =
             usize::try_from(plan.cache_budget_bytes).map_err(|_| "cache budget overflow")?;
     }
+    check_execution_deadline(deadline)?;
     let stdout = io::stdout();
     let mut handle = stdout.lock();
     let mut logits_file = logits_path
@@ -603,18 +633,27 @@ fn chat(args: &[String]) -> Result<(), String> {
             }
             true
         };
-        let execution = llmbridge_core::streamed::generate_streamed_controlled(
-            model_path,
-            &prompt,
-            config,
-            &cancelled,
-            llmbridge_core::streamed::StreamedControl {
-                expected_sha256: expected_hash.as_deref(),
-                cache: cache_pressure_floor.map(|_| &control),
-            },
-            emit,
-            logits,
-        );
+        let session = llmbridge_core::streamed::StreamedControl {
+            expected_sha256: expected_hash.as_deref(),
+            cache: cache_pressure_floor.map(|_| &control),
+        };
+        let execution = match deadline {
+            Some(deadline) => llmbridge_core::streamed::generate_streamed_with_deadline(
+                model_path,
+                &prompt,
+                config,
+                &cancelled,
+                llmbridge_core::streamed::StreamedDeadlineControl {
+                    control: session,
+                    deadline,
+                },
+                emit,
+                logits,
+            ),
+            None => llmbridge_core::streamed::generate_streamed_controlled(
+                model_path, &prompt, config, &cancelled, session, emit, logits,
+            ),
+        };
         execution
         .map(|metrics| {
             if show_metrics {
@@ -671,6 +710,46 @@ fn chat(_args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "native")]
+    #[test]
+    fn deadline_conversion_preserves_absence_zero_and_future_budget() {
+        use std::time::{Duration, Instant};
+        assert!(execution_deadline(None).unwrap().is_none());
+        let zero = execution_deadline(Some(0)).unwrap();
+        assert!(check_execution_deadline(zero).is_err());
+        let before = Instant::now();
+        let future = execution_deadline(Some(30_000)).unwrap().unwrap();
+        let after = Instant::now();
+        assert!(future >= before + Duration::from_secs(30));
+        assert!(future <= after + Duration::from_secs(30));
+        assert!(check_execution_deadline(Some(future)).is_ok());
+    }
+    #[cfg(feature = "native")]
+    #[test]
+    fn unsupported_backend_and_zero_deadline_refuse_before_model_open() {
+        let args = |backend: &str, ms: &str| {
+            [
+                "/unopened-cli-deadline.gguf",
+                "--prompt",
+                "fixture",
+                "--backend",
+                backend,
+                "--deadline-ms",
+                ms,
+            ]
+            .map(str::to_string)
+            .to_vec()
+        };
+        assert!(chat(&args("resident", "100"))
+            .unwrap_err()
+            .contains("requires streamed backend"));
+        assert!(chat(&args("streamed", "0"))
+            .unwrap_err()
+            .contains("deadline expired"));
+        assert!(chat(&args("streamed", "-1"))
+            .unwrap_err()
+            .contains("invalid deadline-ms"));
+    }
     #[cfg(feature = "native")]
     #[test]
     fn logits_export_never_truncates_an_existing_source() {
