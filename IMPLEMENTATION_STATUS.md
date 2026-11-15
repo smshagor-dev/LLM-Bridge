@@ -131,3 +131,7 @@ M3 now has native-derived CLI/context admission, not a complete adaptive schedul
 ## Batch main integration checkpoint
 
 - #90 merged into the prior admission-timeout branch after #89 had already reached main. This integration brings those reviewed batch changes to main; it also shares the native prompt ceiling with batch validation so unsupported larger line buffers fail before I/O. Historical evidence retains its original branch/source context.
+
+## CLI execution deadline checkpoint
+
+- `--deadline-ms` exposes the cooperative deadline to streamed chat (starting before preflight) and batch (a fresh budget before each job admission). Resident chat rejects the option; old defaults and waiting-only timeout semantics remain. Trust/cache controls and protected partial outputs are preserved. This is not preemption, a hard process-exit bound or RSS enforcement. See `docs/CLI_EXECUTION_DEADLINES.md`.

@@ -18,6 +18,7 @@ Options are explicit key/value pairs:
 | `--slot-mb` | 64 | Full cooperative charge per admitted session |
 | `--os-reserve-mb` | 512 | Planner reserve outside session slots |
 | `--wait-timeout-ms` | 30000 | Per-job admission wait, not native execution time; zero refuses |
+| `--deadline-ms` | absent | Fresh per-job budget spanning waiting and native execution; zero expires |
 | `--max-prompt-bytes` | 65536 | Maximum bytes per line, 1–65536, including LF/CRLF when present |
 | `--max-tokens` | 16 | Native output-token limit, 1–2048 |
 | `--ctx` | 128 | Native context, 64–8192 |
@@ -32,3 +33,5 @@ The first worker error is recorded before signalling shared cancellation. In-fli
 `scripts/check_batch.py` executes the actual CLI with two pinned Q8 fixture jobs and compares exact output bytes against separate direct streamed `chat` calls. It also verifies existing-output preservation, bounded input refusal, wrong-digest refusal, pressure timeout cleanup and POSIX SIGINT cleanup. These are tiny-model functionality/byte-parity checks, not measured worker overlap, throughput, process memory or large-model feasibility. The library's separate concurrent-session and all-logit contracts retain their existing coverage.
 
 The configurable prompt-line limit cannot exceed the streamed backend's shared 65536-byte ceiling. Unsupported limits fail during option validation before input/output creation, preventing a larger staging buffer for a prompt that native generation would always reject.
+
+See [CLI execution deadlines](CLI_EXECUTION_DEADLINES.md) for the per-job budget start, independent waiting timeout, partial-result behavior and cooperative limits.
