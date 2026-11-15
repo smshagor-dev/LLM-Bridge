@@ -14,7 +14,7 @@ The hardware reading is point-in-time. Default construction does not automatical
 
 Planner regressions check worker counts and capacity against CPU/request/RAM bounds, unknown measurements and invalid settings. The real pinned Q8 contract requires at least two admitted CPUs and sufficient memory. It starts two native sessions before the direct reference path is warmed up, pauses both at their first-logits callbacks, and requires two full simultaneous slot reservations. Both complete-output hashes and SHA-256 over every FP32 logit must match subsequent direct execution.
 
-A separate one-worker executor holds a native session at its first logits. A much smaller request (which would fit leftover byte capacity under partial charging) must remain pending without opening its nonexistent model path. Cancelling that pending call removes it while preserving the first session's slot; completing the first leaves zero reservations. Oversized requests leave no pending/running charge. The incompatible-CPU protocol now exercises sixteen guarded library paths, including this executor.
+A separate one-worker executor holds a native session at its first logits. A much smaller request (which would fit leftover byte capacity under partial charging) must remain pending without opening its nonexistent model path. Cancelling that pending call removes it while preserving the first session's slot; completing the first leaves zero reservations. Oversized requests leave no pending/running charge. The incompatible-CPU protocol now exercises nineteen guarded library paths, including this executor.
 
 Reproduce with `cargo run --release -p llmbridge-core --features native --example streamed_executor_contract -- models/stories15M-q8_0.gguf`. This is tiny-model concurrency/correctness validation, not a throughput, race-detector, physical2GB or large-model feasibility result. Other architectures and workloads require separate measurements.
 
@@ -31,3 +31,5 @@ The `executor_controls_contract` real-model test queues two calls while paused, 
 Opt-in automatic pressure gating is documented in [executor memory pressure](EXECUTOR_MEMORY_PRESSURE.md). Manual pause and capacity remain independent of that policy.
 
 Opt-in [admission waiting timeouts](ADMISSION_WAIT_TIMEOUT.md) clean up expired requests while preserving active reservations and policy controls.
+
+For an explicit absolute deadline across both waiting and native execution, use [QueuedExecutionLimits](STREAMED_EXECUTION_DEADLINE.md) with `generate_with_limits`. The existing `generate_with_timeout` remains waiting-only.

@@ -6,7 +6,8 @@ use crate::{
     memory_budget::{BudgetSnapshot, MemoryBudget},
     memory_pressure::{MemoryPressurePolicy, PressureGate, PressureSnapshot},
     queued_streamed::{
-        generate_streamed_queued_with_poll, QueuedStreamedMetrics, QueuedStreamedRequest,
+        generate_streamed_queued_with_poll, QueuedExecutionLimits, QueuedStreamedMetrics,
+        QueuedStreamedRequest,
     },
     worker_plan::{plan_workers, WorkerPlan, WorkerRequest},
 };
@@ -169,7 +170,13 @@ impl StreamedExecutor {
         on_piece: F,
         on_logits: L,
     ) -> Result<QueuedStreamedMetrics, String> {
-        self.generate_inner(request, cancelled, None, on_piece, on_logits)
+        self.generate_inner(
+            request,
+            cancelled,
+            QueuedExecutionLimits::default(),
+            on_piece,
+            on_logits,
+        )
     }
 
     /// Bound waiting for a full slot, including pressure polling. Once admitted,
@@ -182,20 +189,43 @@ impl StreamedExecutor {
         on_piece: F,
         on_logits: L,
     ) -> Result<QueuedStreamedMetrics, String> {
-        self.generate_inner(request, cancelled, Some(wait_timeout), on_piece, on_logits)
+        self.generate_inner(
+            request,
+            cancelled,
+            QueuedExecutionLimits {
+                wait_timeout: Some(wait_timeout),
+                deadline: None,
+            },
+            on_piece,
+            on_logits,
+        )
+    }
+
+    /// Carry one absolute deadline from FIFO waiting through native execution.
+    /// An optional waiting-only timeout remains an independent earlier limit.
+    pub fn generate_with_limits<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
+        &self,
+        request: QueuedStreamedRequest<'_>,
+        cancelled: &AtomicBool,
+        limits: QueuedExecutionLimits,
+        on_piece: F,
+        on_logits: L,
+    ) -> Result<QueuedStreamedMetrics, String> {
+        self.generate_inner(request, cancelled, limits, on_piece, on_logits)
     }
 
     fn generate_inner<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
         &self,
         mut request: QueuedStreamedRequest<'_>,
         cancelled: &AtomicBool,
-        wait_timeout: Option<Duration>,
+        limits: QueuedExecutionLimits,
         on_piece: F,
         on_logits: L,
     ) -> Result<QueuedStreamedMetrics, String> {
         if cancelled.load(Ordering::Acquire) {
             return Err("executor session cancelled before admission".into());
         }
+        let _ = limits.deadline_remaining()?;
         crate::native_cpu::ensure_compatible()?;
         let requested = request.reservation_bytes()?;
         if requested > self.slot_bytes {
@@ -212,7 +242,7 @@ impl StreamedExecutor {
             &self.queue,
             request,
             cancelled,
-            wait_timeout,
+            limits,
             on_piece,
             on_logits,
             || self.refresh_pressure(),
@@ -223,6 +253,54 @@ impl StreamedExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn expired_executor_limits_do_not_sample_or_take_slots() {
+        use std::sync::atomic::AtomicUsize;
+        let sampled = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&sampled);
+        let slot = 64 * 1024 * 1024;
+        let executor = StreamedExecutor::new_with_pressure_sampler(
+            &hardware(1, Some(4 * slot)),
+            ExecutorConfig {
+                requested_workers: 1,
+                session_slot_bytes: slot,
+                os_reserve_bytes: 0,
+                max_pending: 2,
+            },
+            MemoryPressurePolicy {
+                pause_below_bytes: slot,
+                resume_at_bytes: 2 * slot,
+                sample_interval: Duration::from_millis(1),
+            },
+            move || {
+                observed.fetch_add(1, Ordering::Relaxed);
+                Some(4 * slot)
+            },
+        )
+        .unwrap();
+        let flag = AtomicBool::new(false);
+        let limits = QueuedExecutionLimits {
+            deadline: Some(std::time::Instant::now()),
+            wait_timeout: None,
+        };
+        let error = executor
+            .generate_with_limits(
+                QueuedStreamedRequest::new(
+                    std::path::Path::new("/unopened-executor-limits.gguf"),
+                    "fixture",
+                ),
+                &flag,
+                limits,
+                |_| panic!("piece"),
+                |_| panic!("logits"),
+            )
+            .unwrap_err();
+        assert!(error.contains("deadline expired"));
+        assert_eq!(sampled.load(Ordering::Relaxed), 0);
+        assert_eq!(executor.pending_sessions(), 0);
+        assert_eq!(executor.reserved_bytes(), 0);
+        assert!(!flag.load(Ordering::Acquire));
+    }
     fn hardware(cpus: usize, available: Option<u64>) -> Hardware {
         Hardware {
             logical_cpus: cpus,

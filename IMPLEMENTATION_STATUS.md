@@ -94,7 +94,7 @@ Local checks: Python regression suite; workspace non-native tests; release nativ
 
 ## Cooperative native execution deadline checkpoint
 
-- The direct streamed API now accepts an opt-in absolute deadline observed during authentication, native polling/range reads and consumer boundaries. Expiry aborts without setting the caller cancellation flag and retains trusted-source/cleanup semantics. Existing queue timeouts still bound waiting only. No preemption, hard wall-clock return, CLI propagation or physical low-RAM result is implied. See `docs/STREAMED_EXECUTION_DEADLINE.md`.
+- The direct streamed API now accepts an opt-in absolute deadline observed during authentication, native polling/range reads and consumer boundaries. Expiry aborts without setting the caller cancellation flag and retains trusted-source/cleanup semantics. Queued/executor limits can carry the same absolute deadline from waiting through native work; existing timeout APIs still bound waiting only. Expired tickets/charges clean up through RAII without changing policy controls. No preemption, hard wall-clock return, CLI propagation or physical low-RAM result is implied. See `docs/STREAMED_EXECUTION_DEADLINE.md`.
 
 ## M3–M11
 
