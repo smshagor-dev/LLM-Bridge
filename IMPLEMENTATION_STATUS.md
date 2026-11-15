@@ -119,3 +119,7 @@ M3 now has native-derived CLI/context admission, not a complete adaptive schedul
 ## Bounded admission waiting checkpoint
 
 - Opt-in queued/executor timeout APIs bound cooperative admission waiting, including pressure sampling, with zero-time refusal and RAII cleanup of expired FIFO tickets. Existing methods keep indefinite waiting/cancellation. Already-admitted native work can finish beyond the waiting budget. Checks cover sampler delay, exact/maximum duration boundaries and real native recovery; neither hard wall-clock return nor end-to-end inference deadlines are implied. See `docs/ADMISSION_WAIT_TIMEOUT.md`.
+
+## Streamed batch CLI checkpoint
+
+- `llmbridge batch` connects caller-visible file input/output to one shared executor with a fixed planned worker set, per-line input bounds, direct file streaming, optional trusted digest/pressure policy and bounded admission waiting. First-error/Ctrl+C cancellation joins workers and retains unfinished `.partial` outputs. Atomic no-replace result publication requires hard-link support. This is not a server, restart/resume engine or RSS guarantee. See `docs/BATCH_CLI.md`.
