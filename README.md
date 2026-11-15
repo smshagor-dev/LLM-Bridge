@@ -104,33 +104,49 @@ flowchart TD
 
 The integration roadmap is to extend the existing decoder with broader model/quantization support, benchmark-driven CPU and I/O scheduling, asynchronous prefetch where safe, stronger portable worker isolation and resource enforcement, and reproducible low-memory **physical hardware** evidence. Queue admission, worker planning and cache-pressure controls already have implemented pieces, but they are not a globally adaptive or OS-enforced scheduler. Remote providers, GPU, MoE, public API and desktop integration remain separate later milestones.
 
-### 4. PC → Bridge → model storage (local drives and future cloud)
+### 4. PC → LLM Bridge → model drive → generated response
 
-LLM Bridge opens GGUF files on an **internal drive** or an **external/secondary drive mounted by the OS**. Both use the implemented local reader when the file is accessible as a regular file. **Google Drive links and arbitrary remote URLs are not model sources today.**
-
-**[Explore the animated 3D workflow](docs/architecture-3d.html)**. Open the **Raw** HTML file locally in a browser: GitHub README does not execute embedded HTML/JavaScript. The self-contained explorer has interactive source choices, draggable 3D orbit and animated data paths. It is an architecture visualization, **not** a remote-storage implementation or benchmark.
+This is the end-to-end path from a prompt on your PC to an accessible GGUF model, bounded local tensor reads, CPU inference and the returned response. **Solid animated arrows are implemented paths; dashed arrows are planned.** Animation uses Mermaid edge IDs and is visible only when the Markdown renderer supports animated edges; older renderers may display static arrows.
 
 ```mermaid
-flowchart LR
-    PC["Your PC<br/>prompt + CPU/RAM"] --> Bridge["LLM Bridge<br/>Rust control + admission"]
-    Bridge --> Source{"Model location?"}
-    Source --> SSD["Internal SSD / HDD<br/>implemented local path"]
-    Source --> Mount["External / mounted drive<br/>implemented local path"]
-    Source -.-> Cloud["Google Drive<br/>planned: no direct adapter"]
-    Cloud -.-> Stage["Future OAuth/API + bounded download<br/>verified local staging"]
-    SSD --> File["Accessible local GGUF file"]
-    Mount --> File
-    Stage -.-> File
-    File --> Index["GGUF index + source checks"]
-    Index --> Reader["Bounded range reads<br/>optional trusted SHA-256"]
-    Reader --> CPU["Native CPU decoder<br/>attention + KV + SwiGLU"]
-    CPU --> Reply["Tokens / logits / metrics"]
-    Reply --> PC
+flowchart TB
+    PC["Your PC<br/>Prompt + CPU + RAM"] e1@--> Bridge["LLM Bridge<br/>Rust control and memory admission"]
+    Bridge e2@--> Source{"Model location?"}
+
+    Source e3@--> SSD["Internal SSD / HDD<br/>Local GGUF file"]
+    Source e4@--> External["Mounted external drive<br/>Local GGUF file"]
+    Source -.-> Google["Google Drive<br/>PLANNED — no adapter"]
+    Google -.-> Stage["Future OAuth + authenticated<br/>download and verified staging"]
+
+    SSD e5@--> Loader["GGUF tensor loader<br/>Bounded reads + source checks"]
+    External e6@--> Loader
+    Stage -.-> Loader
+    Loader e7@--> Decoder["Rust / C++ CPU decoder<br/>Attention, KV cache and SwiGLU"]
+    Decoder e8@--> Tokens["Generated tokens + optional logits"]
+    Tokens e9@--> Reply["Response returned to your PC"]
+
+    e1@{ animation: fast }
+    e2@{ animation: fast }
+    e3@{ animation: slow }
+    e4@{ animation: slow }
+    e5@{ animation: fast }
+    e6@{ animation: fast }
+    e7@{ animation: fast }
+    e8@{ animation: fast }
+    e9@{ animation: fast }
+
+    classDef runtime fill:#072942,stroke:#2b9ad6,color:#e9f6ff,stroke-width:1.5px
+    classDef drive fill:#0a3555,stroke:#1989c6,color:#e9f6ff
+    classDef future fill:#272c3a,stroke:#98a4b6,color:#e0e6f0,stroke-dasharray:5\,5
+    class PC,Bridge,Loader,Decoder,Tokens,Reply runtime
+    class SSD,External drive
+    class Google,Stage future
 ```
 
-**Implemented:** local and mounted-file access (when regular-file checks pass), indexed GGUF ranges, CPU-first streamed decoder, opt-in Linux verified sessions, cancellation and bounded staging.
+**Available now:** An internal disk or an OS-mounted external drive can supply a regular local GGUF file. The streamed backend indexes the tensor regions, bounds local reads and runs the supported CPU decoder. The optional trusted SHA-256 verified-session path currently has Linux-specific guarantees.
 
-**Planned:** Google Drive OAuth/API and secure transfer adapter, verified local staging, direct remote range streaming, resilient remote retries and portable constrained-hardware validation. Model bytes from Google Drive are **not** passed directly into the current decoder.
+**Planned, not implemented:** Google Drive or arbitrary remote URLs cannot be passed directly as model paths. A future cloud adapter would need account authorization, bounded/retriable transfer, validated local staging and session integrity before the existing file reader could use the bytes. The animation is a workflow illustration, **not** evidence of Google Drive support, hard physical RAM limits or large-model capability.
+
 ### Where to find the code
 
 | Location | Responsibility |
