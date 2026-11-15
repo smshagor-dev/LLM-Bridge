@@ -49,19 +49,32 @@ flowchart LR
         Queue["Batch worker slots + FIFO admission<br/>Shared memory reservations"]
     end
 
-    Chat --> CPU
-    Tools --> CPU
-    CPU --> Plan
-    Plan --> Select
-    Batch --> Queue
-    Plan -->|"budget inputs"| Queue
+    Chat r1@--> CPU
+    Tools r2@--> CPU
+    CPU r3@--> Plan
+    Plan r4@--> Select
+    Batch r5@--> Queue
+    Plan r6@-->|"budget inputs"| Queue
 
-    Select -->|"resident (default)"| Resident["Pinned llama.cpp resident-weight CPU graph"]
-    Select -->|"streamed (explicit)"| Streamed["Experimental bounded streamed Llama session"]
-    Queue -->|"admitted streamed job"| Streamed
+    Select r7@-->|"resident (default)"| Resident["Pinned llama.cpp resident-weight CPU graph"]
+    Select r8@-->|"streamed (explicit)"| Streamed["Experimental bounded streamed Llama session"]
+    Queue r9@-->|"admitted streamed job"| Streamed
 
-    Resident --> Output["Tokens / optional logits / metrics"]
-    Streamed --> Output
+    Resident r10@--> Output["Tokens / optional logits / metrics"]
+    Streamed r11@--> Output
+
+    %% Animated connections are optional in older Mermaid renderers.
+    r1@{ animation: fast }
+    r2@{ animation: slow }
+    r3@{ animation: fast }
+    r4@{ animation: fast }
+    r5@{ animation: fast }
+    r6@{ animation: slow }
+    r7@{ animation: fast }
+    r8@{ animation: fast }
+    r9@{ animation: fast }
+    r10@{ animation: fast }
+    r11@{ animation: fast }
 ```
 
 **What this means:** `chat` defaults to the pinned llama.cpp resident model-loading path. `chat --backend streamed` selects the separately implemented dense-Llama decoder. The `batch` CLI uses an admitted streamed-worker path with cooperative FIFO reservations; those reservations budget configured resources, **not whole-process RSS**. `doctor` and `plan` inspect capabilities and admission constraints without generating tokens.
@@ -83,17 +96,36 @@ flowchart LR
     Memory["Budgeted activations + FP32 KV cache"]
     Output["Greedy tokens + optional logits<br/>range, memory + timing metrics"]
 
-    Session --> Index --> Trust
-    Trust -->|"yes, supported Linux path"| Verified
-    Trust -->|"no"| Unverified
-    Verified --> Reader
-    Unverified --> Reader
-    Verified --> Vocab
-    Unverified --> Vocab
-    Reader --> Cache --> Native --> Decoder
-    Vocab --> Decoder
-    Memory --> Decoder
-    Decoder --> Output
+    Session s1@--> Index
+    Index s2@--> Trust
+    Trust s3@-->|"yes, supported Linux path"| Verified
+    Trust s4@-->|"no"| Unverified
+    Verified s5@--> Reader
+    Unverified s6@--> Reader
+    Verified s7@--> Vocab
+    Unverified s8@--> Vocab
+    Reader s9@--> Cache
+    Cache s10@--> Native
+    Native s11@--> Decoder
+    Vocab s12@--> Decoder
+    Memory s13@--> Decoder
+    Decoder s14@--> Output
+
+    %% Each executed data path animates; no remote model support is implied.
+    s1@{ animation: fast }
+    s2@{ animation: fast }
+    s3@{ animation: fast }
+    s4@{ animation: fast }
+    s5@{ animation: fast }
+    s6@{ animation: fast }
+    s7@{ animation: slow }
+    s8@{ animation: slow }
+    s9@{ animation: fast }
+    s10@{ animation: fast }
+    s11@{ animation: fast }
+    s12@{ animation: slow }
+    s13@{ animation: slow }
+    s14@{ animation: fast }
 ```
 
 **Bounds and security:** Tensor weights reach native streamed operators through bounded Rust range reads; native upstream loading is vocabulary-only. Session-local caching is optional and disabled by default. Authenticated reads follow the verified-session policy (including per-range revalidation and cache bypass where required); the cache box is **not** an unconditional authenticated-cache hit. Cancellation and cooperative deadlines are checked at supported read, native polling and callback boundaries; a blocking native operation is not preempted.
