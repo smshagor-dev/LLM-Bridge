@@ -35,7 +35,7 @@ The diagrams separate **what runs today** from the larger roadmap. Solid arrows 
 ### 1. Requests, planning and backend selection
 
 ```mermaid
-flowchart TD
+flowchart LR
     subgraph Entry["Entry points"]
         Chat["CLI chat / Rust library"]
         Batch["CLI batch"]
@@ -69,7 +69,7 @@ flowchart TD
 ### 2. Inside the streamed inference path
 
 ```mermaid
-flowchart TD
+flowchart LR
     Session["Streamed model session"]
     Index["GGUF index: tensor shapes, types,<br/>offsets, range bounds + source identity"]
     Trust{"Trusted SHA-256 supplied?"}
@@ -109,7 +109,7 @@ The integration roadmap is to extend the existing decoder with broader model/qua
 This is the end-to-end path from a prompt on your PC to an accessible GGUF model, bounded local tensor reads, CPU inference and the returned response. **Solid animated arrows are implemented paths; dashed arrows are planned.** Animation uses Mermaid edge IDs and is visible only when the Markdown renderer supports animated edges; older renderers may display static arrows.
 
 ```mermaid
-flowchart TB
+flowchart LR
     PC["Your PC<br/>Prompt + CPU + RAM"] e1@--> Bridge["LLM Bridge<br/>Rust control and memory admission"]
     Bridge e2@--> Source{"Model location?"}
 
