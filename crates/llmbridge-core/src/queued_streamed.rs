@@ -3,7 +3,10 @@
 use crate::{
     admission_queue::AdmissionQueue,
     read_cache::cache_allocated_bytes,
-    streamed::{generate_streamed_controlled, StreamedConfig, StreamedControl, StreamedMetrics},
+    streamed::{
+        generate_streamed_controlled, generate_streamed_with_deadline, StreamedConfig,
+        StreamedControl, StreamedDeadlineControl, StreamedMetrics,
+    },
 };
 use std::{
     path::Path,
@@ -69,6 +72,30 @@ pub struct QueuedStreamedMetrics {
     pub queue_wait_ns: u64,
 }
 
+/// Independent admission waiting budget and absolute whole-request deadline.
+/// The same deadline is carried into native execution; it is never restarted.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct QueuedExecutionLimits {
+    pub wait_timeout: Option<Duration>,
+    pub deadline: Option<Instant>,
+}
+impl QueuedExecutionLimits {
+    pub(crate) fn deadline_remaining(&self) -> Result<Option<Duration>, String> {
+        let left = self
+            .deadline
+            .map(|deadline| deadline.saturating_duration_since(Instant::now()));
+        if left.is_some_and(|left| left.is_zero()) {
+            return Err("queued generation deadline expired".into());
+        }
+        Ok(left)
+    }
+    fn remaining(&self, start: Instant) -> Result<Duration, String> {
+        let deadline_left = self.deadline_remaining()?;
+        let poll = remaining_wait(start.elapsed(), self.wait_timeout)?;
+        Ok(deadline_left.map_or(poll, |left| poll.min(left)))
+    }
+}
+
 /// Wait cooperatively without opening the model, then hold one reservation across
 /// all authentication/native/consumer work. Cancellation, errors and unwinding
 /// remove a pending ticket or release the running reservation through RAII.
@@ -81,7 +108,15 @@ pub fn generate_streamed_queued<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> boo
     on_piece: F,
     on_logits: L,
 ) -> Result<QueuedStreamedMetrics, String> {
-    generate_streamed_queued_with_poll(queue, request, cancelled, None, on_piece, on_logits, || {})
+    generate_streamed_queued_with_poll(
+        queue,
+        request,
+        cancelled,
+        QueuedExecutionLimits::default(),
+        on_piece,
+        on_logits,
+        || {},
+    )
 }
 
 /// Bound cooperative admission waiting, not native execution. Zero refuses
@@ -98,7 +133,31 @@ pub fn generate_streamed_queued_with_timeout<F: FnMut(&[u8]) -> bool, L: FnMut(&
         queue,
         request,
         cancelled,
-        Some(wait_timeout),
+        QueuedExecutionLimits {
+            wait_timeout: Some(wait_timeout),
+            deadline: None,
+        },
+        on_piece,
+        on_logits,
+        || {},
+    )
+}
+
+/// Bound waiting and/or native execution without changing the caller's flag.
+/// Expired pending tickets and admitted reservations clean up through RAII.
+pub fn generate_streamed_queued_with_limits<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
+    queue: &AdmissionQueue,
+    request: QueuedStreamedRequest<'_>,
+    cancelled: &AtomicBool,
+    limits: QueuedExecutionLimits,
+    on_piece: F,
+    on_logits: L,
+) -> Result<QueuedStreamedMetrics, String> {
+    generate_streamed_queued_with_poll(
+        queue,
+        request,
+        cancelled,
+        limits,
         on_piece,
         on_logits,
         || {},
@@ -122,7 +181,7 @@ pub(crate) fn generate_streamed_queued_with_poll<
     queue: &AdmissionQueue,
     request: QueuedStreamedRequest<'_>,
     cancelled: &AtomicBool,
-    wait_timeout: Option<Duration>,
+    limits: QueuedExecutionLimits,
     on_piece: F,
     on_logits: L,
     mut before_poll: P,
@@ -130,12 +189,13 @@ pub(crate) fn generate_streamed_queued_with_poll<
     if cancelled.load(Ordering::Acquire) {
         return Err("queued generation cancelled before admission".into());
     }
+    let _ = limits.deadline_remaining()?;
     crate::native_cpu::ensure_compatible()?;
     let charge = request.reservation_bytes()?;
     let start = Instant::now();
-    remaining_wait(start.elapsed(), wait_timeout)?;
+    limits.remaining(start)?;
     before_poll();
-    remaining_wait(start.elapsed(), wait_timeout)?;
+    limits.remaining(start)?;
     let mut pending = queue
         .request(charge)
         .map_err(|e| format!("streamed queue admission: {e:?}"))?;
@@ -143,31 +203,45 @@ pub(crate) fn generate_streamed_queued_with_poll<
         if cancelled.load(Ordering::Acquire) {
             return Err("queued generation cancelled while waiting".into());
         }
-        remaining_wait(start.elapsed(), wait_timeout)?;
+        limits.remaining(start)?;
         before_poll();
-        remaining_wait(start.elapsed(), wait_timeout)?;
+        limits.remaining(start)?;
         if let Some(reservation) = pending
             .try_admit()
             .map_err(|e| format!("streamed queue polling: {e:?}"))?
         {
             break reservation;
         }
-        std::thread::park_timeout(remaining_wait(start.elapsed(), wait_timeout)?);
+        std::thread::park_timeout(limits.remaining(start)?);
     };
     let queue_wait_ns = start.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
     if cancelled.load(Ordering::Acquire) {
         return Err("queued generation cancelled after admission".into());
     }
-    remaining_wait(start.elapsed(), wait_timeout)?;
-    let inference = generate_streamed_controlled(
-        request.model,
-        request.prompt,
-        request.config,
-        cancelled,
-        request.control,
-        on_piece,
-        on_logits,
-    );
+    limits.remaining(start)?;
+    let inference = match limits.deadline {
+        Some(deadline) => generate_streamed_with_deadline(
+            request.model,
+            request.prompt,
+            request.config,
+            cancelled,
+            StreamedDeadlineControl {
+                control: request.control,
+                deadline,
+            },
+            on_piece,
+            on_logits,
+        ),
+        None => generate_streamed_controlled(
+            request.model,
+            request.prompt,
+            request.config,
+            cancelled,
+            request.control,
+            on_piece,
+            on_logits,
+        ),
+    };
     drop(reservation);
     Ok(QueuedStreamedMetrics {
         inference: inference?,
@@ -179,6 +253,55 @@ pub(crate) fn generate_streamed_queued_with_poll<
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn absolute_deadline_and_waiting_timeout_are_independent_and_clean() {
+        let budget = crate::memory_budget::MemoryBudget::new(64 * 1024 * 1024).unwrap();
+        let queue = AdmissionQueue::new(budget.clone(), 2).unwrap();
+        let flag = AtomicBool::new(false);
+        let request = QueuedStreamedRequest::new(Path::new("/unopened-limits.gguf"), "fixture");
+        let expired = QueuedExecutionLimits {
+            wait_timeout: Some(Duration::ZERO),
+            deadline: Some(Instant::now()),
+        };
+        let error = generate_streamed_queued_with_limits(
+            &queue,
+            request,
+            &flag,
+            expired,
+            |_| panic!("piece"),
+            |_| panic!("logits"),
+        )
+        .unwrap_err();
+        assert!(error.contains("deadline expired"));
+        let waiting = QueuedExecutionLimits {
+            wait_timeout: Some(Duration::ZERO),
+            deadline: Some(Instant::now() + Duration::from_secs(30)),
+        };
+        let error = generate_streamed_queued_with_limits(
+            &queue,
+            request,
+            &flag,
+            waiting,
+            |_| panic!("piece"),
+            |_| panic!("logits"),
+        )
+        .unwrap_err();
+        assert!(error.contains("admission wait timed out"));
+        assert_eq!(queue.pending(), 0);
+        assert_eq!(budget.reserved(), 0);
+        assert!(!flag.load(Ordering::Acquire));
+        flag.store(true, Ordering::Release);
+        let error = generate_streamed_queued_with_limits(
+            &queue,
+            request,
+            &flag,
+            expired,
+            |_| panic!("piece"),
+            |_| panic!("logits"),
+        )
+        .unwrap_err();
+        assert!(error.contains("cancelled before admission"));
+    }
     #[test]
     fn waiting_boundaries_do_not_overflow_or_oversleep_remaining_budget() {
         let limit = Duration::from_millis(10);
@@ -208,7 +331,10 @@ mod tests {
             &queue,
             request,
             &AtomicBool::new(false),
-            Some(Duration::ZERO),
+            QueuedExecutionLimits {
+                wait_timeout: Some(Duration::ZERO),
+                deadline: None,
+            },
             |_| panic!("output"),
             |_| panic!("logits"),
             || panic!("zero timeout sampled"),
@@ -220,7 +346,10 @@ mod tests {
             &queue,
             request,
             &AtomicBool::new(false),
-            Some(Duration::from_millis(10)),
+            QueuedExecutionLimits {
+                wait_timeout: Some(Duration::from_millis(10)),
+                deadline: None,
+            },
             |_| panic!("output"),
             |_| panic!("logits"),
             || {

@@ -83,6 +83,9 @@ jobs:
       - name: Require identical cached logits and measured read-call reduction
         run: python3 scripts/compare_cache_results.py --uncached benchmarks/results/streamed/streamed_parity.json --cached benchmarks/results/streamed-cached/streamed_parity.json --output benchmarks/results/cache_comparison.json
 
+      - name: Validate one deadline across queued and native execution
+        run: cargo run --release -p llmbridge-core --features native --example queued_deadline_contract -- models/stories15M-q8_0.gguf
+
       - name: Validate native execution deadline and recovery
         run: cargo run --release -p llmbridge-core --features native --example streamed_deadline_contract -- models/stories15M-q8_0.gguf
 

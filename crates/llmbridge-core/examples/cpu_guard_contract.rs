@@ -105,6 +105,19 @@ fn main() {
         |_| panic!("output"),
         |_| panic!("logits"),
     ));
+    rejected(
+        llmbridge_core::queued_streamed::generate_streamed_queued_with_limits(
+            &queue,
+            llmbridge_core::queued_streamed::QueuedStreamedRequest::new(model, "fixture"),
+            &cancelled,
+            llmbridge_core::queued_streamed::QueuedExecutionLimits {
+                deadline: Some(std::time::Instant::now() + std::time::Duration::from_secs(30)),
+                wait_timeout: None,
+            },
+            |_| panic!("limited queued piece"),
+            |_| panic!("limited queued logits"),
+        ),
+    );
     assert_eq!(queue.pending(), 0);
     assert_eq!(budget.reserved(), 0);
     rejected(
@@ -139,6 +152,16 @@ fn main() {
         &cancelled,
         |_| panic!("output"),
         |_| panic!("logits"),
+    ));
+    rejected(executor.generate_with_limits(
+        llmbridge_core::queued_streamed::QueuedStreamedRequest::new(model, "fixture"),
+        &cancelled,
+        llmbridge_core::queued_streamed::QueuedExecutionLimits {
+            deadline: Some(std::time::Instant::now() + std::time::Duration::from_secs(30)),
+            wait_timeout: None,
+        },
+        |_| panic!("limited executor piece"),
+        |_| panic!("limited executor logits"),
     ));
     assert_eq!(executor.pending_sessions(), 0);
     assert_eq!(executor.reserved_bytes(), 0);
@@ -191,5 +214,5 @@ fn main() {
     drop(file);
     std::fs::remove_file(path).unwrap();
     println!("LLMBRIDGE_CPU_GUARD {}", cpu.to_json());
-    println!("seventeen Rust native execution/probe paths rejected before FFI: PASS");
+    println!("nineteen Rust native execution/probe paths rejected before FFI: PASS");
 }
