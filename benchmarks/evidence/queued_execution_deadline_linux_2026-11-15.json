@@ -1,0 +1,276 @@
+{
+  "schema_version": 1,
+  "client_date": "2026-11-15",
+  "client_timezone": "Europe/Moscow",
+  "recorded_at_utc": "2026-11-15T03:44:46.178996+00:00",
+  "scope": "One cooperative absolute deadline across FIFO admission and authenticated native execution; current-main batch compatibility and tiny-model correctness",
+  "source_commit": "8ca50ec85f677db7ed6ee6be31a0b2f71dab64d3",
+  "source_tree": "895a0a91b9da89259a7c1460f749a479e73e19ee",
+  "source_worktree_clean": true,
+  "parent_main": "fd68a36a003b59dd63335287917eef8cf86973bf",
+  "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+  "contract_binary_sha256": "92693ef90ebc7fa905542036c2f3707d4253f154f0a976d9e4374a36e646fdc6",
+  "validation": {
+    "native_rust_tests": 250,
+    "non_native_rust_tests": 206,
+    "msrv_1_82_non_native_tests": 206,
+    "python_tests": 23,
+    "release_clippy_native_and_non_native": "passed with -D warnings",
+    "format_and_diff_checks": "passed",
+    "clean_source_fresh_process_deadline_protocol_runs": 2,
+    "qemu_guarded_library_paths": 19,
+    "current_main_batch_protocol": "passed"
+  },
+  "protocol": [
+    "One real native blocker retains a full slot at first logits",
+    "Timed head and later-deadline tail enqueue in FIFO order",
+    "Half a second of the heads original absolute budget is consumed while queued",
+    "Blocker finishes, head takes the full slot and crosses its original deadline at native first logits",
+    "Head aborts with zero piece callbacks and unchanged caller flag; its slot releases and tail progresses",
+    "Blocker, tail, recovered executor call and explicit public queued-limits call match direct complete-output/allFP32logit hashes",
+    "Shorter waiting timeout under manual pause reports admission timeout and preserves pause",
+    "Shorter absolute deadline under unknown pressure reports deadline expiry and preserves policy",
+    "All ended calls leave zero pending/reserved charges"
+  ],
+  "logs": {
+    "native": {
+      "sha256": "c64b7ac57bba0937d1a88aaf11f033fa01f15a706e80f430dc91bcc4dfd04ee3",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 19.78s",
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 235 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    "nonnative": {
+      "sha256": "0d373c233345e91dd9b86de5b0cb436005b96e1b631210843360935965b30ce9",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 10.00s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 195 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    "msrv": {
+      "sha256": "93f0f6f8ebae9209ef1276ae7c571c81d95e1c99a5dcde0d5756a631ef19ed7d",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 5.45s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 195 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    "python": {
+      "sha256": "f5c554b08dc7e0ec3182025a32c0d80d02154bd328e40ae8f6ecb899be41a644",
+      "result_lines": [
+        "Ran 23 tests in 0.151s"
+      ]
+    },
+    "clippy-native": {
+      "sha256": "2d864c08aeae765a9b3b24f108df8b18743c5b23ed8f31a83a1b7e8f3368a90f",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 2.83s"
+      ]
+    },
+    "clippy-nonnative": {
+      "sha256": "695fbbb93b741426d2c777279d3a042173c093f0432d4e06ba33ec65b792177a",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 1.94s"
+      ]
+    },
+    "clean-1": {
+      "sha256": "d69279f5f873dbbdd577756e836332c6fe827310fcfc712a6b804e07cd8e0767",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 0.01s",
+        "queued deadline: queue time not reset, active slot retention/release, FIFO tail progress, independent waiting timeout, pressure cleanup and exact bytes/logits recovery: PASS",
+        "expired_session_piece_callbacks=0 final_pending=0 final_reserved=0 output_sha256=76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89 logits_sha256=f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb"
+      ]
+    },
+    "clean-2": {
+      "sha256": "7a0db9ee7f8a88f96ec7a88199bf951177ed323cef0c7c011152145fdec1e474",
+      "result_lines": [
+        "queued deadline: queue time not reset, active slot retention/release, FIFO tail progress, independent waiting timeout, pressure cleanup and exact bytes/logits recovery: PASS",
+        "expired_session_piece_callbacks=0 final_pending=0 final_reserved=0 output_sha256=76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89 logits_sha256=f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb"
+      ]
+    }
+  },
+  "cpu_guard_report_sha256": "c18258270facb5f7b11d692c5df55d809399ac70e1e273ff9abb3e765c8db1a4",
+  "cpu_guard": {
+    "pass": true,
+    "source": {
+      "commit": "8ca50ec85f677db7ed6ee6be31a0b2f71dab64d3",
+      "tree": "895a0a91b9da89259a7c1460f749a479e73e19ee",
+      "working_tree_dirty": false
+    },
+    "guest_cpu": "core2duo",
+    "cases": {
+      "doctor": {
+        "exit_code": 0,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "9b3e4b85357d84024289aa5e3c0d9dd74ed43be2b7df51d87743a3543eff66d4",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "runtime_profile_cannot_override_build": {
+        "exit_code": 0,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e5a9fed958c29a97c32581a2e082ed5625dbdc90568d9fb4ff9abd63ae8465b8",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "avx_without_os_state": {
+        "exit_code": 0,
+        "guest_cpu": "Haswell,-xsave",
+        "stdout_sha256": "8d945f8955108cc259e0d047ae640be9bbd5edb2dea5b8a42c004768ace75d2d",
+        "stderr_sha256": "1b975121e9fa414c908dd7e1053b54750eddd55b37ab9586fc738c16db2b4543"
+      },
+      "resident": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "streamed": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "verified_streamed": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "batch": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "plan": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "library_entry_paths": {
+        "exit_code": 0,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "ce0f53894f7c7680ea6cec72e50d122950582ab7573d7bb3bee8b407db634064",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "note": "QEMU user-mode negative admission test; no inference speed, old physical CPU or 2GB-hardware claim.",
+    "binary_sha256": "b135e1c2f03f16784256fbfcd8945f14bb9fb33e5bb02cef1dbae1ef25eff45e",
+    "contract_sha256": "a4fa33d38a0ed6aeeb2815a68331c9daf7727b1a227453672568183088ff541d",
+    "emulator_sha256": "36d35ffe5363bd49bfa9c2b6a048e9fb2e798fea38285a5a45f52d34f9869089",
+    "emulator_version": "qemu-x86_64 version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)",
+    "emulated_cpu": {
+      "native_profile": "x86-avx2",
+      "architecture": "x86_64",
+      "native_compatible": false,
+      "capabilities": {
+        "sse2": true,
+        "sse42": false,
+        "avx": false,
+        "avx2": false,
+        "fma": false,
+        "f16c": false,
+        "bmi2": false
+      },
+      "missing_cpu_os_capabilities": [
+        "sse4.2",
+        "avx",
+        "avx2",
+        "fma",
+        "f16c",
+        "bmi2"
+      ],
+      "scalar_fallback_validated": false
+    },
+    "avx_without_os_state_cpu": {
+      "native_profile": "x86-avx2",
+      "architecture": "x86_64",
+      "native_compatible": false,
+      "capabilities": {
+        "sse2": true,
+        "sse42": true,
+        "avx": false,
+        "avx2": false,
+        "fma": false,
+        "f16c": true,
+        "bmi2": false
+      },
+      "missing_cpu_os_capabilities": [
+        "avx",
+        "avx2",
+        "fma",
+        "bmi2"
+      ],
+      "scalar_fallback_validated": false
+    },
+    "library_paths_checked": 19
+  },
+  "batch_report_sha256": "2a26dcab15381d05d3ddad7a50c54d4d99c10f55ec4d55ceeac5dc9671d4eadb",
+  "batch_report": {
+    "pass": true,
+    "binary_sha256": "b135e1c2f03f16784256fbfcd8945f14bb9fb33e5bb02cef1dbae1ef25eff45e",
+    "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+    "cases": {
+      "two_jobs_match_direct_bytes": {
+        "pass": true,
+        "output_sha256": [
+          "76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89",
+          "915cb26176032ac2881bc2dbed98f2bfe575e92f1c0370b818cbbf125111f9c0"
+        ],
+        "summary": "completed=2 workers=2 pending=0 reserved_bytes=0"
+      },
+      "existing_outputs_preserved": {
+        "pass": true
+      },
+      "oversized_input_fails_cleanly": {
+        "pass": true
+      },
+      "native_prompt_limit_rejected_before_output_creation": {
+        "pass": true
+      },
+      "untrusted_model_publishes_no_result": {
+        "pass": true
+      },
+      "pressure_timeout_cleanup": {
+        "pass": true
+      },
+      "sigint_cleanup": {
+        "pass": true
+      }
+    },
+    "note": "Real tiny-model CLI byte parity and failure cleanup, not measured physical memory/concurrency overlap or throughput."
+  },
+  "limitations": [
+    "Cooperative checks cannot preempt in-flight sampling/I/O/native operations or consumers",
+    "No hard wall-clock return or maximum deadline reaction latency guarantee",
+    "Waiting-only APIs retain their earlier semantics",
+    "CLI/batch execution-deadline flags remain separate work",
+    "No new native ABI/numerical path",
+    "No RSS, throughput, physical2GB, large-model or race-detector claim"
+  ]
+}
