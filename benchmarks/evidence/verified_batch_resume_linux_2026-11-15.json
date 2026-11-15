@@ -1,0 +1,381 @@
+{
+  "schema": "llmbridge-verified-batch-resume-evidence-v1",
+  "recorded_at_utc": "2026-11-15T06:55:39.940261+00:00",
+  "source": {
+    "commit": "c247f3d879f4c0bc4d3809ad85c6e49069b3395c",
+    "tree": "af87b7057278f1e7aa293221c1933b7f31d1ee51",
+    "working_tree_dirty_during_clean_protocols": false,
+    "base_main_commit": "b5d6ed9b4a1fee7bf6907fdaca58b5851ba982a7"
+  },
+  "artifacts": {
+    "binary_sha256": "f8d5637a8085fa06810680372ff95a46fed9ccbef3765aad1fddf0be73f75198",
+    "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+    "upstream_llama_cpp_commit": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+    "rust_native": "1.85.1",
+    "rust_non_native_msrv": "1.82.0"
+  },
+  "checks": {
+    "release_native_rust_tests_passed": 257,
+    "non_native_rust_tests_passed": 206,
+    "msrv_non_native_tests_passed": 206,
+    "python_tests_passed": 23,
+    "fmt_check_passed": true,
+    "native_and_non_native_clippy_deny_warnings_passed": true,
+    "diff_check_passed": true
+  },
+  "clean_source_resume_protocols": [
+    {
+      "pass": true,
+      "binary_sha256": "f8d5637a8085fa06810680372ff95a46fed9ccbef3765aad1fddf0be73f75198",
+      "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+      "cases": {
+        "interrupted_native_batch_resumes_verified_jobs": {
+          "pass": true,
+          "skipped_existing_jobs": 1,
+          "total_completed_jobs": 3,
+          "completed_files_unchanged": true,
+          "unfinished_partials_archived": true
+        },
+        "fully_completed_resume_is_read_only": {
+          "pass": true
+        },
+        "changed_model_input_configuration_refuse_unchanged": {
+          "pass": true,
+          "model_size_mtime_preserved": true
+        },
+        "identical_binary_copy_can_resume": {
+          "pass": true
+        },
+        "changed_binary_artifact_refuses_unchanged": {
+          "pass": true
+        },
+        "corrupt_and_orphan_results_never_overwritten": {
+          "pass": true,
+          "output_size_mtime_preserved": true
+        },
+        "exclusive_lock_and_sigkill_release": {
+          "pass": true,
+          "expired_deadline_retry": true
+        },
+        "checkpoint_requires_trusted_digest": {
+          "pass": true
+        }
+      },
+      "note": "Real Linux interruption/resume and integrity protocol; not signed records, adversarial concurrent-write resistance, power-loss or physical-memory/throughput proof."
+    },
+    {
+      "pass": true,
+      "binary_sha256": "f8d5637a8085fa06810680372ff95a46fed9ccbef3765aad1fddf0be73f75198",
+      "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+      "cases": {
+        "interrupted_native_batch_resumes_verified_jobs": {
+          "pass": true,
+          "skipped_existing_jobs": 1,
+          "total_completed_jobs": 3,
+          "completed_files_unchanged": true,
+          "unfinished_partials_archived": true
+        },
+        "fully_completed_resume_is_read_only": {
+          "pass": true
+        },
+        "changed_model_input_configuration_refuse_unchanged": {
+          "pass": true,
+          "model_size_mtime_preserved": true
+        },
+        "identical_binary_copy_can_resume": {
+          "pass": true
+        },
+        "changed_binary_artifact_refuses_unchanged": {
+          "pass": true
+        },
+        "corrupt_and_orphan_results_never_overwritten": {
+          "pass": true,
+          "output_size_mtime_preserved": true
+        },
+        "exclusive_lock_and_sigkill_release": {
+          "pass": true,
+          "expired_deadline_retry": true
+        },
+        "checkpoint_requires_trusted_digest": {
+          "pass": true
+        }
+      },
+      "note": "Real Linux interruption/resume and integrity protocol; not signed records, adversarial concurrent-write resistance, power-loss or physical-memory/throughput proof."
+    }
+  ],
+  "clean_source_unsupported_cpu_protocol": {
+    "pass": true,
+    "source": {
+      "commit": "c247f3d879f4c0bc4d3809ad85c6e49069b3395c",
+      "tree": "af87b7057278f1e7aa293221c1933b7f31d1ee51",
+      "working_tree_dirty": false
+    },
+    "guest_cpu": "core2duo",
+    "cases": {
+      "doctor": {
+        "exit_code": 0,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "93ab5fff039327abf989abf677ed11f92394dc79eacdc5da2927278d507f5271",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "runtime_profile_cannot_override_build": {
+        "exit_code": 0,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "a25ce5172d17ae4e330649d54a4d05dd54ce982c0cc7eebcef68a917c3bb03d5",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "avx_without_os_state": {
+        "exit_code": 0,
+        "guest_cpu": "Haswell,-xsave",
+        "stdout_sha256": "38362d1ace1fdeb39d79af1f32822823532528dd191f6b6356f7223b76041402",
+        "stderr_sha256": "1b975121e9fa414c908dd7e1053b54750eddd55b37ab9586fc738c16db2b4543"
+      },
+      "resident": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "streamed": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "verified_streamed": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "batch": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "deadline_streamed": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "deadline_batch": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "resumable_batch": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "plan": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "library_entry_paths": {
+        "exit_code": 0,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "ce0f53894f7c7680ea6cec72e50d122950582ab7573d7bb3bee8b407db634064",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "note": "QEMU user-mode negative admission test; no inference speed, old physical CPU or 2GB-hardware claim.",
+    "binary_sha256": "f8d5637a8085fa06810680372ff95a46fed9ccbef3765aad1fddf0be73f75198",
+    "contract_sha256": "a4fa33d38a0ed6aeeb2815a68331c9daf7727b1a227453672568183088ff541d",
+    "emulator_sha256": "36d35ffe5363bd49bfa9c2b6a048e9fb2e798fea38285a5a45f52d34f9869089",
+    "emulator_version": "qemu-x86_64 version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)",
+    "emulated_cpu": {
+      "native_profile": "x86-avx2",
+      "architecture": "x86_64",
+      "native_compatible": false,
+      "capabilities": {
+        "sse2": true,
+        "sse42": false,
+        "avx": false,
+        "avx2": false,
+        "fma": false,
+        "f16c": false,
+        "bmi2": false
+      },
+      "missing_cpu_os_capabilities": [
+        "sse4.2",
+        "avx",
+        "avx2",
+        "fma",
+        "f16c",
+        "bmi2"
+      ],
+      "scalar_fallback_validated": false
+    },
+    "avx_without_os_state_cpu": {
+      "native_profile": "x86-avx2",
+      "architecture": "x86_64",
+      "native_compatible": false,
+      "capabilities": {
+        "sse2": true,
+        "sse42": true,
+        "avx": false,
+        "avx2": false,
+        "fma": false,
+        "f16c": true,
+        "bmi2": false
+      },
+      "missing_cpu_os_capabilities": [
+        "avx",
+        "avx2",
+        "fma",
+        "bmi2"
+      ],
+      "scalar_fallback_validated": false
+    },
+    "library_paths_checked": 19
+  },
+  "ordinary_batch_regression_protocol": {
+    "pass": true,
+    "binary_sha256": "f8d5637a8085fa06810680372ff95a46fed9ccbef3765aad1fddf0be73f75198",
+    "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+    "cases": {
+      "two_jobs_match_direct_bytes": {
+        "pass": true,
+        "output_sha256": [
+          "76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89",
+          "915cb26176032ac2881bc2dbed98f2bfe575e92f1c0370b818cbbf125111f9c0"
+        ],
+        "summary": "completed=2 workers=2 pending=0 reserved_bytes=0"
+      },
+      "existing_outputs_preserved": {
+        "pass": true
+      },
+      "oversized_input_fails_cleanly": {
+        "pass": true
+      },
+      "native_prompt_limit_rejected_before_output_creation": {
+        "pass": true
+      },
+      "untrusted_model_publishes_no_result": {
+        "pass": true
+      },
+      "pressure_timeout_cleanup": {
+        "pass": true
+      },
+      "sigint_cleanup": {
+        "pass": true
+      }
+    },
+    "note": "Real tiny-model CLI byte parity and failure cleanup, not measured physical memory/concurrency overlap or throughput."
+  },
+  "cli_deadline_regression_protocol": {
+    "pass": true,
+    "binary_sha256": "f8d5637a8085fa06810680372ff95a46fed9ccbef3765aad1fddf0be73f75198",
+    "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+    "cases": {
+      "future_chat_matches_bytes_logits_and_cache_release": {
+        "pass": true,
+        "output_sha256": "f9f8b7ed14e9bfdcd72e1551e148d6cf7a752060d90663b650556949f94247cc",
+        "logits_sha256": "f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb"
+      },
+      "zero_chat_refuses_before_model_and_trace_creation": {
+        "pass": true
+      },
+      "unsupported_backend_and_invalid_chat_values_refuse": {
+        "pass": true
+      },
+      "deadline_preserves_existing_logit_trace": {
+        "pass": true
+      },
+      "timed_chat_wrong_digest_refuses_delivery": {
+        "pass": true
+      },
+      "active_native_chat_expiry": {
+        "pass": true,
+        "selected_budget_ms": 250,
+        "logits_bytes_before_expiry": 128000,
+        "partial_stdout_bytes": 6,
+        "partial_stdout_sha256": "189de8b1604f34a0e74d2e525dde275b77c0a9bb4a191b86436b21d268d09ee3"
+      },
+      "per_job_future_batch_matches_direct_bytes": {
+        "pass": true
+      },
+      "timed_batch_wrong_digest_publishes_nothing": {
+        "pass": true
+      },
+      "batch_zero_and_independent_wait_deadline_cleanup": {
+        "pass": true
+      },
+      "invalid_batch_values_refuse_before_output_creation": {
+        "pass": true
+      },
+      "active_batch_preserves_partial_without_publication": {
+        "pass": true,
+        "selected_budget_ms": 250,
+        "partial_bytes": 5,
+        "published_results": 0
+      }
+    },
+    "note": "Adaptive fixture budgets prove active CLI wiring, not maximum deadline latency, RSS, physical2GB or throughput."
+  },
+  "logs": {
+    "latest-native": {
+      "sha256": "e0cac3e4c58f68612e4c99dacfff4ec62c0d81774567f3714095b432dae937a5",
+      "bytes": 27294
+    },
+    "latest-clippy": {
+      "sha256": "e4b8a9115a51b2150dd2f06c1679a2150df9178fdba5d7e0bd6de8d98de3ce30",
+      "bytes": 165
+    },
+    "latest-build": {
+      "sha256": "6007ec4f81c3d3f45b15228b6aa1ac965ab4cb4429538a85f91e6840ebc7d427",
+      "bytes": 165
+    },
+    "nonative": {
+      "sha256": "0d81a1e950a62af5436270e7a4cfc0a022a72988da2f5ec3b9e0296152dc3984",
+      "bytes": 18711
+    },
+    "clippy-nonative": {
+      "sha256": "27924210e01dd2dd3b72e09815912d95849a437bbe826f2e24addac3cfa32426",
+      "bytes": 638
+    },
+    "msrv": {
+      "sha256": "37e2e3f4d68f23dcbd810b0cbc9b91df53164eafef728848b9308e18cf19cb8d",
+      "bytes": 19335
+    },
+    "python": {
+      "sha256": "2caeb19b50acb566c12130e642a458878cdfc40a50b18ad015c9494874a1220f",
+      "bytes": 122
+    },
+    "clean-1": {
+      "sha256": "a2932ac9a8ad9811d63cfac1b5e85ab2caec126c4cb01b3489ca34adf94b0f04",
+      "bytes": 151
+    },
+    "clean-2": {
+      "sha256": "a2932ac9a8ad9811d63cfac1b5e85ab2caec126c4cb01b3489ca34adf94b0f04",
+      "bytes": 151
+    },
+    "clean-cpu": {
+      "sha256": "08dfae7d09e4438e258aac5329d8c303642a1ea270018b1cb3bb82af7e98547e",
+      "bytes": 65
+    },
+    "ordinary-batch": {
+      "sha256": "b9d6f1a9852c5a68379e12846f02c0482bb9e8a1cda17597b8cddd4d531eb206",
+      "bytes": 103
+    },
+    "cli-deadlines": {
+      "sha256": "b6ce3d3815796643a4d1b673762317b40d073d3c68fb1e599183f480746acf2e",
+      "bytes": 135
+    }
+  },
+  "limitations": [
+    "Linux-only opt-in local completed-job resume; unfinished work restarts from its prompt, without KV continuation.",
+    "Local SHA-256 records are integrity checks, not signed attestations or protection from an actor rewriting records and outputs.",
+    "Kernel flock coordinates cooperating processes on a stable local lock inode; not a distributed lease or adversarial concurrent-filesystem proof.",
+    "No power-loss, exactly-once, physical2GB, RSS, large-model, throughput or maximum deadline latency claim.",
+    "Preflight hashing, skip checks, result sync and publication are outside native/admission deadline budgets.",
+    "Real tiny-Q8 output parity here compares the existing direct streamed decoder; independent upstream mathematical parity is covered by existing separate repository gates."
+  ]
+}
