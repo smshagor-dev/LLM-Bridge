@@ -1,0 +1,228 @@
+{
+  "schema_version": 1,
+  "client_date": "2026-11-15",
+  "client_timezone": "Europe/Moscow",
+  "recorded_at_utc": "2026-11-14T22:24:25.586288+00:00",
+  "scope": "Cooperative admission-wait timeout cleanup and real tiny-model correctness; not native execution deadlines",
+  "source_commit": "3e98e580826be83784b8b7131ff8ea0532b2e252",
+  "source_tree": "ea22da818448cb1912a52e5a2a0b3baf9b0e5e2e",
+  "source_worktree_clean": true,
+  "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+  "contract_binary_sha256": "ffe2b31d4f8a72cf7adc53ba81fc77e62d88c7ab8593c6fab6769cd0c65e26f9",
+  "validation": {
+    "native_rust_tests": 244,
+    "non_native_rust_tests": 206,
+    "msrv_1_82_non_native_tests": 206,
+    "python_tests": 23,
+    "format_and_diff_checks": "passed",
+    "release_clippy_native_and_non_native": "passed with -D warnings",
+    "clean_source_fresh_process_real_model_runs": 2,
+    "qemu_guarded_library_paths": 16
+  },
+  "protocol": [
+    "Missing-model FIFO head times out behind a full reservation; tail completes after capacity releases",
+    "Manual pause retains state while a waiting request times out and cleans its ticket",
+    "A timed waiting request leaves an already-running native slot intact",
+    "The running real session completes beyond its own admission timeout with identical direct hashes",
+    "Unknown pressure causes a waiting timeout without model opening or leaked charges",
+    "Zero timeout refuses before enqueue/sampling and does not change pressure snapshot",
+    "Subsequent generation recovers with zero final pending/reserved bytes",
+    "All three successful generations match direct complete output and every FP32 logit hash"
+  ],
+  "logs": {
+    "native": {
+      "sha256": "ce05e231a3f71c46a18c906a092f9b1ff2b62ebf7daf97670b0001e76b4ababf",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 0.23s",
+        "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 231 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    "nonnative": {
+      "sha256": "90e74f3c0f24a7bf560e17c96b520408c4f5d868d6ddaaaba740541116540ec5",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 6.48s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 195 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    "msrv": {
+      "sha256": "8c9dce9ee0a0e6be8c1710ae8c8dad49a3faa1197a652118a59b3ed7c9109b68",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 15.49s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 195 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    "python": {
+      "sha256": "1ce9a6f95696b3b8b31609f72a32243669c850a4af802336115fce9609350fe7",
+      "result_lines": [
+        "Ran 23 tests in 0.078s"
+      ]
+    },
+    "clippy-native": {
+      "sha256": "d514bc42548c68db178f6f6d9362465923fe48c8ba5645f75ffb9b76623d7978",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 2.04s"
+      ]
+    },
+    "clippy-nonnative": {
+      "sha256": "263fbcd3501e586f65791ef15f04c8a6a0cdfefc3039efc592ec78ec0e98711a",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 1.32s"
+      ]
+    },
+    "clean-1": {
+      "sha256": "61cf07aa787a507a17574a3dc8bb1e24014018c27c31e6c75df9d3f912a3128e",
+      "result_lines": [
+        "admission timeout: expired FIFO head cleanup, active slot retained beyond wait deadline, paused/unknown-pressure refusal, zero timeout and exact bytes/logits: PASS",
+        "slot_bytes=67108864 output_sha256=76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89 logits_sha256=f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb"
+      ]
+    },
+    "clean-2": {
+      "sha256": "61cf07aa787a507a17574a3dc8bb1e24014018c27c31e6c75df9d3f912a3128e",
+      "result_lines": [
+        "admission timeout: expired FIFO head cleanup, active slot retained beyond wait deadline, paused/unknown-pressure refusal, zero timeout and exact bytes/logits: PASS",
+        "slot_bytes=67108864 output_sha256=76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89 logits_sha256=f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb"
+      ]
+    }
+  },
+  "cpu_guard_report_sha256": "77c87348000ebc158a29c5faa2258999d36ba836ce9caf52952bdaca8e7f1036",
+  "cpu_guard": {
+    "pass": true,
+    "source": {
+      "commit": "3e98e580826be83784b8b7131ff8ea0532b2e252",
+      "tree": "ea22da818448cb1912a52e5a2a0b3baf9b0e5e2e",
+      "working_tree_dirty": false
+    },
+    "guest_cpu": "core2duo",
+    "cases": {
+      "doctor": {
+        "exit_code": 0,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "07c7940404a2039d9b7c29c07883551ca82277a692fd97bff4dca4363be69f39",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "runtime_profile_cannot_override_build": {
+        "exit_code": 0,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "a28f34a6e921675321c402db3e122c190d9a08fff407aec75e96285f5820150a",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "avx_without_os_state": {
+        "exit_code": 0,
+        "guest_cpu": "Haswell,-xsave",
+        "stdout_sha256": "7bb17306205287e67be80244b21ff2042fe6db7f3b0009f76a871fbc5e3595f1",
+        "stderr_sha256": "1b975121e9fa414c908dd7e1053b54750eddd55b37ab9586fc738c16db2b4543"
+      },
+      "resident": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "streamed": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "verified_streamed": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "plan": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "library_entry_paths": {
+        "exit_code": 0,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "cc2a3e27b25e09ad2e4064d231cb6f5a1266527e35dbbe78bf6b1794071c2fab",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "note": "QEMU user-mode negative admission test; no inference speed, old physical CPU or 2GB-hardware claim.",
+    "binary_sha256": "2827f46542dde9a88cf898afaca01c89c08c23e825c5d1ce7a751926f2e8ab3c",
+    "contract_sha256": "a79c4ce13bd393b16a7124d496d23af631e064bb83ae09fce635c9a3d874163e",
+    "emulator_sha256": "36d35ffe5363bd49bfa9c2b6a048e9fb2e798fea38285a5a45f52d34f9869089",
+    "emulator_version": "qemu-x86_64 version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)",
+    "emulated_cpu": {
+      "native_profile": "x86-avx2",
+      "architecture": "x86_64",
+      "native_compatible": false,
+      "capabilities": {
+        "sse2": true,
+        "sse42": false,
+        "avx": false,
+        "avx2": false,
+        "fma": false,
+        "f16c": false,
+        "bmi2": false
+      },
+      "missing_cpu_os_capabilities": [
+        "sse4.2",
+        "avx",
+        "avx2",
+        "fma",
+        "f16c",
+        "bmi2"
+      ],
+      "scalar_fallback_validated": false
+    },
+    "avx_without_os_state_cpu": {
+      "native_profile": "x86-avx2",
+      "architecture": "x86_64",
+      "native_compatible": false,
+      "capabilities": {
+        "sse2": true,
+        "sse42": true,
+        "avx": false,
+        "avx2": false,
+        "fma": false,
+        "f16c": true,
+        "bmi2": false
+      },
+      "missing_cpu_os_capabilities": [
+        "avx",
+        "avx2",
+        "fma",
+        "bmi2"
+      ],
+      "scalar_fallback_validated": false
+    },
+    "library_paths_checked": 14
+  },
+  "limitations": [
+    "Cooperative timeout can be observed late due to scheduling/locks/synchronous sampler",
+    "No interruption of active authentication/native work or token/logits consumers",
+    "No hard wall-clock return or end-to-end inference deadline guarantee",
+    "No CLI/server timeout integration",
+    "No RSS, physical2GB, large-model, throughput or race-detector claim"
+  ]
+}

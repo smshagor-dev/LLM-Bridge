@@ -115,3 +115,7 @@ M3 now has native-derived CLI/context admission, not a complete adaptive schedul
 ## Sampled executor memory-pressure checkpoint
 
 - An opt-in OS/cgroup-aware admission gate samples before and during queued generation polls, fails closed on unknown headroom and uses separate low/high thresholds for recovery hysteresis. Pressure recovery cannot clear manual pause; active reservations remain valid. Sampling is shared/throttled, with no background monitor or worker replanning. This is cooperative sampled admission, not a physical memory/RSS guarantee. See `docs/EXECUTOR_MEMORY_PRESSURE.md`.
+
+## Bounded admission waiting checkpoint
+
+- Opt-in queued/executor timeout APIs bound cooperative admission waiting, including pressure sampling, with zero-time refusal and RAII cleanup of expired FIFO tickets. Existing methods keep indefinite waiting/cancellation. Already-admitted native work can finish beyond the waiting budget. Checks cover sampler delay, exact/maximum duration boundaries and real native recovery; neither hard wall-clock return nor end-to-end inference deadlines are implied. See `docs/ADMISSION_WAIT_TIMEOUT.md`.

@@ -14,6 +14,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
+use std::time::Duration;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ExecutorConfig {
@@ -163,8 +164,32 @@ impl StreamedExecutor {
     /// Existing controlled generation performs all native/config/source checks.
     pub fn generate<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
         &self,
+        request: QueuedStreamedRequest<'_>,
+        cancelled: &AtomicBool,
+        on_piece: F,
+        on_logits: L,
+    ) -> Result<QueuedStreamedMetrics, String> {
+        self.generate_inner(request, cancelled, None, on_piece, on_logits)
+    }
+
+    /// Bound waiting for a full slot, including pressure polling. Once admitted,
+    /// native work uses its existing cancellation semantics without this timeout.
+    pub fn generate_with_timeout<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
+        &self,
+        request: QueuedStreamedRequest<'_>,
+        cancelled: &AtomicBool,
+        wait_timeout: Duration,
+        on_piece: F,
+        on_logits: L,
+    ) -> Result<QueuedStreamedMetrics, String> {
+        self.generate_inner(request, cancelled, Some(wait_timeout), on_piece, on_logits)
+    }
+
+    fn generate_inner<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
+        &self,
         mut request: QueuedStreamedRequest<'_>,
         cancelled: &AtomicBool,
+        wait_timeout: Option<Duration>,
         on_piece: F,
         on_logits: L,
     ) -> Result<QueuedStreamedMetrics, String> {
@@ -187,6 +212,7 @@ impl StreamedExecutor {
             &self.queue,
             request,
             cancelled,
+            wait_timeout,
             on_piece,
             on_logits,
             || self.refresh_pressure(),

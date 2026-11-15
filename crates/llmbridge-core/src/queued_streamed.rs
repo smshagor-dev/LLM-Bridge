@@ -81,7 +81,37 @@ pub fn generate_streamed_queued<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> boo
     on_piece: F,
     on_logits: L,
 ) -> Result<QueuedStreamedMetrics, String> {
-    generate_streamed_queued_with_poll(queue, request, cancelled, on_piece, on_logits, || {})
+    generate_streamed_queued_with_poll(queue, request, cancelled, None, on_piece, on_logits, || {})
+}
+
+/// Bound cooperative admission waiting, not native execution. Zero refuses
+/// before enqueue/sampling. Expiration removes a pending ticket through RAII.
+pub fn generate_streamed_queued_with_timeout<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
+    queue: &AdmissionQueue,
+    request: QueuedStreamedRequest<'_>,
+    cancelled: &AtomicBool,
+    wait_timeout: Duration,
+    on_piece: F,
+    on_logits: L,
+) -> Result<QueuedStreamedMetrics, String> {
+    generate_streamed_queued_with_poll(
+        queue,
+        request,
+        cancelled,
+        Some(wait_timeout),
+        on_piece,
+        on_logits,
+        || {},
+    )
+}
+
+fn remaining_wait(elapsed: Duration, timeout: Option<Duration>) -> Result<Duration, String> {
+    let poll = Duration::from_millis(5);
+    match timeout {
+        Some(limit) if elapsed >= limit => Err("queued generation admission wait timed out".into()),
+        Some(limit) => Ok(poll.min(limit - elapsed)),
+        None => Ok(poll),
+    }
 }
 
 pub(crate) fn generate_streamed_queued_with_poll<
@@ -92,6 +122,7 @@ pub(crate) fn generate_streamed_queued_with_poll<
     queue: &AdmissionQueue,
     request: QueuedStreamedRequest<'_>,
     cancelled: &AtomicBool,
+    wait_timeout: Option<Duration>,
     on_piece: F,
     on_logits: L,
     mut before_poll: P,
@@ -101,8 +132,10 @@ pub(crate) fn generate_streamed_queued_with_poll<
     }
     crate::native_cpu::ensure_compatible()?;
     let charge = request.reservation_bytes()?;
-    before_poll();
     let start = Instant::now();
+    remaining_wait(start.elapsed(), wait_timeout)?;
+    before_poll();
+    remaining_wait(start.elapsed(), wait_timeout)?;
     let mut pending = queue
         .request(charge)
         .map_err(|e| format!("streamed queue admission: {e:?}"))?;
@@ -110,19 +143,22 @@ pub(crate) fn generate_streamed_queued_with_poll<
         if cancelled.load(Ordering::Acquire) {
             return Err("queued generation cancelled while waiting".into());
         }
+        remaining_wait(start.elapsed(), wait_timeout)?;
         before_poll();
+        remaining_wait(start.elapsed(), wait_timeout)?;
         if let Some(reservation) = pending
             .try_admit()
             .map_err(|e| format!("streamed queue polling: {e:?}"))?
         {
             break reservation;
         }
-        std::thread::park_timeout(Duration::from_millis(5));
+        std::thread::park_timeout(remaining_wait(start.elapsed(), wait_timeout)?);
     };
     let queue_wait_ns = start.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
     if cancelled.load(Ordering::Acquire) {
         return Err("queued generation cancelled after admission".into());
     }
+    remaining_wait(start.elapsed(), wait_timeout)?;
     let inference = generate_streamed_controlled(
         request.model,
         request.prompt,
@@ -143,6 +179,73 @@ pub(crate) fn generate_streamed_queued_with_poll<
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn waiting_boundaries_do_not_overflow_or_oversleep_remaining_budget() {
+        let limit = Duration::from_millis(10);
+        assert!(remaining_wait(Duration::ZERO, Some(Duration::ZERO)).is_err());
+        assert!(remaining_wait(limit, Some(limit)).is_err());
+        assert!(remaining_wait(limit + limit, Some(limit)).is_err());
+        assert_eq!(
+            remaining_wait(Duration::from_millis(9), Some(limit)).unwrap(),
+            Duration::from_millis(1)
+        );
+        assert_eq!(
+            remaining_wait(Duration::ZERO, Some(Duration::MAX)).unwrap(),
+            Duration::from_millis(5)
+        );
+        assert_eq!(
+            remaining_wait(Duration::MAX, None).unwrap(),
+            Duration::from_millis(5)
+        );
+    }
+    #[test]
+    fn expired_sampler_and_zero_budget_do_not_open_model_or_leak_ticket() {
+        use crate::memory_budget::MemoryBudget;
+        let budget = MemoryBudget::new(64 * 1024 * 1024).unwrap();
+        let queue = AdmissionQueue::new(budget.clone(), 1).unwrap();
+        let request = QueuedStreamedRequest::new(Path::new("not-opened.gguf"), "fixture");
+        let error = generate_streamed_queued_with_poll(
+            &queue,
+            request,
+            &AtomicBool::new(false),
+            Some(Duration::ZERO),
+            |_| panic!("output"),
+            |_| panic!("logits"),
+            || panic!("zero timeout sampled"),
+        )
+        .unwrap_err();
+        assert!(error.contains("admission wait timed out"));
+        let mut sampled_pending = false;
+        let error = generate_streamed_queued_with_poll(
+            &queue,
+            request,
+            &AtomicBool::new(false),
+            Some(Duration::from_millis(10)),
+            |_| panic!("output"),
+            |_| panic!("logits"),
+            || {
+                if queue.pending() == 1 {
+                    sampled_pending = true;
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            },
+        )
+        .unwrap_err();
+        assert!(sampled_pending);
+        assert!(error.contains("admission wait timed out"));
+        assert_eq!(queue.pending(), 0);
+        assert_eq!(budget.reserved(), 0);
+        let error = generate_streamed_queued_with_timeout(
+            &queue,
+            request,
+            &AtomicBool::new(true),
+            Duration::ZERO,
+            |_| panic!("output"),
+            |_| panic!("logits"),
+        )
+        .unwrap_err();
+        assert!(error.contains("cancelled before admission"));
+    }
     #[test]
     fn charge_includes_all_selected_ceilings_and_exact_cache_slots() {
         let mut request = QueuedStreamedRequest::new(Path::new("not-opened.gguf"), "fixture");
