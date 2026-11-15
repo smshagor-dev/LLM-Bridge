@@ -92,6 +92,10 @@ Local checks: Python regression suite; workspace non-native tests; release nativ
 - Group contiguous matrix rows within the existing packed buffer, preserving per-row dot order/cancellation and exact tensor boundaries. No extra weight buffer or asynchronous worker. Range metrics distinguish total/weight callback counts and bytes from source I/O. Authenticated metadata callbacks use bounded reads from the already sealed prefix, preventing repeated whole-block hashing for tiny GGUF fields.
 - Real-model chunk geometry, independent reference and cancellation/integrity contracts validate this change separately. Historical authenticated-cache speed/read-count evidence is not current-policy evidence. Configured authenticated cache reservations remain accounted until release/teardown. See `docs/BOUNDED_ROW_BATCHING.md`.
 
+## Cooperative native execution deadline checkpoint
+
+- The direct streamed API now accepts an opt-in absolute deadline observed during authentication, native polling/range reads and consumer boundaries. Expiry aborts without setting the caller cancellation flag and retains trusted-source/cleanup semantics. Existing queue timeouts still bound waiting only. No preemption, hard wall-clock return, CLI propagation or physical low-RAM result is implied. See `docs/STREAMED_EXECUTION_DEADLINE.md`.
+
 ## M3–M11
 
 M3 now has native-derived CLI/context admission, not a complete adaptive scheduler. M4 remote providers, M5 MoE, M6 GPU, M7 API/SDK, M8 desktop, M9 full robustness/benchmarks, M10 format/plugin extensibility and M11 large-model feasibility remain incomplete. No 70B/550B or real 2GB-machine result is claimed.

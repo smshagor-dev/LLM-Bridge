@@ -36,6 +36,41 @@ pub struct StreamedControl<'a> {
     pub cache: Option<&'a CacheControl>,
 }
 
+/// Opt-in absolute monotonic deadline, observed cooperatively at safe boundaries.
+/// Existing StreamedControl literals and untimed entry points remain unchanged.
+#[derive(Clone, Copy)]
+pub struct StreamedDeadlineControl<'a> {
+    pub control: StreamedControl<'a>,
+    pub deadline: Instant,
+}
+struct ExecutionControl<'a> {
+    session: StreamedControl<'a>,
+    deadline: Option<Instant>,
+}
+impl<'a> From<StreamedControl<'a>> for ExecutionControl<'a> {
+    fn from(session: StreamedControl<'a>) -> Self {
+        Self {
+            session,
+            deadline: None,
+        }
+    }
+}
+fn deadline_expired(deadline: Option<Instant>) -> bool {
+    deadline.is_some_and(|deadline| Instant::now() >= deadline)
+}
+fn interrupted(cancelled: &AtomicBool, deadline: Option<Instant>) -> bool {
+    cancelled.load(Ordering::Acquire) || deadline_expired(deadline)
+}
+fn ensure_active(cancelled: &AtomicBool, deadline: Option<Instant>) -> Result<(), String> {
+    if cancelled.load(Ordering::Acquire) {
+        Err("streamed generation cancelled".into())
+    } else if deadline_expired(deadline) {
+        Err("streamed generation deadline expired".into())
+    } else {
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct StreamedConfig {
     pub context_tokens: u32,
@@ -121,6 +156,7 @@ struct State<'a, F, L> {
     max_chunk: usize,
     reader: CachedLocalReader,
     cancelled: &'a AtomicBool,
+    deadline: Option<Instant>,
     cache_control: Option<&'a CacheControl>,
     emit: F,
     logits: L,
@@ -142,7 +178,7 @@ extern "C" fn poll<F, L>(state: *mut c_void) -> i32 {
         }
         // SAFETY: native borrows this State synchronously, never stores its pointer.
         let state = unsafe { &*(state.cast::<State<'_, F, L>>()) };
-        i32::from(!state.cancelled.load(Ordering::Acquire) && state.failure.is_none())
+        i32::from(!interrupted(state.cancelled, state.deadline) && state.failure.is_none())
     })
 }
 extern "C" fn read<F, L>(
@@ -157,6 +193,9 @@ extern "C" fn read<F, L>(
         }
         // SAFETY: sole mutable synchronous callback; C++ supplies length writable bytes.
         let state = unsafe { &mut *(state.cast::<State<'_, F, L>>()) };
+        if interrupted(state.cancelled, state.deadline) || state.failure.is_some() {
+            return 0;
+        }
         let start = state.performance.as_ref().map(|_| Instant::now());
         if length > state.max_chunk {
             state.failure = Some("native read exceeds configured chunk".into());
@@ -167,16 +206,17 @@ extern "C" fn read<F, L>(
         // a synchronous callback, so releasing here cannot invalidate native data.
         apply_cache_control(state);
         let flag = state.cancelled;
+        let deadline = state.deadline;
         let copied = (|| {
             // Authenticated metadata comes from the already sealed trusted prefix.
             // This avoids rehashing a source block for every small GGUF field.
             if let Some(metadata) = state.sealed.filter(|m| offset < m.prefix_bytes) {
-                if flag.load(Ordering::Acquire) {
+                if interrupted(flag, deadline) {
                     return 0;
                 }
                 let output = unsafe { std::slice::from_raw_parts_mut(output.cast::<u8>(), length) };
                 return match metadata.read_into(offset, output) {
-                    Ok(()) if !flag.load(Ordering::Acquire) => length,
+                    Ok(()) if !interrupted(flag, deadline) => length,
                     Ok(()) => 0,
                     Err(error) => {
                         state.failure = Some(error.to_string());
@@ -186,10 +226,10 @@ extern "C" fn read<F, L>(
             }
             match state
                 .reader
-                .read_range_cancellable(offset, length, || flag.load(Ordering::Acquire))
+                .read_range_cancellable(offset, length, || interrupted(flag, deadline))
             {
                 Ok(bytes) => {
-                    if flag.load(Ordering::Acquire) {
+                    if interrupted(flag, deadline) {
                         return 0;
                     }
                     unsafe {
@@ -219,7 +259,7 @@ extern "C" fn emit<F: FnMut(&[u8]) -> bool, L>(
             return 0;
         }
         let state = unsafe { &mut *(state.cast::<State<'_, F, L>>()) };
-        if state.cancelled.load(Ordering::Acquire) || state.failure.is_some() {
+        if interrupted(state.cancelled, state.deadline) || state.failure.is_some() {
             return 0;
         }
         let piece = unsafe { std::slice::from_raw_parts(bytes.cast(), count) };
@@ -231,7 +271,7 @@ extern "C" fn emit<F: FnMut(&[u8]) -> bool, L>(
         if let (Some(clock), Some(start)) = (&mut state.performance, start) {
             clock.consumer(start.elapsed());
         }
-        i32::from(accepted && !state.cancelled.load(Ordering::Acquire))
+        i32::from(accepted && !interrupted(state.cancelled, state.deadline))
     })
 }
 extern "C" fn logits<F, L: FnMut(&[f32]) -> bool>(
@@ -244,7 +284,7 @@ extern "C" fn logits<F, L: FnMut(&[f32]) -> bool>(
             return 0;
         }
         let state = unsafe { &mut *(state.cast::<State<'_, F, L>>()) };
-        if state.cancelled.load(Ordering::Acquire) || state.failure.is_some() {
+        if interrupted(state.cancelled, state.deadline) || state.failure.is_some() {
             return 0;
         }
         apply_cache_control(state);
@@ -258,7 +298,7 @@ extern "C" fn logits<F, L: FnMut(&[f32]) -> bool>(
             clock.consumer(start.elapsed());
         }
         apply_cache_control(state);
-        i32::from(accepted && !state.cancelled.load(Ordering::Acquire))
+        i32::from(accepted && !interrupted(state.cancelled, state.deadline))
     })
 }
 
@@ -279,7 +319,7 @@ pub fn generate_streamed<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
         prompt,
         config,
         cancelled,
-        StreamedControl::default(),
+        StreamedControl::default().into(),
         on_piece,
         on_logits,
     )
@@ -304,7 +344,8 @@ pub fn generate_streamed_verified<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> b
         StreamedControl {
             expected_sha256: Some(expected_sha256),
             cache: None,
-        },
+        }
+        .into(),
         on_piece,
         on_logits,
     )
@@ -323,7 +364,39 @@ pub fn generate_streamed_controlled<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) ->
     on_logits: L,
 ) -> Result<StreamedMetrics, String> {
     generate_streamed_internal(
-        model, prompt, config, cancelled, control, on_piece, on_logits,
+        model,
+        prompt,
+        config,
+        cancelled,
+        control.into(),
+        on_piece,
+        on_logits,
+    )
+}
+
+/// Cooperatively bound this synchronous session, including authentication and
+/// native execution. In-flight I/O/native work/consumers cannot be preempted.
+/// Deadline expiry never writes the caller's cancellation flag.
+pub fn generate_streamed_with_deadline<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
+    model: &Path,
+    prompt: &str,
+    config: StreamedConfig,
+    cancelled: &AtomicBool,
+    control: StreamedDeadlineControl<'_>,
+    on_piece: F,
+    on_logits: L,
+) -> Result<StreamedMetrics, String> {
+    generate_streamed_internal(
+        model,
+        prompt,
+        config,
+        cancelled,
+        ExecutionControl {
+            session: control.control,
+            deadline: Some(control.deadline),
+        },
+        on_piece,
+        on_logits,
     )
 }
 fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
@@ -331,15 +404,20 @@ fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>
     prompt: &str,
     config: StreamedConfig,
     cancelled: &AtomicBool,
-    control: StreamedControl<'_>,
+    execution: ExecutionControl<'_>,
     on_piece: F,
     on_logits: L,
 ) -> Result<StreamedMetrics, String> {
+    let ExecutionControl {
+        session: control,
+        deadline,
+    } = execution;
     let expected_sha256 = control.expected_sha256;
     let performance = config.collect_performance.then(PerformanceClock::start);
     if cancelled.load(Ordering::Acquire) {
         return Err("streamed generation cancelled before admission".into());
     }
+    ensure_active(cancelled, deadline)?;
     if !(64..=8192).contains(&config.context_tokens)
         || !(1..=2048).contains(&config.max_tokens)
         || !(34..=1024 * 1024).contains(&config.chunk_bytes)
@@ -360,9 +438,13 @@ fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>
     }
     crate::native_cpu::ensure_compatible()?;
     let prompt = CString::new(prompt).map_err(|_| "NUL in prompt")?;
-    let index = GgufTensorIndex::inspect(model).map_err(|e| e.to_string())?;
+    ensure_active(cancelled, deadline)?;
+    let index = GgufTensorIndex::inspect(model);
+    ensure_active(cancelled, deadline)?;
+    let index = index.map_err(|e| e.to_string())?;
     let mut reader = BoundedLocalReader::open(model, config.chunk_bytes, config.chunk_bytes * 2)
         .map_err(|e| e.to_string())?;
+    ensure_active(cancelled, deadline)?;
     if reader.identity() != &index.source_identity {
         return Err("streamed model changed after index".into());
     }
@@ -372,11 +454,12 @@ fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>
                 hash,
                 index.data_offset,
                 config.authentication_budget_bytes,
-                || cancelled.load(Ordering::Acquire),
+                || interrupted(cancelled, deadline),
             )
         })
-        .transpose()
-        .map_err(|e| e.to_string())?;
+        .transpose();
+    ensure_active(cancelled, deadline)?;
+    let sealed = sealed.map_err(|e| e.to_string())?;
     let tokenizer_path = sealed.as_ref().map_or(model, |snapshot| snapshot.path());
     let path = CString::new(tokenizer_path.to_str().ok_or("model path must be UTF-8")?)
         .map_err(|_| "NUL in model path")?;
@@ -391,6 +474,7 @@ fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>
         max_chunk: config.chunk_bytes,
         reader: CachedLocalReader::new(reader, config.cache_bytes).map_err(|e| e.to_string())?,
         cancelled,
+        deadline,
         cache_control: control.cache,
         emit: on_piece,
         logits: on_logits,
@@ -417,7 +501,8 @@ fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>
             error.len(),
         )
     };
-    if status == 2 || cancelled.load(Ordering::Acquire) {
+    ensure_active(cancelled, deadline)?;
+    if status == 2 {
         return Err("streamed generation cancelled".into());
     }
     if status != 0 {
@@ -444,6 +529,101 @@ fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn expired_deadline_refuses_before_open_and_preserves_caller_flag() {
+        let flag = AtomicBool::new(false);
+        let control = StreamedDeadlineControl {
+            control: StreamedControl::default(),
+            deadline: Instant::now(),
+        };
+        let error = generate_streamed_with_deadline(
+            Path::new("/absent-deadline.gguf"),
+            "fixture",
+            StreamedConfig::default(),
+            &flag,
+            control,
+            |_| panic!("piece"),
+            |_| panic!("logits"),
+        )
+        .unwrap_err();
+        assert!(error.contains("deadline expired"));
+        assert!(!flag.load(Ordering::Acquire));
+        flag.store(true, Ordering::Release);
+        let error = generate_streamed_with_deadline(
+            Path::new("/absent-deadline.gguf"),
+            "fixture",
+            StreamedConfig::default(),
+            &flag,
+            control,
+            |_| panic!("piece"),
+            |_| panic!("logits"),
+        )
+        .unwrap_err();
+        assert!(error.contains("cancelled before admission"));
+    }
+    #[test]
+    fn expired_callbacks_never_read_or_deliver_native_data() {
+        static DELIVERED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        fn no_piece(_: &[u8]) -> bool {
+            DELIVERED.fetch_add(1, Ordering::Relaxed);
+            true
+        }
+        fn no_logits(_: &[f32]) -> bool {
+            DELIVERED.fetch_add(1, Ordering::Relaxed);
+            true
+        }
+        DELIVERED.store(0, Ordering::Relaxed);
+        type Piece = fn(&[u8]) -> bool;
+        type Logits = fn(&[f32]) -> bool;
+        let path = std::env::temp_dir().join(format!(
+            "llmbridge-deadline-callback-{}",
+            std::process::id()
+        ));
+        std::fs::write(&path, [1u8; 64]).unwrap();
+        let reader = BoundedLocalReader::open(&path, 64, 128).unwrap();
+        let flag = AtomicBool::new(false);
+        let mut state = State {
+            ranges: RangeReads::default(),
+            sealed: None,
+            weight_offset: 0,
+            max_chunk: 64,
+            reader: CachedLocalReader::new(reader, 0).unwrap(),
+            cancelled: &flag,
+            deadline: Some(Instant::now()),
+            cache_control: None,
+            emit: no_piece as Piece,
+            logits: no_logits as Logits,
+            failure: None,
+            performance: None,
+        };
+        let pointer = (&mut state as *mut State<'_, Piece, Logits>).cast();
+        let mut output = [0xa5u8; 16];
+        assert_eq!(poll::<Piece, Logits>(pointer), 0);
+        assert_eq!(
+            read::<Piece, Logits>(pointer, output.as_mut_ptr().cast(), 0, 16),
+            0
+        );
+        assert_eq!(emit::<Piece, Logits>(output.as_ptr().cast(), 1, pointer), 0);
+        assert_eq!(logits::<Piece, Logits>([0.0f32].as_ptr(), 1, pointer), 0);
+        assert_eq!(output, [0xa5; 16]);
+        assert_eq!(state.ranges.calls, 0);
+        assert_eq!(state.reader.metrics().source_read_calls, 0);
+        assert!(!flag.load(Ordering::Acquire));
+        assert_eq!(DELIVERED.load(Ordering::Relaxed), 0);
+        state.deadline = None;
+        let pointer = (&mut state as *mut State<'_, Piece, Logits>).cast();
+        assert_eq!(poll::<Piece, Logits>(pointer), 1);
+        assert_eq!(emit::<Piece, Logits>(output.as_ptr().cast(), 1, pointer), 1);
+        assert_eq!(logits::<Piece, Logits>([0.0f32].as_ptr(), 1, pointer), 1);
+        assert_eq!(DELIVERED.load(Ordering::Relaxed), 2);
+        assert_eq!(
+            read::<Piece, Logits>(pointer, output.as_mut_ptr().cast(), 0, 16),
+            16
+        );
+        assert_eq!(output, [1; 16]);
+        drop(state);
+        std::fs::remove_file(path).unwrap();
+    }
     #[test]
     fn range_metrics_count_calls_bytes_and_maximum_without_overflow() {
         let mut ranges = RangeReads::default();

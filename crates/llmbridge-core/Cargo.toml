@@ -75,3 +75,7 @@ required-features = ["native"]
 [[example]]
 name = "admission_timeout_contract"
 required-features = ["native"]
+
+[[example]]
+name = "streamed_deadline_contract"
+required-features = ["native"]
