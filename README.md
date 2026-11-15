@@ -104,6 +104,33 @@ flowchart TD
 
 The integration roadmap is to extend the existing decoder with broader model/quantization support, benchmark-driven CPU and I/O scheduling, asynchronous prefetch where safe, stronger portable worker isolation and resource enforcement, and reproducible low-memory **physical hardware** evidence. Queue admission, worker planning and cache-pressure controls already have implemented pieces, but they are not a globally adaptive or OS-enforced scheduler. Remote providers, GPU, MoE, public API and desktop integration remain separate later milestones.
 
+### 4. PC → Bridge → model storage (local drives and future cloud)
+
+LLM Bridge opens GGUF files on an **internal drive** or an **external/secondary drive mounted by the OS**. Both use the implemented local reader when the file is accessible as a regular file. **Google Drive links and arbitrary remote URLs are not model sources today.**
+
+**[Explore the animated 3D workflow](docs/architecture-3d.html)**. Open the **Raw** HTML file locally in a browser: GitHub README does not execute embedded HTML/JavaScript. The self-contained explorer has interactive source choices, draggable 3D orbit and animated data paths. It is an architecture visualization, **not** a remote-storage implementation or benchmark.
+
+```mermaid
+flowchart LR
+    PC["Your PC<br/>prompt + CPU/RAM"] --> Bridge["LLM Bridge<br/>Rust control + admission"]
+    Bridge --> Source{"Model location?"}
+    Source --> SSD["Internal SSD / HDD<br/>implemented local path"]
+    Source --> Mount["External / mounted drive<br/>implemented local path"]
+    Source -.-> Cloud["Google Drive<br/>planned: no direct adapter"]
+    Cloud -.-> Stage["Future OAuth/API + bounded download<br/>verified local staging"]
+    SSD --> File["Accessible local GGUF file"]
+    Mount --> File
+    Stage -.-> File
+    File --> Index["GGUF index + source checks"]
+    Index --> Reader["Bounded range reads<br/>optional trusted SHA-256"]
+    Reader --> CPU["Native CPU decoder<br/>attention + KV + SwiGLU"]
+    CPU --> Reply["Tokens / logits / metrics"]
+    Reply --> PC
+```
+
+**Implemented:** local and mounted-file access (when regular-file checks pass), indexed GGUF ranges, CPU-first streamed decoder, opt-in Linux verified sessions, cancellation and bounded staging.
+
+**Planned:** Google Drive OAuth/API and secure transfer adapter, verified local staging, direct remote range streaming, resilient remote retries and portable constrained-hardware validation. Model bytes from Google Drive are **not** passed directly into the current decoder.
 ### Where to find the code
 
 | Location | Responsibility |
