@@ -1,9 +1,11 @@
+mod checkpoint;
 use llmbridge_core::{
     hardware,
     memory_pressure::MemoryPressurePolicy,
     queued_streamed::{QueuedExecutionLimits, QueuedStreamedRequest},
     streamed_executor::{ExecutorConfig, StreamedExecutor},
 };
+use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File, OpenOptions},
     io::{BufRead, BufReader, Read, Write},
@@ -29,6 +31,8 @@ struct Options {
     context: u32,
     digest: Option<String>,
     pressure: Option<MemoryPressurePolicy>,
+    resumable: bool,
+    resume: bool,
 }
 fn options(args: &[String]) -> Result<Options, String> {
     let model = args.first().ok_or("batch requires a GGUF model path")?;
@@ -45,7 +49,24 @@ fn options(args: &[String]) -> Result<Options, String> {
     let mut digest = None;
     let mut low = None;
     let mut high = None;
-    for pair in args[1..].chunks(2) {
+    let mut resumable = false;
+    let mut resume = false;
+    let mut position = 1;
+    while position < args.len() {
+        match args[position].as_str() {
+            "--resumable" => {
+                resumable = true;
+                position += 1;
+                continue;
+            }
+            "--resume" => {
+                resume = true;
+                position += 1;
+                continue;
+            }
+            _ => {}
+        }
+        let pair = &args[position..args.len().min(position + 2)];
         let value = pair.get(1).ok_or("missing batch option value")?;
         let number = || {
             value
@@ -72,6 +93,7 @@ fn options(args: &[String]) -> Result<Options, String> {
             "--pressure-resume-mb" => high = Some(number()?),
             flag => return Err(format!("unknown batch option {flag}")),
         }
+        position += 2;
     }
     let mb = |n: u64| n.checked_mul(1024 * 1024).ok_or("MiB overflow".to_string());
     if workers == 0
@@ -88,6 +110,9 @@ fn options(args: &[String]) -> Result<Options, String> {
         .is_some_and(|d| d.len() != 64 || !d.bytes().all(|b| b.is_ascii_hexdigit()))
     {
         return Err("sha256 must contain 64 hexadecimal digits".into());
+    }
+    if (resumable && resume) || ((resumable || resume) && digest.is_none()) {
+        return Err("choose --resumable or --resume, with a trusted --sha256".into());
     }
     let pressure =
         match (low, high) {
@@ -116,15 +141,24 @@ fn options(args: &[String]) -> Result<Options, String> {
         context,
         digest,
         pressure,
+        resumable,
+        resume,
     })
 }
 
-fn next_prompt(reader: &mut impl BufRead, limit: usize) -> Result<Option<String>, String> {
+fn next_prompt(
+    reader: &mut impl BufRead,
+    limit: usize,
+    hash: Option<&mut Sha256>,
+) -> Result<Option<String>, String> {
     let mut bytes = Vec::new();
     reader
         .take(limit as u64 + 1)
         .read_until(b'\n', &mut bytes)
         .map_err(|e| format!("prompt read failed: {e}"))?;
+    if let Some(hash) = hash {
+        hash.update(&bytes);
+    }
     if bytes.len() > limit {
         return Err("prompt exceeds --max-prompt-bytes (including line ending)".into());
     }
@@ -166,15 +200,26 @@ pub fn run(args: &[String]) -> Result<(), String> {
     if template.reservation_bytes()? > executor.slot_bytes() {
         return Err("batch request exceeds session slot".into());
     }
-    let file = File::open(&options.input).map_err(|e| format!("cannot open prompt input: {e}"))?;
+    let mut file =
+        File::open(&options.input).map_err(|e| format!("cannot open prompt input: {e}"))?;
     let cancelled = Arc::new(AtomicBool::new(false));
     let signal = Arc::clone(&cancelled);
     ctrlc::set_handler(move || signal.store(true, Ordering::Release))
         .map_err(|e| format!("cannot install cancellation handler: {e}"))?;
-    // Never reuse/truncate an existing output directory or prompt/model path.
-    fs::create_dir(&options.output)
-        .map_err(|e| format!("cannot create new output directory: {e}"))?;
-    let input = Mutex::new((BufReader::new(file), 0u64));
+    let journal = if options.resumable || options.resume {
+        Some(checkpoint::Journal::open(&options, &mut file, &cancelled)?)
+    } else {
+        // Ordinary batches still require a new output directory.
+        fs::create_dir(&options.output)
+            .map_err(|e| format!("cannot create new output directory: {e}"))?;
+        None
+    };
+    let input = Mutex::new((
+        BufReader::new(file),
+        0u64,
+        journal.as_ref().map(|_| Sha256::new()),
+    ));
+    let skipped = AtomicU64::new(0);
     let completed = AtomicU64::new(0);
     let failure: Mutex<Option<String>> = Mutex::new(None);
     let result = std::thread::scope(|scope| {
@@ -194,23 +239,42 @@ pub fn run(args: &[String]) -> Result<(), String> {
                                 if cancelled.load(Ordering::Acquire) {
                                     return Err("batch cancelled".into());
                                 }
-                                match next_prompt(&mut input.0, options.line_bytes)? {
-                                    None => None,
+                                let (reader, counter, hash) = &mut *input;
+                                match next_prompt(reader, options.line_bytes, hash.as_mut())? {
+                                    None => {
+                                        if let (Some(journal), Some(hash)) = (&journal, hash) {
+                                            if format!("{:x}", hash.clone().finalize())
+                                                != journal.input_sha
+                                            {
+                                                return Err(
+                                                    "batch input changed while processing".into()
+                                                );
+                                            }
+                                        }
+                                        None
+                                    }
                                     Some(prompt) => {
-                                        input.1 = input
-                                            .1
+                                        *counter = counter
                                             .checked_add(1)
                                             .ok_or("batch job counter overflow")?;
-                                        Some((input.1, prompt))
+                                        Some((*counter, prompt))
                                     }
                                 }
                             };
                             let Some((id, prompt)) = item else {
                                 return Ok(());
                             };
+                            if let Some(journal) = &journal {
+                                if journal.before_job(id, &prompt, &cancelled)? {
+                                    skipped.fetch_add(1, Ordering::Relaxed);
+                                    eprintln!("job={id} status=verified-skip");
+                                    continue;
+                                }
+                            }
                             let partial = options.output.join(format!("job-{id:08}.partial"));
                             let target = options.output.join(format!("job-{id:08}.txt"));
                             let mut output = OpenOptions::new()
+                                .read(journal.is_some())
                                 .write(true)
                                 .create_new(true)
                                 .open(&partial)
@@ -242,6 +306,12 @@ pub fn run(args: &[String]) -> Result<(), String> {
                             output
                                 .flush()
                                 .map_err(|e| format!("job {id}: output flush failed: {e}"))?;
+                            let receipt = journal
+                                .as_ref()
+                                .map(|journal| {
+                                    journal.result_record(id, &prompt, &mut output, &cancelled)
+                                })
+                                .transpose()?;
                             drop(output);
                             // Atomic no-replace publication; preserve partial output on error.
                             fs::hard_link(&partial, &target)
@@ -249,6 +319,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
                             fs::remove_file(&partial).map_err(|e| {
                                 format!("job {id}: cannot remove partial name: {e}")
                             })?;
+                            if let (Some(journal), Some(receipt)) = (&journal, receipt) {
+                                journal.complete(id, &receipt)?;
+                            }
                             completed.fetch_add(1, Ordering::Relaxed);
                             eprintln!(
                                 "job={id} status=complete reservation_bytes={} queue_wait_ns={}",
@@ -295,11 +368,16 @@ pub fn run(args: &[String]) -> Result<(), String> {
             .map_or(Ok(()), Err)
     });
     println!(
-        "completed={} workers={} pending={} reserved_bytes={}",
+        "completed={} workers={} pending={} reserved_bytes={}{}",
         completed.load(Ordering::Relaxed),
         executor.worker_count(),
         executor.pending_sessions(),
-        executor.reserved_bytes()
+        executor.reserved_bytes(),
+        if journal.is_some() {
+            format!(" skipped={}", skipped.load(Ordering::Relaxed))
+        } else {
+            String::new()
+        }
     );
     result?;
     if cancelled.load(Ordering::Acquire) {
@@ -312,14 +390,58 @@ pub fn run(args: &[String]) -> Result<(), String> {
 mod tests {
     use super::*;
     #[test]
+    fn checkpoint_modes_require_trust_and_are_exclusive() {
+        let args = |flags: &[&str]| {
+            let mut values = vec!["model", "--input", "in", "--output-dir", "out"];
+            values.extend_from_slice(flags);
+            values.into_iter().map(str::to_string).collect::<Vec<_>>()
+        };
+        assert!(options(&args(&["--resumable"])).is_err());
+        assert!(options(&args(&["--resume"])).is_err());
+        let digest = "0".repeat(64);
+        assert!(options(&args(&["--resumable", "--resume", "--sha256", &digest])).is_err());
+        assert!(
+            options(&args(&["--resumable", "--sha256", &digest]))
+                .unwrap()
+                .resumable
+        );
+        assert!(
+            options(&args(&["--sha256", &digest, "--resume"]))
+                .unwrap()
+                .resume
+        );
+    }
+    #[test]
+    fn checkpoint_input_hash_includes_exact_line_endings() {
+        let bytes = b"one\r\ntwo";
+        let mut reader = &bytes[..];
+        let mut hash = Sha256::new();
+        assert_eq!(
+            next_prompt(&mut reader, 8, Some(&mut hash))
+                .unwrap()
+                .unwrap(),
+            "one"
+        );
+        assert_eq!(
+            next_prompt(&mut reader, 8, Some(&mut hash))
+                .unwrap()
+                .unwrap(),
+            "two"
+        );
+        assert!(next_prompt(&mut reader, 8, Some(&mut hash))
+            .unwrap()
+            .is_none());
+        assert_eq!(hash.finalize(), Sha256::digest(bytes));
+    }
+    #[test]
     fn input_is_bounded_and_handles_utf8_crlf_and_final_line() {
         let mut input = &b"one\r\n\xd0\xb4\xd0\xb2\xd0\xb0"[..];
-        assert_eq!(next_prompt(&mut input, 6).unwrap().unwrap(), "one");
-        assert_eq!(next_prompt(&mut input, 6).unwrap().unwrap(), "два");
-        assert!(next_prompt(&mut input, 6).unwrap().is_none());
-        assert!(next_prompt(&mut &b"abcd\n"[..], 4).is_err());
-        assert!(next_prompt(&mut &b"\xff\n"[..], 4).is_err());
-        assert!(next_prompt(&mut &b"\n"[..], 4).is_err());
+        assert_eq!(next_prompt(&mut input, 6, None).unwrap().unwrap(), "one");
+        assert_eq!(next_prompt(&mut input, 6, None).unwrap().unwrap(), "два");
+        assert!(next_prompt(&mut input, 6, None).unwrap().is_none());
+        assert!(next_prompt(&mut &b"abcd\n"[..], 4, None).is_err());
+        assert!(next_prompt(&mut &b"\xff\n"[..], 4, None).is_err());
+        assert!(next_prompt(&mut &b"\n"[..], 4, None).is_err());
     }
     #[test]
     fn malformed_options_reject_before_io() {

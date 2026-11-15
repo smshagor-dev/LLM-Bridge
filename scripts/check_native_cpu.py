@@ -68,6 +68,7 @@ def main():
                 ('batch', ['batch', '/absent-cpu-fixture.gguf', '--input', '/absent-prompts.txt', '--output-dir', '/absent-cpu-output']),
                 ('deadline_streamed', ['chat', '/absent-cpu-fixture.gguf', '--prompt', 'fixture', '--backend', 'streamed', '--deadline-ms', '30000']),
                 ('deadline_batch', ['batch', '/absent-cpu-fixture.gguf', '--input', '/absent-deadline-input.txt', '--output-dir', '/absent-deadline-output', '--deadline-ms', '30000']),
+                ('resumable_batch', ['batch', '/absent-cpu-fixture.gguf', '--input', '/absent-resume-input.txt', '--output-dir', '/absent-resume-output', '--sha256', '0' * 64, '--resumable']),
                 ('plan', ['plan', '/absent-cpu-fixture.gguf'])]:
                 result = run(name, binary, command)
                 assert result.returncode == 1 and not result.stdout
