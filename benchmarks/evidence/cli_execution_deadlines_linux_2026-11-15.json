@@ -1,0 +1,376 @@
+{
+  "schema_version": 1,
+  "client_date": "2026-11-15",
+  "client_timezone": "Europe/Moscow",
+  "recorded_at_utc": "2026-11-15T04:10:09.947403+00:00",
+  "scope": "Real chat/batch CLI cooperative deadline wiring, exact normal-output/logit parity, active expiry, trust/output protection and cleanup",
+  "source_commit": "c3db4b5f7bc14c5d8a86cb7d29c7effd03b458fe",
+  "source_tree": "e719d4cd43adcbef88ec50c345005c508e4af303",
+  "source_worktree_clean": true,
+  "parent_feature_commit": "2198763f495778c35fcc4e91e870f304e9620d03",
+  "read_only_main_merge_check": {
+    "main": "54df7c4bae27da80a1094ffa408362aeabbe6ca3",
+    "result_tree": "1f86884eb01d3b4d7ffb4120ae021f943e08811b",
+    "conflicts": false,
+    "branches_merged": false,
+    "note": "Main architecture/HTML-removal changes are preserved by a clean read-only merge; README not modified by this feature."
+  },
+  "validation": {
+    "native_rust_tests": 252,
+    "non_native_rust_tests": 206,
+    "msrv_1_82_non_native_tests": 206,
+    "python_tests": 23,
+    "format_and_diff_checks": "passed",
+    "release_clippy_native_and_non_native": "passed with -D warnings",
+    "clean_source_fresh_process_cli_protocol_runs": 2,
+    "qemu_guarded_library_paths": 19,
+    "negative_cli_deadline_variants": 2,
+    "legacy_batch_protocol": "passed"
+  },
+  "logs": {
+    "native": {
+      "sha256": "d729662b89113dd1bbd80c549113e965589d9b9056f421886845a6613eb6a69d",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 3.38s",
+        "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 235 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    "nonnative": {
+      "sha256": "a82496f529003ebacd2e66cdd2d76442ae76df8abe91e3dabdc5490798140569",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 0.78s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 195 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    "msrv": {
+      "sha256": "489c8b81380105c26b8be3b37f27f1623f1c9ca8e0a4f99e947e544d408c315d",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 1.01s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 195 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    "python": {
+      "sha256": "8b69296d7b2b89a9e96ac8f26aa591567e81dec5d5b549c14546a60a7cb6215f",
+      "result_lines": [
+        "Ran 23 tests in 0.125s"
+      ]
+    },
+    "clippy-native": {
+      "sha256": "0b3d27dfee9170b84f84a568f6a324e42f081c3ea5248199682e53e6f3abd48f",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 0.46s"
+      ]
+    },
+    "clippy-nonnative": {
+      "sha256": "24c0fb9ae5ba35121e4d7a10e004a5282b186673c34d47d7ee38bdde261d18a9",
+      "result_lines": [
+        "    Finished `release` profile [optimized] target(s) in 0.17s"
+      ]
+    }
+  },
+  "cli_protocols": [
+    {
+      "report_sha256": "5ec3971439c53826f645470afc5363dfffd0e974ba8f8406f749070cd29b546b",
+      "report": {
+        "pass": true,
+        "binary_sha256": "38675237140291eef834c3669e0d98b6f973a316c18cd691413bab460cce0e50",
+        "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+        "cases": {
+          "future_chat_matches_bytes_logits_and_cache_release": {
+            "pass": true,
+            "output_sha256": "f9f8b7ed14e9bfdcd72e1551e148d6cf7a752060d90663b650556949f94247cc",
+            "logits_sha256": "f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb"
+          },
+          "zero_chat_refuses_before_model_and_trace_creation": {
+            "pass": true
+          },
+          "unsupported_backend_and_invalid_chat_values_refuse": {
+            "pass": true
+          },
+          "deadline_preserves_existing_logit_trace": {
+            "pass": true
+          },
+          "timed_chat_wrong_digest_refuses_delivery": {
+            "pass": true
+          },
+          "active_native_chat_expiry": {
+            "pass": true,
+            "selected_budget_ms": 500,
+            "logits_bytes_before_expiry": 512000,
+            "partial_stdout_bytes": 14,
+            "partial_stdout_sha256": "27a1cc36a2dc56d3708d75493d13c6252d37d04f4e7f5166122c0311dc8ed9fe"
+          },
+          "per_job_future_batch_matches_direct_bytes": {
+            "pass": true
+          },
+          "timed_batch_wrong_digest_publishes_nothing": {
+            "pass": true
+          },
+          "batch_zero_and_independent_wait_deadline_cleanup": {
+            "pass": true
+          },
+          "invalid_batch_values_refuse_before_output_creation": {
+            "pass": true
+          },
+          "active_batch_preserves_partial_without_publication": {
+            "pass": true,
+            "selected_budget_ms": 500,
+            "partial_bytes": 20,
+            "published_results": 0
+          }
+        },
+        "note": "Adaptive fixture budgets prove active CLI wiring, not maximum deadline latency, RSS, physical2GB or throughput."
+      }
+    },
+    {
+      "report_sha256": "c99ee714437e3a559e3b07b33169a2fa0b71fec0167fad324711f6dd9346231c",
+      "report": {
+        "pass": true,
+        "binary_sha256": "38675237140291eef834c3669e0d98b6f973a316c18cd691413bab460cce0e50",
+        "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+        "cases": {
+          "future_chat_matches_bytes_logits_and_cache_release": {
+            "pass": true,
+            "output_sha256": "f9f8b7ed14e9bfdcd72e1551e148d6cf7a752060d90663b650556949f94247cc",
+            "logits_sha256": "f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb"
+          },
+          "zero_chat_refuses_before_model_and_trace_creation": {
+            "pass": true
+          },
+          "unsupported_backend_and_invalid_chat_values_refuse": {
+            "pass": true
+          },
+          "deadline_preserves_existing_logit_trace": {
+            "pass": true
+          },
+          "timed_chat_wrong_digest_refuses_delivery": {
+            "pass": true
+          },
+          "active_native_chat_expiry": {
+            "pass": true,
+            "selected_budget_ms": 500,
+            "logits_bytes_before_expiry": 512000,
+            "partial_stdout_bytes": 18,
+            "partial_stdout_sha256": "f9f8b7ed14e9bfdcd72e1551e148d6cf7a752060d90663b650556949f94247cc"
+          },
+          "per_job_future_batch_matches_direct_bytes": {
+            "pass": true
+          },
+          "timed_batch_wrong_digest_publishes_nothing": {
+            "pass": true
+          },
+          "batch_zero_and_independent_wait_deadline_cleanup": {
+            "pass": true
+          },
+          "invalid_batch_values_refuse_before_output_creation": {
+            "pass": true
+          },
+          "active_batch_preserves_partial_without_publication": {
+            "pass": true,
+            "selected_budget_ms": 500,
+            "partial_bytes": 20,
+            "published_results": 0
+          }
+        },
+        "note": "Adaptive fixture budgets prove active CLI wiring, not maximum deadline latency, RSS, physical2GB or throughput."
+      }
+    }
+  ],
+  "cpu_guard_report_sha256": "d4a5d64ab9d88626045a15485573daaf5f1a3241cdb5cd9ae17d204ab44dd2d1",
+  "cpu_guard": {
+    "pass": true,
+    "source": {
+      "commit": "c3db4b5f7bc14c5d8a86cb7d29c7effd03b458fe",
+      "tree": "e719d4cd43adcbef88ec50c345005c508e4af303",
+      "working_tree_dirty": false
+    },
+    "guest_cpu": "core2duo",
+    "cases": {
+      "doctor": {
+        "exit_code": 0,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "6194d35fe1cd2e0b72ceb600447b80a80ec126ecb12674f089f0141666fce9c3",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "runtime_profile_cannot_override_build": {
+        "exit_code": 0,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "b2e450490bb211a1268bde6a17080133e82d56dfb0451a9b8229c2a8023136e8",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "avx_without_os_state": {
+        "exit_code": 0,
+        "guest_cpu": "Haswell,-xsave",
+        "stdout_sha256": "484178cfd9e373af43dda5a235af175a3788437a19c4185502dd25685c3c046d",
+        "stderr_sha256": "1b975121e9fa414c908dd7e1053b54750eddd55b37ab9586fc738c16db2b4543"
+      },
+      "resident": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "streamed": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "verified_streamed": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "batch": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "deadline_streamed": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "deadline_batch": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "plan": {
+        "exit_code": 1,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7830502a56d253b800cded29d8e49e27e69d361486330128d143931addb3b3fc"
+      },
+      "library_entry_paths": {
+        "exit_code": 0,
+        "guest_cpu": "core2duo",
+        "stdout_sha256": "ce0f53894f7c7680ea6cec72e50d122950582ab7573d7bb3bee8b407db634064",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "note": "QEMU user-mode negative admission test; no inference speed, old physical CPU or 2GB-hardware claim.",
+    "binary_sha256": "38675237140291eef834c3669e0d98b6f973a316c18cd691413bab460cce0e50",
+    "contract_sha256": "a4fa33d38a0ed6aeeb2815a68331c9daf7727b1a227453672568183088ff541d",
+    "emulator_sha256": "36d35ffe5363bd49bfa9c2b6a048e9fb2e798fea38285a5a45f52d34f9869089",
+    "emulator_version": "qemu-x86_64 version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)",
+    "emulated_cpu": {
+      "native_profile": "x86-avx2",
+      "architecture": "x86_64",
+      "native_compatible": false,
+      "capabilities": {
+        "sse2": true,
+        "sse42": false,
+        "avx": false,
+        "avx2": false,
+        "fma": false,
+        "f16c": false,
+        "bmi2": false
+      },
+      "missing_cpu_os_capabilities": [
+        "sse4.2",
+        "avx",
+        "avx2",
+        "fma",
+        "f16c",
+        "bmi2"
+      ],
+      "scalar_fallback_validated": false
+    },
+    "avx_without_os_state_cpu": {
+      "native_profile": "x86-avx2",
+      "architecture": "x86_64",
+      "native_compatible": false,
+      "capabilities": {
+        "sse2": true,
+        "sse42": true,
+        "avx": false,
+        "avx2": false,
+        "fma": false,
+        "f16c": true,
+        "bmi2": false
+      },
+      "missing_cpu_os_capabilities": [
+        "avx",
+        "avx2",
+        "fma",
+        "bmi2"
+      ],
+      "scalar_fallback_validated": false
+    },
+    "library_paths_checked": 19
+  },
+  "batch_report_sha256": "03e56a4eae3407a3af0e0acdc54605165b4738c1e2e352fa73d67bb258001db7",
+  "batch_report": {
+    "pass": true,
+    "binary_sha256": "38675237140291eef834c3669e0d98b6f973a316c18cd691413bab460cce0e50",
+    "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+    "cases": {
+      "two_jobs_match_direct_bytes": {
+        "pass": true,
+        "output_sha256": [
+          "76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89",
+          "915cb26176032ac2881bc2dbed98f2bfe575e92f1c0370b818cbbf125111f9c0"
+        ],
+        "summary": "completed=2 workers=2 pending=0 reserved_bytes=0"
+      },
+      "existing_outputs_preserved": {
+        "pass": true
+      },
+      "oversized_input_fails_cleanly": {
+        "pass": true
+      },
+      "native_prompt_limit_rejected_before_output_creation": {
+        "pass": true
+      },
+      "untrusted_model_publishes_no_result": {
+        "pass": true
+      },
+      "pressure_timeout_cleanup": {
+        "pass": true
+      },
+      "sigint_cleanup": {
+        "pass": true
+      }
+    },
+    "note": "Real tiny-model CLI byte parity and failure cleanup, not measured physical memory/concurrency overlap or throughput."
+  },
+  "limitations": [
+    "Cooperative deadline can be observed late during synchronous preflight/planning/I/O/native operations/consumers",
+    "Chat budget starts after argument validation before preflight; batch budget starts per job after prompt/partial-file preparation",
+    "Chat stdout/logit traces can retain partial data; batch partials are not published as successful results",
+    "Resident chat explicitly unsupported for this deadline option",
+    "Adaptive selected budgets prove native activity and flag wiring, not deadline reaction latency or throughput",
+    "No RSS, physical2GB, large-model or race-detector claim"
+  ]
+}
