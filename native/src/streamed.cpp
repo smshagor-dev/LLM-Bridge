@@ -134,7 +134,12 @@ struct Decoder {
         // Refuse unrecognized tensors (biases, special RoPE, adapters, etc.).
         require(gguf_get_n_tensors(g) == static_cast<int64_t>(layers * 9 + (out_id < 0 ? 2 : 3)),
                 "unsupported extra tensors in streamed model");
-        if (!allocate_state) return;
+        // Tensor descriptors own their offsets/shapes; no metadata is used by forward().
+        g = nullptr;
+        if (allocate_state) allocate_workspace(vocab);
+    }
+    void allocate_workspace(size_t vocab) {
+        const auto kvcount = checked_mul(checked_mul(layers, context), kvdim);
         packed.resize(chunk); row.resize(std::max(dim, hidden)); quantized.resize(std::max(dim, hidden));
         x.resize(dim); norm.resize(dim); q.resize(dim); k.resize(kvdim); v.resize(kvdim);
         att.resize(dim); projected.resize(dim); gate.resize(hidden); up.resize(hidden);
@@ -276,18 +281,30 @@ extern "C" int32_t llmbridge_generate_streamed_cpu_v2(
         require(static_cast<bool>(metadata), "streamed GGUF parse failed");
         if (tokenizer_prefix) require(gguf_get_data_offset(metadata.get()) == tokenizer_prefix, "authenticated tokenizer metadata prefix mismatch");
         if (!poll(userdata)) return 2;
+        auto tokenizer = gguf_find_key(metadata.get(), "tokenizer.ggml.tokens");
+        require(tokenizer >= 0 && gguf_get_kv_type(metadata.get(), tokenizer) == GGUF_TYPE_ARRAY &&
+                gguf_get_arr_type(metadata.get(), tokenizer) == GGUF_TYPE_STRING,
+                "missing/invalid tokenizer token inventory");
+        const auto vocabulary_size = gguf_get_arr_n(metadata.get(), tokenizer);
+        Decoder decoder(metadata.get(), file_bytes, max_chunk, reader, poll, userdata, context,
+                        vocabulary_size, workspace_budget, false);
+        // Resolve owned tensor descriptors first, then retire the duplicate GGUF token
+        // inventory before the upstream vocabulary and decoder workspace are allocated.
+        metadata.reset();
+        decoder.alive();
         auto mp = llama_model_default_params(); mp.vocab_only = true; mp.n_gpu_layers = 0;
         std::unique_ptr<llama_model, decltype(&llama_model_free)> vocabulary(llama_model_load_from_file(path, mp), llama_model_free);
         require(static_cast<bool>(vocabulary), "streamed tokenizer load failed");
         auto vocab = llama_model_get_vocab(vocabulary.get());
+        require(static_cast<size_t>(llama_vocab_n_tokens(vocab)) == vocabulary_size, "streamed tokenizer inventory changed");
         int count = llama_tokenize(vocab, prompt, static_cast<int32_t>(std::strlen(prompt)), nullptr, 0, true, true);
         require(count < 0 && count != INT32_MIN, "streamed prompt tokenization failed"); count = -count;
         require(static_cast<uint64_t>(count) + max_tokens <= context, "streamed prompt and response exceed context");
         std::vector<llama_token> tokens(count);
         require(llama_tokenize(vocab, prompt, static_cast<int32_t>(std::strlen(prompt)), tokens.data(), count, true, true) == count,
                 "streamed prompt tokenization changed");
-        Decoder decoder(metadata.get(), file_bytes, max_chunk, reader, poll, userdata, context,
-                        llama_vocab_n_tokens(vocab), workspace_budget);
+        decoder.alive();
+        decoder.allocate_workspace(vocabulary_size);
         for (size_t i = 0; i < tokens.size(); ++i) decoder.forward(tokens[i], i, i+1 == tokens.size());
         size_t position = tokens.size();
         for (uint32_t step = 0; step < max_tokens; ++step) {

@@ -4,6 +4,10 @@ The CLI now has two explicit CPU paths. `resident` remains the default pinned ll
 
 Implemented: embedding lookup, RMS normalization, Q/K/V projection, normal full-head RoPE, causal grouped-query attention, bounded FP32 KV cache, attention output/residual, SwiGLU feed-forward/residual, output normalization/head, greedy token sampling, prompt prefill and incremental decode. Cancellation is checked at reads and execution/output boundaries. Tokenizer metadata and native parser allocations are separate from the explicitly counted activation/KV workspace.
 
+## Native metadata lifetime
+
+Generation resolves and validates owned tensor descriptors from the native GGUF parser before loading the upstream vocabulary. It then frees that parser, including its duplicate token inventory, before vocabulary construction and KV/activation allocation. The vocabulary stays live for tokenization and token-piece decoding. The planning probe still retains its parser while deriving shape/payload metadata. This reduces avoidable live allocation overlap; allocator retention and platform overhead still affect process address space. Workspace accounting, authentication, cache policy, native ABI and numerical kernels are unchanged.
+
 ## Supported scope
 
 Only dense `llama` GGUF models with F32/Q8_0/Q4_0 weights, standard full-head RoPE and the implemented tensor inventory are accepted. Unknown Llama metadata options, extra tensors, unsupported quantization, oversized context and infeasible workspace fail explicitly. `--logits path.f32` creates a new file and refuses to overwrite an existing model, trace or symlink.
