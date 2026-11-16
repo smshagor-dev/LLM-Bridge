@@ -96,6 +96,14 @@ Local checks: Python regression suite; workspace non-native tests; release nativ
 
 - The direct streamed API now accepts an opt-in absolute deadline observed during authentication, native polling/range reads and consumer boundaries. Expiry aborts without setting the caller cancellation flag and retains trusted-source/cleanup semantics. Queued/executor limits can carry the same absolute deadline from waiting through native work; existing timeout APIs still bound waiting only. Expired tickets/charges clean up through RAII without changing policy controls. No preemption, hard wall-clock return, CLI propagation or physical low-RAM result is implied. See `docs/STREAMED_EXECUTION_DEADLINE.md`.
 
+## Streamed native allocation lifetime
+
+- Native generation resolves owned tensor descriptors, then releases its duplicate GGUF metadata before loading the vocabulary and allocating KV/activation state. The independent numerical and unchanged process-cap gates cover the new lifetime order. Allocation failure at tighter/platform-dependent limits remains possible. See `docs/STREAMED_DECODER.md`.
+
+## Verified batch resume checkpoint
+
+- Explicit Linux `--resumable`/`--resume` modes bind trusted model, exact input, running binary and generation settings. Only output/receipt pairs with verified hashes are skipped; unfinished partials are archived before retry. Kernel run locking excludes concurrent users and releases after process termination. Inconsistent final/receipt states fail closed. This is job-level local resume, not signed provenance, KV continuation, distributed locking or proved power-loss/exactly-once recovery. See `docs/VERIFIED_BATCH_RESUME.md`.
+
 ## M3–M11
 
 M3 now has native-derived CLI/context admission, not a complete adaptive scheduler. M4 remote providers, M5 MoE, M6 GPU, M7 API/SDK, M8 desktop, M9 full robustness/benchmarks, M10 format/plugin extensibility and M11 large-model feasibility remain incomplete. No 70B/550B or real 2GB-machine result is claimed.

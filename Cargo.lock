@@ -138,6 +138,7 @@ dependencies = [
  "ctrlc",
  "libc",
  "llmbridge-core",
+ "sha2",
 ]
 
 [[package]]

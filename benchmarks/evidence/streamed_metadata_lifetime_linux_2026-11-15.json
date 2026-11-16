@@ -1,0 +1,1977 @@
+{
+  "schema": "llmbridge-streamed-metadata-lifetime-v1",
+  "recorded_at_utc": "2026-11-15T07:54:36.208967+00:00",
+  "source": {
+    "commit": "6fb635a44ad2e52738f0ac53ecde7c543caa8f81",
+    "tree": "2b00fafa41d455e7ea0028db9c8785af72fb068e",
+    "clean_during_final_protocols": true,
+    "previous_pr_head": "34d9e0b7cb591b43e129aeaf151f33bfdfc9ace6"
+  },
+  "change": "Resolve owned tensor descriptors, destroy duplicate GGUF parser/token inventory, then load vocabulary and allocate KV/activation workspace. No weight loading, cache policy, kernel, ABI or cap/tolerance change.",
+  "artifacts": {
+    "before_binary_sha256": "f8d5637a8085fa06810680372ff95a46fed9ccbef3765aad1fddf0be73f75198",
+    "after_binary_sha256": "a2e224ec5d4469a8a683b3756693dbef00bc19d7d953978444feb83f94af0b53",
+    "upstream_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+    "reference_sha256": "9675a35062a2172a8a806c966e512a00df694402c35ac721e0327b1c452206bc"
+  },
+  "original_ci_failure": {
+    "run_id": 43687692980,
+    "job_id": 132732202838,
+    "artifact_id": 14151261829,
+    "artifact_zip_sha256": "b8fe3618baac0a96a5bb058225f4f013d181af64faec2d01ed411fe8f4535ac0",
+    "protocol": {
+      "pass": false,
+      "checkpoint": "stories15M-q8_0",
+      "generation_max_tokens": 8,
+      "cpu_profile": {
+        "native_profile": "x86-avx2",
+        "architecture": "x86_64",
+        "native_compatible": true,
+        "capabilities": {
+          "sse2": true,
+          "sse42": true,
+          "avx": true,
+          "avx2": true,
+          "fma": true,
+          "f16c": true,
+          "bmi2": true
+        },
+        "missing_cpu_os_capabilities": [],
+        "scalar_fallback_validated": false
+      },
+      "emulation": null,
+      "reference_weight_repacking": "upstream_default",
+      "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+      "model_file_bytes": 26671328,
+      "binary_sha256": "88b28dd4f98f2f9f7b88df0429aba01fd3b8c465bfcebfd2513080c94043ef17",
+      "reference_binary_sha256": "41f48b7cf6400afe9bc25cab3e1e95a660a6a3f319caa5af789c42441518656c",
+      "reference_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+      "working_tree_dirty": true,
+      "source_sha256": {
+        "native/src/streamed.cpp": "6a6607de9f80f9a8e690a9b38e31d86299c37c44a94792d744330f3c3b933ee6",
+        "crates/llmbridge-core/src/streamed.rs": "8ebfe972607133a32df8f5a4f4630568dcd0815ad7fbee6ed95e4c1d98d87c17",
+        "crates/llmbridge-core/src/read_cache.rs": "63fea96b27b7547c197312c4bb8b136fc4596f743881a123e0b9ac598c19edef",
+        "crates/llmbridge-core/src/storage.rs": "24855e5ad44345ccd5a26a4f68c33ee7aa876373a76051abe1e505c0a164ff5d",
+        "crates/llmbridge-core/src/storage_auth.rs": "1d60d554e6438a26c3f421eac2a82d228f21671fd384c1d30668cf6ff5adeabb"
+      },
+      "verified_session_requested": true,
+      "cache_budget_bytes": 1048576,
+      "cache_pressure_floor_mib": null,
+      "cache_release_required": false,
+      "address_space_limit_bytes": 25165824,
+      "memory_proof_scope": "native_model_larger_than_cap",
+      "host": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.39",
+      "git_sha": "7fae6ec9ba60b89b952720025b3f61b40437e900",
+      "kv_precision": "FP32 on both paths; reference flash attention disabled",
+      "logit_tolerance": {
+        "atol": 0.01,
+        "rtol": 0.001
+      },
+      "note": "Checkpoint-specific experimental streamed path with pinned ggml dot kernels versus upstream graph; observed matching logits are checkpoint-specific. RLIMIT_AS is a Linux process address-space cap, not a portable RSS API.",
+      "trials": [
+        {
+          "streamed_exit": 1,
+          "reference_exit": 0,
+          "integrity_metrics": {},
+          "integrity_pass": false,
+          "reader_metrics": {},
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.1857340880000038,
+          "memory": {
+            "peak_rss_bytes": 16941056,
+            "rss_after_run_bytes": 13750272,
+            "pss_after_run_bytes": 10024960,
+            "cgroup_current_after_run_bytes": 2611662848,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": false,
+          "tokens_match": false,
+          "logits_count": 0,
+          "logits_max_abs_error": null,
+          "logits_rmse": null,
+          "logits_match": false,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": false,
+          "trial_index": 0,
+          "streamed_stderr_sha256": "fa687b8148c797c87f3de82f2266d9d5d651be82354f4d0bb94a287ce0a68c11",
+          "error_tail": "error: streamed generation failed: std::bad_alloc; source: no read error"
+        },
+        {
+          "streamed_exit": 1,
+          "reference_exit": 0,
+          "integrity_metrics": {},
+          "integrity_pass": false,
+          "reader_metrics": {},
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.19712779899998623,
+          "memory": {
+            "peak_rss_bytes": 16678912,
+            "rss_after_run_bytes": 13561856,
+            "pss_after_run_bytes": 9820160,
+            "cgroup_current_after_run_bytes": 2612973568,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": false,
+          "tokens_match": false,
+          "logits_count": 0,
+          "logits_max_abs_error": null,
+          "logits_rmse": null,
+          "logits_match": false,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": false,
+          "trial_index": 1,
+          "streamed_stderr_sha256": "fc672d08569d7afc91f7b4ffa6c6bc8ec69fce99786e90131ddeaffa3263b3f2",
+          "error_tail": "error: streamed generation failed: std::bad_alloc; source: no read error"
+        },
+        {
+          "streamed_exit": 1,
+          "reference_exit": 0,
+          "integrity_metrics": {},
+          "integrity_pass": false,
+          "reader_metrics": {},
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.20764229599996042,
+          "memory": {
+            "peak_rss_bytes": 16637952,
+            "rss_after_run_bytes": 13512704,
+            "pss_after_run_bytes": 9771008,
+            "cgroup_current_after_run_bytes": 2613899264,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": false,
+          "tokens_match": false,
+          "logits_count": 0,
+          "logits_max_abs_error": null,
+          "logits_rmse": null,
+          "logits_match": false,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": false,
+          "trial_index": 2,
+          "streamed_stderr_sha256": "266db8d006cdf68c70d8bffdf3646bee9ad0996a1054a7b82cffdcf34048b9b6",
+          "error_tail": "error: streamed generation failed: std::bad_alloc; source: no read error"
+        }
+      ]
+    }
+  },
+  "same_local_host_cap_probe": {
+    "before": [
+      {
+        "cap_kib": 24576,
+        "exit": 0,
+        "stderr_tail": "ache_peak_allocated_bytes=983376 cache_released_bytes=0 cache_release_events=0\nLLMBRIDGE_MEMORY {\"peak_rss_bytes\":14995456,\"rss_after_run_bytes\":11894784,\"pss_after_run_bytes\":11071488,\"cgroup_current_after_run_bytes\":null,\"cgroup_limit_bytes\":null}\n"
+      },
+      {
+        "cap_kib": 23552,
+        "exit": 1,
+        "stderr_tail": "nsors\nLLMBRIDGE_MEMORY {\"peak_rss_bytes\":14073856,\"rss_after_run_bytes\":11010048,\"pss_after_run_bytes\":10186752,\"cgroup_current_after_run_bytes\":null,\"cgroup_limit_bytes\":null}\nerror: streamed generation failed: std::bad_alloc; source: no read error\n"
+      },
+      {
+        "cap_kib": 23040,
+        "exit": 1,
+        "stderr_tail": "_MEMORY {\"peak_rss_bytes\":13156352,\"rss_after_run_bytes\":10256384,\"pss_after_run_bytes\":9433088,\"cgroup_current_after_run_bytes\":null,\"cgroup_limit_bytes\":null}\nerror: streamed generation failed: streamed tokenizer load failed; source: no read error\n"
+      },
+      {
+        "cap_kib": 22528,
+        "exit": 1,
+        "stderr_tail": "_MEMORY {\"peak_rss_bytes\":13029376,\"rss_after_run_bytes\":10059776,\"pss_after_run_bytes\":9236480,\"cgroup_current_after_run_bytes\":null,\"cgroup_limit_bytes\":null}\nerror: streamed generation failed: streamed tokenizer load failed; source: no read error\n"
+      },
+      {
+        "cap_kib": 22016,
+        "exit": 1,
+        "stderr_tail": "E_MEMORY {\"peak_rss_bytes\":12505088,\"rss_after_run_bytes\":9682944,\"pss_after_run_bytes\":8859648,\"cgroup_current_after_run_bytes\":null,\"cgroup_limit_bytes\":null}\nerror: streamed generation failed: streamed tokenizer load failed; source: no read error\n"
+      }
+    ],
+    "after": [
+      {
+        "cap_kib": 24576,
+        "exit": 0,
+        "stderr_tail": "cache_peak_allocated_bytes=983376 cache_released_bytes=0 cache_release_events=0\nLLMBRIDGE_MEMORY {\"peak_rss_bytes\":13455360,\"rss_after_run_bytes\":11534336,\"pss_after_run_bytes\":8768512,\"cgroup_current_after_run_bytes\":null,\"cgroup_limit_bytes\":null}\n"
+      },
+      {
+        "cap_kib": 23552,
+        "exit": 0,
+        "stderr_tail": "cache_peak_allocated_bytes=983376 cache_released_bytes=0 cache_release_events=0\nLLMBRIDGE_MEMORY {\"peak_rss_bytes\":13606912,\"rss_after_run_bytes\":11542528,\"pss_after_run_bytes\":9393152,\"cgroup_current_after_run_bytes\":null,\"cgroup_limit_bytes\":null}\n"
+      },
+      {
+        "cap_kib": 23040,
+        "exit": 1,
+        "stderr_tail": "ensors\nLLMBRIDGE_MEMORY {\"peak_rss_bytes\":12898304,\"rss_after_run_bytes\":10817536,\"pss_after_run_bytes\":8261632,\"cgroup_current_after_run_bytes\":null,\"cgroup_limit_bytes\":null}\nerror: streamed generation failed: std::bad_alloc; source: no read error\n"
+      },
+      {
+        "cap_kib": 22528,
+        "exit": 1,
+        "stderr_tail": "ensors\nLLMBRIDGE_MEMORY {\"peak_rss_bytes\":12726272,\"rss_after_run_bytes\":10715136,\"pss_after_run_bytes\":7996416,\"cgroup_current_after_run_bytes\":null,\"cgroup_limit_bytes\":null}\nerror: streamed generation failed: std::bad_alloc; source: no read error\n"
+      },
+      {
+        "cap_kib": 22016,
+        "exit": 1,
+        "stderr_tail": "E_MEMORY {\"peak_rss_bytes\":11759616,\"rss_after_run_bytes\":9699328,\"pss_after_run_bytes\":8295424,\"cgroup_current_after_run_bytes\":null,\"cgroup_limit_bytes\":null}\nerror: streamed generation failed: streamed tokenizer load failed; source: no read error\n"
+      }
+    ],
+    "note": "Two-token authenticated 1MiB-cache diagnostic at fixed caps. Host allocator/address-space observations, not a portable minimum or physical-memory saving claim."
+  },
+  "clean_final_24mib_authenticated_cache_parity": {
+    "pass": true,
+    "checkpoint": "stories15M-q8_0",
+    "generation_max_tokens": 8,
+    "cpu_profile": {
+      "native_profile": "x86-avx2",
+      "architecture": "x86_64",
+      "native_compatible": true,
+      "capabilities": {
+        "sse2": true,
+        "sse42": true,
+        "avx": true,
+        "avx2": true,
+        "fma": true,
+        "f16c": true,
+        "bmi2": true
+      },
+      "missing_cpu_os_capabilities": [],
+      "scalar_fallback_validated": false
+    },
+    "emulation": null,
+    "reference_weight_repacking": "upstream_default",
+    "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+    "model_file_bytes": 26671328,
+    "binary_sha256": "a2e224ec5d4469a8a683b3756693dbef00bc19d7d953978444feb83f94af0b53",
+    "reference_binary_sha256": "9675a35062a2172a8a806c966e512a00df694402c35ac721e0327b1c452206bc",
+    "reference_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+    "working_tree_dirty": false,
+    "source_sha256": {
+      "native/src/streamed.cpp": "fabb9e46be1dbd5e207f36a43e42e9590990cd1c7feddcbc877bf536e90b8afc",
+      "crates/llmbridge-core/src/streamed.rs": "8ebfe972607133a32df8f5a4f4630568dcd0815ad7fbee6ed95e4c1d98d87c17",
+      "crates/llmbridge-core/src/read_cache.rs": "63fea96b27b7547c197312c4bb8b136fc4596f743881a123e0b9ac598c19edef",
+      "crates/llmbridge-core/src/storage.rs": "24855e5ad44345ccd5a26a4f68c33ee7aa876373a76051abe1e505c0a164ff5d",
+      "crates/llmbridge-core/src/storage_auth.rs": "1d60d554e6438a26c3f421eac2a82d228f21671fd384c1d30668cf6ff5adeabb"
+    },
+    "verified_session_requested": true,
+    "cache_budget_bytes": 1048576,
+    "cache_pressure_floor_mib": null,
+    "cache_release_required": false,
+    "address_space_limit_bytes": 25165824,
+    "memory_proof_scope": "native_model_larger_than_cap",
+    "host": "Linux-6.18.57-x86_64-with-glibc2.41",
+    "git_sha": "6fb635a44ad2e52738f0ac53ecde7c543caa8f81",
+    "kv_precision": "FP32 on both paths; reference flash attention disabled",
+    "logit_tolerance": {
+      "atol": 0.01,
+      "rtol": 0.001
+    },
+    "note": "Checkpoint-specific experimental streamed path with pinned ggml dot kernels versus upstream graph; observed matching logits are checkpoint-specific. RLIMIT_AS is a Linux process address-space cap, not a portable RSS API.",
+    "trials": [
+      {
+        "streamed_exit": 0,
+        "reference_exit": 0,
+        "integrity_metrics": {
+          "verified": "1",
+          "accounted_bytes": "807712",
+          "blocks_verified": "4930",
+          "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+        },
+        "integrity_pass": true,
+        "reader_metrics": {
+          "range_read_calls": 131150,
+          "range_bytes_requested": 149025157,
+          "weight_read_calls": 2671,
+          "weight_bytes_requested": 148298022,
+          "max_range_read_bytes": 65484,
+          "source_bytes_read": 349703616,
+          "reader_buffer_bytes": 65536,
+          "source_read_calls": 2671,
+          "cache_allocated_bytes": 983376,
+          "cache_block_hits": 0,
+          "cache_block_misses": 0,
+          "cache_evictions": 0,
+          "cache_peak_allocated_bytes": 983376,
+          "cache_released_bytes": 0,
+          "cache_release_events": 0
+        },
+        "cache_release_pass": true,
+        "wall_seconds_including_load": 0.35184717399999954,
+        "memory": {
+          "peak_rss_bytes": 13512704,
+          "rss_after_run_bytes": 11542528,
+          "pss_after_run_bytes": 10719232,
+          "cgroup_current_after_run_bytes": null,
+          "cgroup_limit_bytes": null
+        },
+        "memory_cap_pass": true,
+        "tokens_match": true,
+        "logits_count": 256000,
+        "logits_max_abs_error": 0.0,
+        "logits_rmse": 0.0,
+        "logits_match": true,
+        "reference_repacking_observed": false,
+        "reference_configuration_pass": true,
+        "pass": true,
+        "trial_index": 0,
+        "streamed_stderr_sha256": "8783fea8c625e66154e1394f83db2cf10adb5433bd57a41d64f252b59ac78c05",
+        "error_tail": null
+      },
+      {
+        "streamed_exit": 0,
+        "reference_exit": 0,
+        "integrity_metrics": {
+          "verified": "1",
+          "accounted_bytes": "807712",
+          "blocks_verified": "5160",
+          "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+        },
+        "integrity_pass": true,
+        "reader_metrics": {
+          "range_read_calls": 131283,
+          "range_bytes_requested": 155384503,
+          "weight_read_calls": 2804,
+          "weight_bytes_requested": 154657368,
+          "max_range_read_bytes": 65484,
+          "source_bytes_read": 364771424,
+          "reader_buffer_bytes": 65536,
+          "source_read_calls": 2804,
+          "cache_allocated_bytes": 983376,
+          "cache_block_hits": 0,
+          "cache_block_misses": 0,
+          "cache_evictions": 0,
+          "cache_peak_allocated_bytes": 983376,
+          "cache_released_bytes": 0,
+          "cache_release_events": 0
+        },
+        "cache_release_pass": true,
+        "wall_seconds_including_load": 0.33036637600002905,
+        "memory": {
+          "peak_rss_bytes": 13590528,
+          "rss_after_run_bytes": 11677696,
+          "pss_after_run_bytes": 10854400,
+          "cgroup_current_after_run_bytes": null,
+          "cgroup_limit_bytes": null
+        },
+        "memory_cap_pass": true,
+        "tokens_match": true,
+        "logits_count": 256000,
+        "logits_max_abs_error": 0.0,
+        "logits_rmse": 0.0,
+        "logits_match": true,
+        "reference_repacking_observed": false,
+        "reference_configuration_pass": true,
+        "pass": true,
+        "trial_index": 1,
+        "streamed_stderr_sha256": "7a5732e6c69326bc8a0dd17efcf9503fac5675148baed9e1742f8368aad4752d",
+        "error_tail": null
+      },
+      {
+        "streamed_exit": 0,
+        "reference_exit": 0,
+        "integrity_metrics": {
+          "verified": "1",
+          "accounted_bytes": "807712",
+          "blocks_verified": "4930",
+          "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+        },
+        "integrity_pass": true,
+        "reader_metrics": {
+          "range_read_calls": 131150,
+          "range_bytes_requested": 149025157,
+          "weight_read_calls": 2671,
+          "weight_bytes_requested": 148298022,
+          "max_range_read_bytes": 65484,
+          "source_bytes_read": 349703616,
+          "reader_buffer_bytes": 65536,
+          "source_read_calls": 2671,
+          "cache_allocated_bytes": 983376,
+          "cache_block_hits": 0,
+          "cache_block_misses": 0,
+          "cache_evictions": 0,
+          "cache_peak_allocated_bytes": 983376,
+          "cache_released_bytes": 0,
+          "cache_release_events": 0
+        },
+        "cache_release_pass": true,
+        "wall_seconds_including_load": 0.3208826659999886,
+        "memory": {
+          "peak_rss_bytes": 13733888,
+          "rss_after_run_bytes": 11685888,
+          "pss_after_run_bytes": 10862592,
+          "cgroup_current_after_run_bytes": null,
+          "cgroup_limit_bytes": null
+        },
+        "memory_cap_pass": true,
+        "tokens_match": true,
+        "logits_count": 256000,
+        "logits_max_abs_error": 0.0,
+        "logits_rmse": 0.0,
+        "logits_match": true,
+        "reference_repacking_observed": false,
+        "reference_configuration_pass": true,
+        "pass": true,
+        "trial_index": 2,
+        "streamed_stderr_sha256": "e088788ffffbe08305178f0a05b0820c70489d5c2fb7de08a6ae19d97b079d01",
+        "error_tail": null
+      }
+    ]
+  },
+  "additional_prepublication_parity_protocols": {
+    "verified-cache24": {
+      "pass": true,
+      "checkpoint": "stories15M-q8_0",
+      "generation_max_tokens": 8,
+      "cpu_profile": {
+        "native_profile": "x86-avx2",
+        "architecture": "x86_64",
+        "native_compatible": true,
+        "capabilities": {
+          "sse2": true,
+          "sse42": true,
+          "avx": true,
+          "avx2": true,
+          "fma": true,
+          "f16c": true,
+          "bmi2": true
+        },
+        "missing_cpu_os_capabilities": [],
+        "scalar_fallback_validated": false
+      },
+      "emulation": null,
+      "reference_weight_repacking": "upstream_default",
+      "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+      "model_file_bytes": 26671328,
+      "binary_sha256": "a2e224ec5d4469a8a683b3756693dbef00bc19d7d953978444feb83f94af0b53",
+      "reference_binary_sha256": "9675a35062a2172a8a806c966e512a00df694402c35ac721e0327b1c452206bc",
+      "reference_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+      "working_tree_dirty": true,
+      "source_sha256": {
+        "native/src/streamed.cpp": "fabb9e46be1dbd5e207f36a43e42e9590990cd1c7feddcbc877bf536e90b8afc",
+        "crates/llmbridge-core/src/streamed.rs": "8ebfe972607133a32df8f5a4f4630568dcd0815ad7fbee6ed95e4c1d98d87c17",
+        "crates/llmbridge-core/src/read_cache.rs": "63fea96b27b7547c197312c4bb8b136fc4596f743881a123e0b9ac598c19edef",
+        "crates/llmbridge-core/src/storage.rs": "24855e5ad44345ccd5a26a4f68c33ee7aa876373a76051abe1e505c0a164ff5d",
+        "crates/llmbridge-core/src/storage_auth.rs": "1d60d554e6438a26c3f421eac2a82d228f21671fd384c1d30668cf6ff5adeabb"
+      },
+      "verified_session_requested": true,
+      "cache_budget_bytes": 1048576,
+      "cache_pressure_floor_mib": null,
+      "cache_release_required": false,
+      "address_space_limit_bytes": 25165824,
+      "memory_proof_scope": "native_model_larger_than_cap",
+      "host": "Linux-6.18.57-x86_64-with-glibc2.41",
+      "git_sha": "34d9e0b7cb591b43e129aeaf151f33bfdfc9ace6",
+      "kv_precision": "FP32 on both paths; reference flash attention disabled",
+      "logit_tolerance": {
+        "atol": 0.01,
+        "rtol": 0.001
+      },
+      "note": "Checkpoint-specific experimental streamed path with pinned ggml dot kernels versus upstream graph; observed matching logits are checkpoint-specific. RLIMIT_AS is a Linux process address-space cap, not a portable RSS API.",
+      "trials": [
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "4930",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131150,
+            "range_bytes_requested": 149025157,
+            "weight_read_calls": 2671,
+            "weight_bytes_requested": 148298022,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 349703616,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2671,
+            "cache_allocated_bytes": 983376,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.3328825319999851,
+          "memory": {
+            "peak_rss_bytes": 13524992,
+            "rss_after_run_bytes": 11542528,
+            "pss_after_run_bytes": 10142720,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "trial_index": 0,
+          "streamed_stderr_sha256": "b83a932d0a208b00ae08db415d9bd9bdf68d16f95e701515416834abc85ede87",
+          "error_tail": null
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "5160",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131283,
+            "range_bytes_requested": 155384503,
+            "weight_read_calls": 2804,
+            "weight_bytes_requested": 154657368,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 364771424,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2804,
+            "cache_allocated_bytes": 983376,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.34023497800001223,
+          "memory": {
+            "peak_rss_bytes": 13451264,
+            "rss_after_run_bytes": 11534336,
+            "pss_after_run_bytes": 10134528,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "trial_index": 1,
+          "streamed_stderr_sha256": "4591bf3b64b0361ecbb6a76c0216ac19621392b8936b8c2b1d11747656623811",
+          "error_tail": null
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "4930",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131150,
+            "range_bytes_requested": 149025157,
+            "weight_read_calls": 2671,
+            "weight_bytes_requested": 148298022,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 349703616,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2671,
+            "cache_allocated_bytes": 983376,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.37370852200001536,
+          "memory": {
+            "peak_rss_bytes": 13594624,
+            "rss_after_run_bytes": 11677696,
+            "pss_after_run_bytes": 10277888,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "trial_index": 2,
+          "streamed_stderr_sha256": "c70dd77c36307584989a9c41a8d0aad66e94050bad1884228e88e3c1722dcfe2",
+          "error_tail": null
+        }
+      ]
+    },
+    "verified-cache23": {
+      "pass": true,
+      "checkpoint": "stories15M-q8_0",
+      "generation_max_tokens": 8,
+      "cpu_profile": {
+        "native_profile": "x86-avx2",
+        "architecture": "x86_64",
+        "native_compatible": true,
+        "capabilities": {
+          "sse2": true,
+          "sse42": true,
+          "avx": true,
+          "avx2": true,
+          "fma": true,
+          "f16c": true,
+          "bmi2": true
+        },
+        "missing_cpu_os_capabilities": [],
+        "scalar_fallback_validated": false
+      },
+      "emulation": null,
+      "reference_weight_repacking": "upstream_default",
+      "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+      "model_file_bytes": 26671328,
+      "binary_sha256": "a2e224ec5d4469a8a683b3756693dbef00bc19d7d953978444feb83f94af0b53",
+      "reference_binary_sha256": "9675a35062a2172a8a806c966e512a00df694402c35ac721e0327b1c452206bc",
+      "reference_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+      "working_tree_dirty": true,
+      "source_sha256": {
+        "native/src/streamed.cpp": "fabb9e46be1dbd5e207f36a43e42e9590990cd1c7feddcbc877bf536e90b8afc",
+        "crates/llmbridge-core/src/streamed.rs": "8ebfe972607133a32df8f5a4f4630568dcd0815ad7fbee6ed95e4c1d98d87c17",
+        "crates/llmbridge-core/src/read_cache.rs": "63fea96b27b7547c197312c4bb8b136fc4596f743881a123e0b9ac598c19edef",
+        "crates/llmbridge-core/src/storage.rs": "24855e5ad44345ccd5a26a4f68c33ee7aa876373a76051abe1e505c0a164ff5d",
+        "crates/llmbridge-core/src/storage_auth.rs": "1d60d554e6438a26c3f421eac2a82d228f21671fd384c1d30668cf6ff5adeabb"
+      },
+      "verified_session_requested": true,
+      "cache_budget_bytes": 1048576,
+      "cache_pressure_floor_mib": null,
+      "cache_release_required": false,
+      "address_space_limit_bytes": 24117248,
+      "memory_proof_scope": "native_model_larger_than_cap",
+      "host": "Linux-6.18.57-x86_64-with-glibc2.41",
+      "git_sha": "34d9e0b7cb591b43e129aeaf151f33bfdfc9ace6",
+      "kv_precision": "FP32 on both paths; reference flash attention disabled",
+      "logit_tolerance": {
+        "atol": 0.01,
+        "rtol": 0.001
+      },
+      "note": "Checkpoint-specific experimental streamed path with pinned ggml dot kernels versus upstream graph; observed matching logits are checkpoint-specific. RLIMIT_AS is a Linux process address-space cap, not a portable RSS API.",
+      "trials": [
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "4930",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131150,
+            "range_bytes_requested": 149025157,
+            "weight_read_calls": 2671,
+            "weight_bytes_requested": 148298022,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 349703616,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2671,
+            "cache_allocated_bytes": 983376,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.3373439339999891,
+          "memory": {
+            "peak_rss_bytes": 13381632,
+            "rss_after_run_bytes": 11468800,
+            "pss_after_run_bytes": 9243648,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "trial_index": 0,
+          "streamed_stderr_sha256": "097b583b75aa90f62edeb8f545d5439ac0417d997aaa84324113a8e1a8d27489",
+          "error_tail": null
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "5160",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131283,
+            "range_bytes_requested": 155384503,
+            "weight_read_calls": 2804,
+            "weight_bytes_requested": 154657368,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 364771424,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2804,
+            "cache_allocated_bytes": 983376,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.37139763099997936,
+          "memory": {
+            "peak_rss_bytes": 13385728,
+            "rss_after_run_bytes": 11472896,
+            "pss_after_run_bytes": 9176064,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "trial_index": 1,
+          "streamed_stderr_sha256": "502205df0c7268f35dc97cb606d56934b50e35351ad17d33be58bb8684054dc8",
+          "error_tail": null
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "4930",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131150,
+            "range_bytes_requested": 149025157,
+            "weight_read_calls": 2671,
+            "weight_bytes_requested": 148298022,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 349703616,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2671,
+            "cache_allocated_bytes": 983376,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.3632074910000256,
+          "memory": {
+            "peak_rss_bytes": 13529088,
+            "rss_after_run_bytes": 11546624,
+            "pss_after_run_bytes": 10146816,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "trial_index": 2,
+          "streamed_stderr_sha256": "7e09344cef4de24d48dca15a02839d5346fbd392d5c4cfb86284c95f28b8d9ff",
+          "error_tail": null
+        }
+      ]
+    },
+    "verified-cache-pressure24": {
+      "pass": true,
+      "checkpoint": "stories15M-q8_0",
+      "generation_max_tokens": 8,
+      "cpu_profile": {
+        "native_profile": "x86-avx2",
+        "architecture": "x86_64",
+        "native_compatible": true,
+        "capabilities": {
+          "sse2": true,
+          "sse42": true,
+          "avx": true,
+          "avx2": true,
+          "fma": true,
+          "f16c": true,
+          "bmi2": true
+        },
+        "missing_cpu_os_capabilities": [],
+        "scalar_fallback_validated": false
+      },
+      "emulation": null,
+      "reference_weight_repacking": "upstream_default",
+      "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+      "model_file_bytes": 26671328,
+      "binary_sha256": "a2e224ec5d4469a8a683b3756693dbef00bc19d7d953978444feb83f94af0b53",
+      "reference_binary_sha256": "9675a35062a2172a8a806c966e512a00df694402c35ac721e0327b1c452206bc",
+      "reference_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+      "working_tree_dirty": true,
+      "source_sha256": {
+        "native/src/streamed.cpp": "fabb9e46be1dbd5e207f36a43e42e9590990cd1c7feddcbc877bf536e90b8afc",
+        "crates/llmbridge-core/src/streamed.rs": "8ebfe972607133a32df8f5a4f4630568dcd0815ad7fbee6ed95e4c1d98d87c17",
+        "crates/llmbridge-core/src/read_cache.rs": "63fea96b27b7547c197312c4bb8b136fc4596f743881a123e0b9ac598c19edef",
+        "crates/llmbridge-core/src/storage.rs": "24855e5ad44345ccd5a26a4f68c33ee7aa876373a76051abe1e505c0a164ff5d",
+        "crates/llmbridge-core/src/storage_auth.rs": "1d60d554e6438a26c3f421eac2a82d228f21671fd384c1d30668cf6ff5adeabb"
+      },
+      "verified_session_requested": true,
+      "cache_budget_bytes": 1048576,
+      "cache_pressure_floor_mib": 1048576,
+      "cache_release_required": true,
+      "address_space_limit_bytes": 25165824,
+      "memory_proof_scope": "native_model_larger_than_cap",
+      "host": "Linux-6.18.57-x86_64-with-glibc2.41",
+      "git_sha": "34d9e0b7cb591b43e129aeaf151f33bfdfc9ace6",
+      "kv_precision": "FP32 on both paths; reference flash attention disabled",
+      "logit_tolerance": {
+        "atol": 0.01,
+        "rtol": 0.001
+      },
+      "note": "Checkpoint-specific experimental streamed path with pinned ggml dot kernels versus upstream graph; observed matching logits are checkpoint-specific. RLIMIT_AS is a Linux process address-space cap, not a portable RSS API.",
+      "trials": [
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "4930",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131150,
+            "range_bytes_requested": 149025157,
+            "weight_read_calls": 2671,
+            "weight_bytes_requested": 148298022,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 349703616,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2671,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 983376,
+            "cache_release_events": 1
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.3443578549999984,
+          "memory": {
+            "peak_rss_bytes": 13656064,
+            "rss_after_run_bytes": 11673600,
+            "pss_after_run_bytes": 10273792,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "trial_index": 0,
+          "streamed_stderr_sha256": "85734a528745df70cced04b14e2efd0791d9c04193d223d8263036a96f8d7fe1",
+          "error_tail": null
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "5160",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131283,
+            "range_bytes_requested": 155384503,
+            "weight_read_calls": 2804,
+            "weight_bytes_requested": 154657368,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 364771424,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2804,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 983376,
+            "cache_release_events": 1
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.33770344399999885,
+          "memory": {
+            "peak_rss_bytes": 13656064,
+            "rss_after_run_bytes": 11673600,
+            "pss_after_run_bytes": 10273792,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "trial_index": 1,
+          "streamed_stderr_sha256": "4f071ef5e6271d743a0f243e880ef1c392999906bcdb6c57560c5c6a3cebb02d",
+          "error_tail": null
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "4930",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131150,
+            "range_bytes_requested": 149025157,
+            "weight_read_calls": 2671,
+            "weight_bytes_requested": 148298022,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 349703616,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2671,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 983376,
+            "cache_release_events": 1
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.35010563399998773,
+          "memory": {
+            "peak_rss_bytes": 13451264,
+            "rss_after_run_bytes": 11534336,
+            "pss_after_run_bytes": 10134528,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "trial_index": 2,
+          "streamed_stderr_sha256": "b8fee48d40f6b63e6f7b83e6bf03ef5fa538aedf121597521e45be524d9666ca",
+          "error_tail": null
+        }
+      ]
+    },
+    "q4": {
+      "pass": true,
+      "checkpoint": "stories15M-derived-q4_0",
+      "generation_max_tokens": 8,
+      "cpu_profile": {
+        "native_profile": "x86-avx2",
+        "architecture": "x86_64",
+        "native_compatible": true,
+        "capabilities": {
+          "sse2": true,
+          "sse42": true,
+          "avx": true,
+          "avx2": true,
+          "fma": true,
+          "f16c": true,
+          "bmi2": true
+        },
+        "missing_cpu_os_capabilities": [],
+        "scalar_fallback_validated": false
+      },
+      "emulation": null,
+      "reference_weight_repacking": "explicitly_disabled",
+      "model_sha256": "b5cd77bb0d1a785a82d7a8a2bcb4170dfe6e43e881b9cbb0d1c8184a6dd99839",
+      "model_file_bytes": 14469344,
+      "binary_sha256": "a2e224ec5d4469a8a683b3756693dbef00bc19d7d953978444feb83f94af0b53",
+      "reference_binary_sha256": "9675a35062a2172a8a806c966e512a00df694402c35ac721e0327b1c452206bc",
+      "reference_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+      "working_tree_dirty": true,
+      "source_sha256": {
+        "native/src/streamed.cpp": "fabb9e46be1dbd5e207f36a43e42e9590990cd1c7feddcbc877bf536e90b8afc",
+        "crates/llmbridge-core/src/streamed.rs": "8ebfe972607133a32df8f5a4f4630568dcd0815ad7fbee6ed95e4c1d98d87c17",
+        "crates/llmbridge-core/src/read_cache.rs": "63fea96b27b7547c197312c4bb8b136fc4596f743881a123e0b9ac598c19edef",
+        "crates/llmbridge-core/src/storage.rs": "24855e5ad44345ccd5a26a4f68c33ee7aa876373a76051abe1e505c0a164ff5d",
+        "crates/llmbridge-core/src/storage_auth.rs": "1d60d554e6438a26c3f421eac2a82d228f21671fd384c1d30668cf6ff5adeabb"
+      },
+      "verified_session_requested": true,
+      "cache_budget_bytes": 1048576,
+      "cache_pressure_floor_mib": null,
+      "cache_release_required": false,
+      "address_space_limit_bytes": null,
+      "memory_proof_scope": "not_a_memory_cap_proof",
+      "host": "Linux-6.18.57-x86_64-with-glibc2.41",
+      "git_sha": "34d9e0b7cb591b43e129aeaf151f33bfdfc9ace6",
+      "kv_precision": "FP32 on both paths; reference flash attention disabled",
+      "logit_tolerance": {
+        "atol": 0.01,
+        "rtol": 0.001
+      },
+      "note": "Checkpoint-specific experimental streamed path with pinned ggml dot kernels versus upstream graph; observed matching logits are checkpoint-specific. RLIMIT_AS is a Linux process address-space cap, not a portable RSS API.",
+      "trials": [
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "801760",
+            "blocks_verified": "2644",
+            "sha256": "b5cd77bb0d1a785a82d7a8a2bcb4170dfe6e43e881b9cbb0d1c8184a6dd99839"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 129930,
+            "range_bytes_requested": 79313749,
+            "weight_read_calls": 1451,
+            "weight_bytes_requested": 78586614,
+            "max_range_read_bytes": 65448,
+            "source_bytes_read": 187591296,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 1451,
+            "cache_allocated_bytes": 983376,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.22495192200000247,
+          "memory": {
+            "peak_rss_bytes": 13594624,
+            "rss_after_run_bytes": 11530240,
+            "pss_after_run_bytes": 10269696,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "trial_index": 0,
+          "streamed_stderr_sha256": "9130c39bf89b7baa6b16e72950ca4a449b65b316a67ecedff8fd57d74aa2039b",
+          "error_tail": null
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "801760",
+            "blocks_verified": "2768",
+            "sha256": "b5cd77bb0d1a785a82d7a8a2bcb4170dfe6e43e881b9cbb0d1c8184a6dd99839"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 130003,
+            "range_bytes_requested": 82686967,
+            "weight_read_calls": 1524,
+            "weight_bytes_requested": 81959832,
+            "max_range_read_bytes": 65448,
+            "source_bytes_read": 195703648,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 1524,
+            "cache_allocated_bytes": 983376,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.24200840399998924,
+          "memory": {
+            "peak_rss_bytes": 13520896,
+            "rss_after_run_bytes": 11530240,
+            "pss_after_run_bytes": 10269696,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "trial_index": 1,
+          "streamed_stderr_sha256": "f82b96be892127a1135085c66fbfae88a6eb9112e07c1570aaa78ce714bc5e59",
+          "error_tail": null
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "801760",
+            "blocks_verified": "2644",
+            "sha256": "b5cd77bb0d1a785a82d7a8a2bcb4170dfe6e43e881b9cbb0d1c8184a6dd99839"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 129930,
+            "range_bytes_requested": 79313749,
+            "weight_read_calls": 1451,
+            "weight_bytes_requested": 78586614,
+            "max_range_read_bytes": 65448,
+            "source_bytes_read": 187591296,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 1451,
+            "cache_allocated_bytes": 983376,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.23441101600002412,
+          "memory": {
+            "peak_rss_bytes": 13647872,
+            "rss_after_run_bytes": 11595776,
+            "pss_after_run_bytes": 10724352,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "trial_index": 2,
+          "streamed_stderr_sha256": "dfb01c49973e74dc0dae7f21d0afb659db4a8d50e4f63186de09945b6b9a10fa",
+          "error_tail": null
+        }
+      ]
+    },
+    "uncached24": {
+      "pass": true,
+      "checkpoint": "stories15M-q8_0",
+      "generation_max_tokens": 8,
+      "cpu_profile": {
+        "native_profile": "x86-avx2",
+        "architecture": "x86_64",
+        "native_compatible": true,
+        "capabilities": {
+          "sse2": true,
+          "sse42": true,
+          "avx": true,
+          "avx2": true,
+          "fma": true,
+          "f16c": true,
+          "bmi2": true
+        },
+        "missing_cpu_os_capabilities": [],
+        "scalar_fallback_validated": false
+      },
+      "emulation": null,
+      "reference_weight_repacking": "upstream_default",
+      "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+      "model_file_bytes": 26671328,
+      "binary_sha256": "a2e224ec5d4469a8a683b3756693dbef00bc19d7d953978444feb83f94af0b53",
+      "reference_binary_sha256": "9675a35062a2172a8a806c966e512a00df694402c35ac721e0327b1c452206bc",
+      "reference_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+      "working_tree_dirty": true,
+      "source_sha256": {
+        "native/src/streamed.cpp": "fabb9e46be1dbd5e207f36a43e42e9590990cd1c7feddcbc877bf536e90b8afc",
+        "crates/llmbridge-core/src/streamed.rs": "8ebfe972607133a32df8f5a4f4630568dcd0815ad7fbee6ed95e4c1d98d87c17",
+        "crates/llmbridge-core/src/read_cache.rs": "63fea96b27b7547c197312c4bb8b136fc4596f743881a123e0b9ac598c19edef",
+        "crates/llmbridge-core/src/storage.rs": "24855e5ad44345ccd5a26a4f68c33ee7aa876373a76051abe1e505c0a164ff5d",
+        "crates/llmbridge-core/src/storage_auth.rs": "1d60d554e6438a26c3f421eac2a82d228f21671fd384c1d30668cf6ff5adeabb"
+      },
+      "verified_session_requested": false,
+      "cache_budget_bytes": 0,
+      "cache_pressure_floor_mib": null,
+      "cache_release_required": false,
+      "address_space_limit_bytes": 25165824,
+      "memory_proof_scope": "native_model_larger_than_cap",
+      "host": "Linux-6.18.57-x86_64-with-glibc2.41",
+      "git_sha": "34d9e0b7cb591b43e129aeaf151f33bfdfc9ace6",
+      "kv_precision": "FP32 on both paths; reference flash attention disabled",
+      "logit_tolerance": {
+        "atol": 0.01,
+        "rtol": 0.001
+      },
+      "note": "Checkpoint-specific experimental streamed path with pinned ggml dot kernels versus upstream graph; observed matching logits are checkpoint-specific. RLIMIT_AS is a Linux process address-space cap, not a portable RSS API.",
+      "trials": [
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "0"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131150,
+            "range_bytes_requested": 149025157,
+            "weight_read_calls": 2671,
+            "weight_bytes_requested": 148298022,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 149025157,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 131150,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 0,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.31472273700001097,
+          "memory": {
+            "peak_rss_bytes": 12517376,
+            "rss_after_run_bytes": 11522048,
+            "pss_after_run_bytes": 10657792,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "trial_index": 0,
+          "streamed_stderr_sha256": "8dfd2b3548c415df22dbab23ce8c6c8b481953c2538d35dfae4ae709eff9239f",
+          "error_tail": null
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "0"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131283,
+            "range_bytes_requested": 155384503,
+            "weight_read_calls": 2804,
+            "weight_bytes_requested": 154657368,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 155384503,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 131283,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 0,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.35664142999996784,
+          "memory": {
+            "peak_rss_bytes": 12521472,
+            "rss_after_run_bytes": 11456512,
+            "pss_after_run_bytes": 10592256,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "trial_index": 1,
+          "streamed_stderr_sha256": "81add649e687b428c1c2ea7e7a6fa70d9e09d91d92dda855effd1db8e3d176d5",
+          "error_tail": null
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "0"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131150,
+            "range_bytes_requested": 149025157,
+            "weight_read_calls": 2671,
+            "weight_bytes_requested": 148298022,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 149025157,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 131150,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 0,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.33144374699998025,
+          "memory": {
+            "peak_rss_bytes": 12513280,
+            "rss_after_run_bytes": 11386880,
+            "pss_after_run_bytes": 10522624,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "trial_index": 2,
+          "streamed_stderr_sha256": "9f4b3a424907dbbcdfdc3733944bb476af90de814281277e2c7c2d014be32d85",
+          "error_tail": null
+        }
+      ]
+    },
+    "cached24": {
+      "pass": true,
+      "checkpoint": "stories15M-q8_0",
+      "generation_max_tokens": 8,
+      "cpu_profile": {
+        "native_profile": "x86-avx2",
+        "architecture": "x86_64",
+        "native_compatible": true,
+        "capabilities": {
+          "sse2": true,
+          "sse42": true,
+          "avx": true,
+          "avx2": true,
+          "fma": true,
+          "f16c": true,
+          "bmi2": true
+        },
+        "missing_cpu_os_capabilities": [],
+        "scalar_fallback_validated": false
+      },
+      "emulation": null,
+      "reference_weight_repacking": "upstream_default",
+      "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+      "model_file_bytes": 26671328,
+      "binary_sha256": "a2e224ec5d4469a8a683b3756693dbef00bc19d7d953978444feb83f94af0b53",
+      "reference_binary_sha256": "9675a35062a2172a8a806c966e512a00df694402c35ac721e0327b1c452206bc",
+      "reference_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+      "working_tree_dirty": true,
+      "source_sha256": {
+        "native/src/streamed.cpp": "fabb9e46be1dbd5e207f36a43e42e9590990cd1c7feddcbc877bf536e90b8afc",
+        "crates/llmbridge-core/src/streamed.rs": "8ebfe972607133a32df8f5a4f4630568dcd0815ad7fbee6ed95e4c1d98d87c17",
+        "crates/llmbridge-core/src/read_cache.rs": "63fea96b27b7547c197312c4bb8b136fc4596f743881a123e0b9ac598c19edef",
+        "crates/llmbridge-core/src/storage.rs": "24855e5ad44345ccd5a26a4f68c33ee7aa876373a76051abe1e505c0a164ff5d",
+        "crates/llmbridge-core/src/storage_auth.rs": "1d60d554e6438a26c3f421eac2a82d228f21671fd384c1d30668cf6ff5adeabb"
+      },
+      "verified_session_requested": false,
+      "cache_budget_bytes": 1048576,
+      "cache_pressure_floor_mib": null,
+      "cache_release_required": false,
+      "address_space_limit_bytes": 25165824,
+      "memory_proof_scope": "native_model_larger_than_cap",
+      "host": "Linux-6.18.57-x86_64-with-glibc2.41",
+      "git_sha": "34d9e0b7cb591b43e129aeaf151f33bfdfc9ace6",
+      "kv_precision": "FP32 on both paths; reference flash attention disabled",
+      "logit_tolerance": {
+        "atol": 0.01,
+        "rtol": 0.001
+      },
+      "note": "Checkpoint-specific experimental streamed path with pinned ggml dot kernels versus upstream graph; observed matching logits are checkpoint-specific. RLIMIT_AS is a Linux process address-space cap, not a portable RSS API.",
+      "trials": [
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "0"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131150,
+            "range_bytes_requested": 149025157,
+            "weight_read_calls": 2671,
+            "weight_bytes_requested": 148298022,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 150253984,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2293,
+            "cache_allocated_bytes": 983376,
+            "cache_block_hits": 131126,
+            "cache_block_misses": 2293,
+            "cache_evictions": 2279,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.2906620599999883,
+          "memory": {
+            "peak_rss_bytes": 13508608,
+            "rss_after_run_bytes": 11522048,
+            "pss_after_run_bytes": 10677248,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "trial_index": 0,
+          "streamed_stderr_sha256": "dc387405eb5d47c294608bbf90f792a6a55dc61227cbdad123255ca0222575f1",
+          "error_tail": null
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "0"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131283,
+            "range_bytes_requested": 155384503,
+            "weight_read_calls": 2804,
+            "weight_bytes_requested": 154657368,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 156740224,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2392,
+            "cache_allocated_bytes": 983376,
+            "cache_block_hits": 131257,
+            "cache_block_misses": 2392,
+            "cache_evictions": 2378,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.29066818900003,
+          "memory": {
+            "peak_rss_bytes": 13365248,
+            "rss_after_run_bytes": 11448320,
+            "pss_after_run_bytes": 10603520,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "trial_index": 1,
+          "streamed_stderr_sha256": "07174baecac6a72d77571238cb09a185423be3c534ef8e7a185596bee3d4d787",
+          "error_tail": null
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "0"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131150,
+            "range_bytes_requested": 149025157,
+            "weight_read_calls": 2671,
+            "weight_bytes_requested": 148298022,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 150253984,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2293,
+            "cache_allocated_bytes": 983376,
+            "cache_block_hits": 131126,
+            "cache_block_misses": 2293,
+            "cache_evictions": 2279,
+            "cache_peak_allocated_bytes": 983376,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.2811117570000192,
+          "memory": {
+            "peak_rss_bytes": 13504512,
+            "rss_after_run_bytes": 11456512,
+            "pss_after_run_bytes": 10611712,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "trial_index": 2,
+          "streamed_stderr_sha256": "9f7dad3f2745e1dc3194ee691692c2ff8412a2a7d360c6fb49307ae15f873be4",
+          "error_tail": null
+        }
+      ]
+    },
+    "verified24": {
+      "pass": true,
+      "checkpoint": "stories15M-q8_0",
+      "generation_max_tokens": 8,
+      "cpu_profile": {
+        "native_profile": "x86-avx2",
+        "architecture": "x86_64",
+        "native_compatible": true,
+        "capabilities": {
+          "sse2": true,
+          "sse42": true,
+          "avx": true,
+          "avx2": true,
+          "fma": true,
+          "f16c": true,
+          "bmi2": true
+        },
+        "missing_cpu_os_capabilities": [],
+        "scalar_fallback_validated": false
+      },
+      "emulation": null,
+      "reference_weight_repacking": "upstream_default",
+      "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+      "model_file_bytes": 26671328,
+      "binary_sha256": "a2e224ec5d4469a8a683b3756693dbef00bc19d7d953978444feb83f94af0b53",
+      "reference_binary_sha256": "9675a35062a2172a8a806c966e512a00df694402c35ac721e0327b1c452206bc",
+      "reference_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+      "working_tree_dirty": true,
+      "source_sha256": {
+        "native/src/streamed.cpp": "fabb9e46be1dbd5e207f36a43e42e9590990cd1c7feddcbc877bf536e90b8afc",
+        "crates/llmbridge-core/src/streamed.rs": "8ebfe972607133a32df8f5a4f4630568dcd0815ad7fbee6ed95e4c1d98d87c17",
+        "crates/llmbridge-core/src/read_cache.rs": "63fea96b27b7547c197312c4bb8b136fc4596f743881a123e0b9ac598c19edef",
+        "crates/llmbridge-core/src/storage.rs": "24855e5ad44345ccd5a26a4f68c33ee7aa876373a76051abe1e505c0a164ff5d",
+        "crates/llmbridge-core/src/storage_auth.rs": "1d60d554e6438a26c3f421eac2a82d228f21671fd384c1d30668cf6ff5adeabb"
+      },
+      "verified_session_requested": true,
+      "cache_budget_bytes": 0,
+      "cache_pressure_floor_mib": null,
+      "cache_release_required": false,
+      "address_space_limit_bytes": 25165824,
+      "memory_proof_scope": "native_model_larger_than_cap",
+      "host": "Linux-6.18.57-x86_64-with-glibc2.41",
+      "git_sha": "34d9e0b7cb591b43e129aeaf151f33bfdfc9ace6",
+      "kv_precision": "FP32 on both paths; reference flash attention disabled",
+      "logit_tolerance": {
+        "atol": 0.01,
+        "rtol": 0.001
+      },
+      "note": "Checkpoint-specific experimental streamed path with pinned ggml dot kernels versus upstream graph; observed matching logits are checkpoint-specific. RLIMIT_AS is a Linux process address-space cap, not a portable RSS API.",
+      "trials": [
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "4930",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131150,
+            "range_bytes_requested": 149025157,
+            "weight_read_calls": 2671,
+            "weight_bytes_requested": 148298022,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 349703616,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2671,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 0,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.34179185400000733,
+          "memory": {
+            "peak_rss_bytes": 12537856,
+            "rss_after_run_bytes": 11472896,
+            "pss_after_run_bytes": 10621952,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "trial_index": 0,
+          "streamed_stderr_sha256": "2f2db33df6cb67d595134bc1537650e231218cbb4c451017d8b2e34e560f38f8",
+          "error_tail": null
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "5160",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131283,
+            "range_bytes_requested": 155384503,
+            "weight_read_calls": 2804,
+            "weight_bytes_requested": 154657368,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 364771424,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2804,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 0,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.33848374900003364,
+          "memory": {
+            "peak_rss_bytes": 12607488,
+            "rss_after_run_bytes": 11608064,
+            "pss_after_run_bytes": 10757120,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "trial_index": 1,
+          "streamed_stderr_sha256": "969712cfab0831e0461e6ce3e28d3791d50a1edd51b32efcfe7281b43201d4c0",
+          "error_tail": null
+        },
+        {
+          "streamed_exit": 0,
+          "reference_exit": 0,
+          "integrity_metrics": {
+            "verified": "1",
+            "accounted_bytes": "807712",
+            "blocks_verified": "4930",
+            "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+          },
+          "integrity_pass": true,
+          "reader_metrics": {
+            "range_read_calls": 131150,
+            "range_bytes_requested": 149025157,
+            "weight_read_calls": 2671,
+            "weight_bytes_requested": 148298022,
+            "max_range_read_bytes": 65484,
+            "source_bytes_read": 349703616,
+            "reader_buffer_bytes": 65536,
+            "source_read_calls": 2671,
+            "cache_allocated_bytes": 0,
+            "cache_block_hits": 0,
+            "cache_block_misses": 0,
+            "cache_evictions": 0,
+            "cache_peak_allocated_bytes": 0,
+            "cache_released_bytes": 0,
+            "cache_release_events": 0
+          },
+          "cache_release_pass": true,
+          "wall_seconds_including_load": 0.33967262699997036,
+          "memory": {
+            "peak_rss_bytes": 12607488,
+            "rss_after_run_bytes": 11542528,
+            "pss_after_run_bytes": 10680320,
+            "cgroup_current_after_run_bytes": null,
+            "cgroup_limit_bytes": null
+          },
+          "memory_cap_pass": true,
+          "tokens_match": true,
+          "logits_count": 256000,
+          "logits_max_abs_error": 0.0,
+          "logits_rmse": 0.0,
+          "logits_match": true,
+          "reference_repacking_observed": false,
+          "reference_configuration_pass": true,
+          "pass": true,
+          "trial_index": 2,
+          "streamed_stderr_sha256": "77e5625df40d3b299d5adcb5752df89dcfe57e01a71fe602b2d294894478360c",
+          "error_tail": null
+        }
+      ]
+    }
+  },
+  "clean_final_resume_protocol": {
+    "pass": true,
+    "binary_sha256": "a2e224ec5d4469a8a683b3756693dbef00bc19d7d953978444feb83f94af0b53",
+    "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+    "cases": {
+      "interrupted_native_batch_resumes_verified_jobs": {
+        "pass": true,
+        "skipped_existing_jobs": 1,
+        "total_completed_jobs": 3,
+        "completed_files_unchanged": true,
+        "unfinished_partials_archived": true
+      },
+      "fully_completed_resume_is_read_only": {
+        "pass": true
+      },
+      "changed_model_input_configuration_refuse_unchanged": {
+        "pass": true,
+        "model_size_mtime_preserved": true
+      },
+      "identical_binary_copy_can_resume": {
+        "pass": true
+      },
+      "changed_binary_artifact_refuses_unchanged": {
+        "pass": true
+      },
+      "corrupt_and_orphan_results_never_overwritten": {
+        "pass": true,
+        "output_size_mtime_preserved": true
+      },
+      "exclusive_lock_and_sigkill_release": {
+        "pass": true,
+        "expired_deadline_retry": true
+      },
+      "checkpoint_requires_trusted_digest": {
+        "pass": true
+      }
+    },
+    "note": "Real Linux interruption/resume and integrity protocol; not signed records, adversarial concurrent-write resistance, power-loss or physical-memory/throughput proof."
+  },
+  "cli_deadline_regression": {
+    "pass": true,
+    "binary_sha256": "a2e224ec5d4469a8a683b3756693dbef00bc19d7d953978444feb83f94af0b53",
+    "model_sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+    "cases": {
+      "future_chat_matches_bytes_logits_and_cache_release": {
+        "pass": true,
+        "output_sha256": "f9f8b7ed14e9bfdcd72e1551e148d6cf7a752060d90663b650556949f94247cc",
+        "logits_sha256": "f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb"
+      },
+      "zero_chat_refuses_before_model_and_trace_creation": {
+        "pass": true
+      },
+      "unsupported_backend_and_invalid_chat_values_refuse": {
+        "pass": true
+      },
+      "deadline_preserves_existing_logit_trace": {
+        "pass": true
+      },
+      "timed_chat_wrong_digest_refuses_delivery": {
+        "pass": true
+      },
+      "active_native_chat_expiry": {
+        "pass": true,
+        "selected_budget_ms": 250,
+        "logits_bytes_before_expiry": 640000,
+        "partial_stdout_bytes": 21,
+        "partial_stdout_sha256": "81ae24f4870c4b18ff1b1c9f8e3c7d85a1df4f320ad680b520d5cf7d6a5b082a"
+      },
+      "per_job_future_batch_matches_direct_bytes": {
+        "pass": true
+      },
+      "timed_batch_wrong_digest_publishes_nothing": {
+        "pass": true
+      },
+      "batch_zero_and_independent_wait_deadline_cleanup": {
+        "pass": true
+      },
+      "invalid_batch_values_refuse_before_output_creation": {
+        "pass": true
+      },
+      "active_batch_preserves_partial_without_publication": {
+        "pass": true,
+        "selected_budget_ms": 250,
+        "partial_bytes": 20,
+        "published_results": 0
+      }
+    },
+    "note": "Adaptive fixture budgets prove active CLI wiring, not maximum deadline latency, RSS, physical2GB or throughput."
+  },
+  "checks": {
+    "release_native_tests_passed": 257,
+    "release_native_clippy_deny_warnings_passed": true,
+    "fmt_and_diff_check_passed": true,
+    "native_real_model_contracts": {
+      "streamed_contract": [
+        "llama_model_load: vocab only - skipping tensors",
+        "cached/uncached streamed real-model cancellation, workspace and context gates: PASS"
+      ],
+      "verified_contract": [
+        "llama_model_load: vocab only - skipping tensors",
+        "verified hash admission, budget, cancellation and same-identity late mutation: PASS"
+      ],
+      "streamed_plan_contract": [
+        "exact native workspace boundary generation/refusal: PASS",
+        "adaptive cache boundary, context preservation and execution allocation: PASS"
+      ],
+      "row_batch_contract": [
+        "{\"chunk_bytes\":65535,\"cache_budget_bytes\":1048576,\"weight_read_calls\":1535,\"weight_bytes_requested\":83688030,\"max_range_read_bytes\":65484,\"logits_steps\":4,\"output_sha256\":\"76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89\",\"logits_sha256\":\"f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb\"}",
+        "bounded row batches: identical bytes/logits, exact logical reads, authenticated LRU bypass and chunk bounds: PASS"
+      ],
+      "cache_release_contract": [
+        "cache release output/logit parity, zero final allocation, cancellation and late-mutation rejection: PASS",
+        "released_bytes=983376 release_events=1 current_cache_bytes=0"
+      ],
+      "streamed_deadline_contract": [
+        "expired_session_piece_callbacks=0 logits_callbacks=1 descriptors_before=Some(4) descriptors_after=Some(4)",
+        "output_sha256=76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89 logits_sha256=f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb"
+      ],
+      "queued_deadline_contract": [
+        "queued deadline: queue time not reset, active slot retention/release, FIFO tail progress, independent waiting timeout, pressure cleanup and exact bytes/logits recovery: PASS",
+        "expired_session_piece_callbacks=0 final_pending=0 final_reserved=0 output_sha256=76bcd857e8e961fb0db31f4799eba250de0513de69004e1d9fac05ac5af2ee89 logits_sha256=f285c3ab542c59a3da178c292d9d6c13698146c0a1cf1502f52f9740f1b11ebb"
+      ]
+    }
+  },
+  "logs": {
+    "fix-build": {
+      "sha256": "80126bb37b19092f821d0021442265bb8bb75c72ae5a34701cf598e1276eff7f",
+      "bytes": 862
+    },
+    "fix-native-tests": {
+      "sha256": "ee69a30492680f7bd32bd81179344a68dd97e7b8d648ea046c6f0a569a7bf318",
+      "bytes": 27403
+    },
+    "fix-clippy": {
+      "sha256": "c9284369de1a24cad8e800f52bcda701fb56b048cb17a224c03668e86b180668",
+      "bytes": 275
+    },
+    "clean-cap24": {
+      "sha256": "15265af8ba018b0ad4b470acafa066787e545424c33c75ba9f6feb9a1f2149d2",
+      "bytes": 5709
+    },
+    "clean-resume": {
+      "sha256": "a2932ac9a8ad9811d63cfac1b5e85ab2caec126c4cb01b3489ca34adf94b0f04",
+      "bytes": 151
+    },
+    "fix-cli-deadlines": {
+      "sha256": "b6ce3d3815796643a4d1b673762317b40d073d3c68fb1e599183f480746acf2e",
+      "bytes": 135
+    },
+    "fix-streamed_contract": {
+      "sha256": "08e123066a21d2c28ccf316018dcd127d7682f090f378b38a5d426c051f479aa",
+      "bytes": 21329
+    },
+    "fix-verified_contract": {
+      "sha256": "1f058974aaa791c610f6578d8f551f91aae13c5d5f1c065321659cdcbe823515",
+      "bytes": 7294
+    },
+    "fix-streamed_plan_contract": {
+      "sha256": "da55c0b9c74b7009ecf4dfea75c589d5e0db657809865a004bbbc06bbecfb912",
+      "bytes": 18165
+    },
+    "fix-row_batch_contract": {
+      "sha256": "316e08d00bc2e52c01bc734db6c7f4bbc71faaf06cf956a9ae639596afd20ee5",
+      "bytes": 23145
+    },
+    "fix-cache_release_contract": {
+      "sha256": "ebcaec8f47a751e7d45e4ff78c0c8ffb4911b06de48ec24c518879e277212695",
+      "bytes": 14335
+    },
+    "fix-streamed_deadline_contract": {
+      "sha256": "522f7bc9f75696cb3f0a50374370397f190e00f7e57e33bd9e7b5a1eb3711896",
+      "bytes": 21558
+    },
+    "fix-queued_deadline_contract": {
+      "sha256": "eb1db8cf852f98a2c84abf19cdcd31e9193120c6bf593f86a7996df4ca502a9a",
+      "bytes": 21524
+    }
+  },
+  "limitations": [
+    "24MiB is Linux process RLIMIT_AS, not physical2GB hardware validation or a portable per-session RSS guarantee.",
+    "Local23MiB success versus previous allocation failure is host/build specific. Tighter caps still fail explicitly.",
+    "Allocator page retention and native tokenization allocation still exist; this does not establish universal maximum memory or latency.",
+    "Additional protocols recorded before publication have dirty=true; their native source hashes match the published source. Final cap24 and resume protocols ran from the exact clean source commit.",
+    "Final GitHub CI must be observed separately; local passing tests do not declare the remote workflow green."
+  ]
+}
