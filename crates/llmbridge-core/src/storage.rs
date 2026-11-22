@@ -16,6 +16,10 @@ pub struct SourceIdentity {
     pub device: u64,
     #[cfg(unix)]
     pub inode: u64,
+    #[cfg(windows)]
+    volume_serial: u32,
+    #[cfg(windows)]
+    file_index: u64,
 }
 impl SourceIdentity {
     pub fn from_metadata(metadata: &std::fs::Metadata) -> Self {
@@ -28,7 +32,34 @@ impl SourceIdentity {
             device: metadata.dev(),
             #[cfg(unix)]
             inode: metadata.ino(),
+            #[cfg(windows)]
+            volume_serial: 0,
+            #[cfg(windows)]
+            file_index: 0,
         }
+    }
+
+    pub(crate) fn from_file(file: &File) -> io::Result<Self> {
+        #[cfg(windows)]
+        let mut identity = Self::from_metadata(&file.metadata()?);
+        #[cfg(not(windows))]
+        let identity = Self::from_metadata(&file.metadata()?);
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawHandle;
+            use windows_sys::Win32::Storage::FileSystem::{
+                GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+            };
+            let mut information = BY_HANDLE_FILE_INFORMATION::default();
+            // SAFETY: `file` owns a valid handle for this synchronous query.
+            if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut information) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            identity.volume_serial = information.dwVolumeSerialNumber;
+            identity.file_index = (u64::from(information.nFileIndexHigh) << 32)
+                | u64::from(information.nFileIndexLow);
+        }
+        Ok(identity)
     }
 }
 
@@ -77,12 +108,14 @@ impl BoundedLocalReader {
         }
         // Recheck the path after open: a rename/symlink substitution between
         // symlink_metadata and File::open must not bypass the source policy.
-        // Compare the opened descriptor with the final path identity on Unix.
+        // Compare stable file identities even when replacement metadata matches.
+        let path_file = File::open(path)?;
         let path_metadata = fs::symlink_metadata(path)?;
+        let opened_identity = SourceIdentity::from_file(&file)?;
+        let path_identity = SourceIdentity::from_file(&path_file)?;
         if path_metadata.file_type().is_symlink()
             || !path_metadata.is_file()
-            || SourceIdentity::from_metadata(&path_metadata)
-                != SourceIdentity::from_metadata(&metadata)
+            || opened_identity != path_identity
         {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
@@ -93,7 +126,7 @@ impl BoundedLocalReader {
             file,
             source_path: path.to_path_buf(),
             file_len: metadata.len(),
-            source_identity: SourceIdentity::from_metadata(&metadata),
+            source_identity: opened_identity,
             buffer: vec![0u8; max_chunk_bytes].into_boxed_slice(),
             disk_bytes_read: 0,
             auth: None,
@@ -122,14 +155,16 @@ impl BoundedLocalReader {
     }
 
     fn assert_unchanged(&self) -> io::Result<()> {
-        let current = self.file.metadata()?;
+        let current_identity = SourceIdentity::from_file(&self.file)?;
         // A descriptor can still read the old inode after its path is replaced.
         // Reject a renamed, deleted or symlink-substituted model before returning bytes.
         let path_metadata = fs::symlink_metadata(&self.source_path)?;
+        let path_file = File::open(&self.source_path)?;
+        let path_identity = SourceIdentity::from_file(&path_file)?;
         if !path_metadata.is_file()
             || path_metadata.file_type().is_symlink()
-            || SourceIdentity::from_metadata(&path_metadata) != self.source_identity
-            || SourceIdentity::from_metadata(&current) != self.source_identity
+            || path_identity != self.source_identity
+            || current_identity != self.source_identity
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,

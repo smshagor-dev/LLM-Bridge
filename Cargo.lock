@@ -148,6 +148,7 @@ dependencies = [
  "cmake",
  "libc",
  "sha2",
+ "windows-sys",
 ]
 
 [[package]]

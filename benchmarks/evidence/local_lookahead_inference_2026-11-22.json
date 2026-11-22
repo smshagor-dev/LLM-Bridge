@@ -1,0 +1,254 @@
+{
+    "evidence_kind":  "final-source native lookahead integration and verification",
+    "recorded_date":  "2026-11-22",
+    "branch":  "local/streamed-metadata-admission",
+    "commit":  "7162e7fa7bfcb7c3e8b32c1188c8b07c8cf29184",
+    "working_tree_dirty":  true,
+    "historical_evidence":  "benchmarks/evidence/local_lookahead_contract_2026-11-22.json is preserved with its original source/revision and prior prototype claims",
+    "dependency":  {
+                       "name":  "llama.cpp",
+                       "pinned_revision":  "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+                       "local_checkout_revision":  "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+                       "cmake_override":  "-DFETCHCONTENT_SOURCE_DIR_LLAMA_CPP=E:/LLM-Bridge/build/reference",
+                       "fetchcontent_blocker":  "The earlier FetchContent attempt had active Git clone/remote activity but no terminal Git/CMake error was captured. No specific Git failure is inferred. The exact pinned local checkout override configured and built successfully. The local checkout has an unrelated modified example source; the llmbridge_native target does not compile that example."
+                   },
+    "source_sha256":  {
+                          "crates/llmbridge-core/examples/lookahead_parity.rs":  "e4beea13108464009d67dfafd163f8fd3051094afbb667f238562ac5bd6df96b",
+                          "crates/llmbridge-core/src/local_lookahead.rs":  "509d41ed7bc3a308e30e88f0ce7409cda59e9301059e57f73c865e26aaf2b0c8",
+                          "scripts/check_lookahead_parity.py":  "84a4f55cf8ccfc01319cc6eae1d9717ef144920b080b6ff9dc0ac7cdde691bef",
+                          "docs/STREAMED_CACHE.md":  "2b4ec89cdc0aecdd106c4ac8220e439ef11fa1018bd90a6d33db0c59036ee28b",
+                          "crates/llmbridge-core/build.rs":  "54250f70fd2c1dff6abb26f1870a522fce08e32181546b2dfd264ac6eb445436",
+                          "native/include/llmbridge.h":  "83f9d092acd16b81a686c2dbcc8fab7b511a95b8b6a2305132b0ba52272aa60a",
+                          "native/src/streamed.cpp":  "c9fb1c7a7048fd652204996e5f76deeac8f0349aa42439a01442ef55926f011f",
+                          "crates/llmbridge-core/src/streamed.rs":  "c9484ab49a8bc30824c2cea15e8462ceda3f056971615b8e571b5dd500cc1c50",
+                          "crates/llmbridge-core/src/read_cache.rs":  "9a5babeeb9da02d8ea32a1ab2d6b6eebfc7a820d6b8ef897d0d42753d7aa0efd",
+                          "native/src/bridge.cpp":  "22a8d23e74c19c3b93e85d1b81addf01f32d3f9c5e20a42ccdb2292bf0ba5833",
+                          "crates/llmbridge-core/src/gguf_index.rs":  "f8ca3a0b78feae6fed291852899a41de6d8cef2a94f7a004f47b5fc238c87157",
+                          "crates/llmbridge-core/src/storage.rs":  "b558830a583389272eb98e8e4efa046c608a394f57b817b8b48d2615a0548072",
+                          "crates/llmbridge-core/src/storage_auth.rs":  "e7adc2c5ba5d234e9313e5e49bd1aabe09b57bf2cde96d0985da68a94268abe9",
+                          "IMPLEMENTATION_STATUS.md":  "04ebcfc726ca7de141403d13be8875664cc1fdff21d6aab42da0392c6b14bd9e",
+                          "crates/llmbridge-core/Cargo.toml":  "0b20bea9587dbcf5d85be3ff7ffd5139b37ccae6ead8270161f0d2c2e7b51dc7"
+                      },
+    "artifacts":  {
+                      "model":  {
+                                    "path":  "models/stories15M-q8_0.gguf (temporary Linux test copy: /tmp/llmbridge-lookahead-q8.gguf)",
+                                    "bytes":  26671328,
+                                    "sha256":  "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6"
+                                },
+                      "release_cli_sha256":  "400ab08d7795d43ef9b50e170ab8d8d31eb8335932b82ddff7d29fdf1ad77735",
+                      "release_lookahead_example_sha256":  "2941a955b16a0de0d58f0bd2b99ebfa520ee7bc30091d62cf21b9c6cd8d5ec78",
+                      "windows_native_library_sha256":  "81c5aa9a7f7058eac1e405d1e5b0c95eb993c7ec009f967da9b7cbf658b852e9",
+                      "pinned_reference_binary_sha256":  "a533a71a09cbaef3adafa4ecaa1951645867275a788203ff5beb368ac1e352b1",
+                      "reference_revision":  "cd959bae99ff4bed22bef2604f45241c09bbb8c8"
+                  },
+    "abi_and_default_behavior":  {
+                                     "native_abi_v1":  "preserved and compiled; wrapper delegates to v2 with no tokenizer prefix",
+                                     "native_abi_v2":  "preserved and compiled; wrapper passes a null scheduler, and default Rust streamed calls remain synchronous v2",
+                                     "native_abi_v3":  "additive opt-in schedule callback; native supplies exact next tensor row batch",
+                                     "windows_static_library_symbols":  "dumpbin confirmed llmbridge_generate_streamed_cpu, llmbridge_generate_streamed_cpu_v2 and llmbridge_generate_streamed_cpu_v3 exports",
+                                     "lookahead_entry_point":  "streamed::generate_streamed_with_lookahead",
+                                     "default_execution":  "synchronous"
+                                 },
+    "verification":  {
+                         "windows_native":  {
+                                                "cmake_configure_and_llmbridge_native_build":  "PASS using MSVC 19.44 and the exact pinned local FetchContent source override",
+                                                "native_rust_tests":  "PASS: 225/225",
+                                                "native_clippy":  "PASS: cargo clippy -p llmbridge-core --features native --all-targets -- -D warnings",
+                                                "format":  "PASS: cargo fmt --all -- --check",
+                                                "integrated_ntfs_deadline":  "PASS: actual lookahead observed; expiry cleanup and successful recovery passed; unsealed source",
+                                                "ntfs_benchmark":  "PASS: three interleaved pairs recorded; lookahead regressed"
+                                            },
+                         "wsl2_linux":  {
+                                            "native_rust_tests":  "PASS: 251 unit + 6 runtime-memory admission + 2 tensor-boundary tests; doctests 0/0",
+                                            "native_clippy":  "PASS: cargo clippy -p llmbridge-core --features native --all-targets -- -D warnings",
+                                            "format":  "PASS: cargo fmt --all -- --check",
+                                            "host_limitation":  "WSL2 virtualization is not physical 2 GB / dual-core hardware evidence"
+                                        },
+                         "lookahead_enabled_inference":  {
+                                                             "result":  "PASS against final-source release artifact rebuilt after panic-cleanup change",
+                                                             "model_sha256":  "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+                                                             "scheduled_reads":  2128,
+                                                             "consumed_reads":  2128,
+                                                             "complete_output_matches_synchronous":  true,
+                                                             "all_logits_match_synchronous":  true,
+                                                             "all_logits_match_pinned_reference":  true,
+                                                             "logit_count":  256000,
+                                                             "reference_max_abs_error":  0.0,
+                                                             "reference_rmse":  0.0,
+                                                             "worker_terminated":  true,
+                                                             "final_reserved_bytes":  0,
+                                                             "final_outstanding_reads":  0,
+                                                             "consumer_source_bytes":  364771424,
+                                                             "additional_worker_source_bytes":  120965472,
+                                                             "performance_claim":  "none; consumption-time revalidation causes additional I/O and no speed improvement was measured"
+                                                         },
+                         "deadline_delivery_and_cleanup":  {
+                                                               "result":  "PASS; active Linux WSL2 lookahead generation",
+                                                               "partial_output_bytes_before_expiry":  41,
+                                                               "delivery_after_expiry_observed":  false,
+                                                               "worker_source_bytes_before_expiry":  161493540,
+                                                               "worker_terminated":  true,
+                                                               "final_reserved_bytes":  0,
+                                                               "final_outstanding_reads":  0,
+                                                               "interpretation":  "partial output before expiry is allowed; no consumer callback began after expiry was observed",
+                                                               "ntfs_specific_result":  "PASS integrated Windows NTFS run: 37 partial bytes before expiry; observer saw no subsequent callback starts; worker joined; reservations/outstanding zero; recovery inference passed. Unsealed source on Windows."
+                                                           },
+                         "authenticated_q8_rlimit_as":  {
+                                                            "result":  "PASS rerun against final-source release CLI",
+                                                            "command":  "python3 scripts/check_streamed_parity.py --binary target/release/llmbridge --reference build/reference-avx2/bin/llama-simple --model /tmp/llmbridge-lookahead-q8.gguf --output build/lookahead-evidence-FINAL/q8-authenticated-24m-final --checkpoint stories15M-q8_0 --verify --cache-mb 1 --max-address-space-mb 24 --max-tokens 8",
+                                                            "limit_bytes":  25165824,
+                                                            "cache_budget_bytes":  1048576,
+                                                            "prompts":  3,
+                                                            "all_outputs_and_logits_match_reference":  true,
+                                                            "all_authenticated_sessions_pass":  true,
+                                                            "maximum_observed_peak_rss_bytes":  15687680,
+                                                            "host":  "WSL2 Linux; not a physical memory feasibility result",
+                                                            "cache_note":  "A 1 MiB cache budget was charged under the unchanged protocol; authenticated reads bypass LRU hits and continue to reverify source blocks."
+                                                        },
+                         "fault_and_cleanup_tests":  {
+                                                         "wsl2_tests":  [
+                                                                            "deterministically blocked worker read followed by cancellation and join",
+                                                                            "injected slow-device read error preserves its original message",
+                                                                            "request queue saturation at its fixed capacity",
+                                                                            "cancellation and exact range mismatch",
+                                                                            "source mutation after prefetch and authenticated consumption refusal",
+                                                                            "zero reservations and outstanding reads after worker termination",
+                                                                            "worker stacks below 1 MiB rejected before thread creation",
+                                                                            "injected worker panic is reported after join with zero outstanding reads and reservations",
+                                                                            "staged-byte mismatch is refused at consumption before successful delivery"
+                                                                        ],
+                                                         "blocking_os_read_limitation":  "the worker is joined, but a real blocking OS read may delay join; deterministic barrier tests do not prove immediate interruption of filesystem I/O"
+                                                     }
+                     },
+    "reproducible_commands":  {
+                                  "windows_native_build":  "cmake -S native -B build/lookahead-native -DFETCHCONTENT_SOURCE_DIR_LLAMA_CPP=E:/LLM-Bridge/build/reference -DLLMBRIDGE_X86_AVX2=OFF -DCMAKE_BUILD_TYPE=Release; cmake --build build/lookahead-native --config Release --target llmbridge_native --parallel 4",
+                                  "windows_tests_and_clippy":  "cargo test -p llmbridge-core --features native --lib; cargo clippy -p llmbridge-core --features native --all-targets -- -D warnings; cargo fmt --all -- --check",
+                                  "wsl2_tests_and_clippy":  "LLMBRIDGE_LLAMA_CPP_SOURCE=/mnt/e/LLM-Bridge/build/reference cargo test -p llmbridge-core --features native; LLMBRIDGE_LLAMA_CPP_SOURCE=/mnt/e/LLM-Bridge/build/reference cargo clippy -p llmbridge-core --features native --all-targets -- -D warnings; cargo fmt --all -- --check",
+                                  "lookahead_and_deadline":  "target/release/examples/lookahead_parity /tmp/llmbridge-lookahead-q8.gguf build/lookahead-evidence-FINAL/rerun",
+                                  "lookahead_reference_comparison":  "python3 scripts/check_lookahead_parity.py --lookahead-dir build/lookahead-evidence-FINAL/rerun --reference-report build/lookahead-evidence-final-source/q8-authenticated-24m/streamed_parity.json --reference-logits build/lookahead-evidence-final-source/q8-authenticated-24m/reference-1.f32 --prompt-prefix \u0027Once upon a time\u0027 --output build/lookahead-evidence-FINAL/lookahead_reference_parity.json"
+                              },
+    "limitations":  [
+                        "The previous test harness briefly used an undersized 2 KiB worker stack and reproduced a stack overflow. Final code rejects stack requests below 1 MiB; final Windows and WSL2 suites passed after the correction.",
+                        "The deterministic slow-read test blocks before a real OS read; blocking filesystem calls are not immediately interruptible.",
+                        "Memory admission does not bound allocator metadata, OS thread/kernel buffers, page cache, or total process RSS.",
+                        "No physical 2 GB RAM, dual-core performance, or integrated Windows NTFS post-expiry generation result is established.",
+                        "Windows NTFS three-pair benchmark found a large lookahead regression under uncontrolled, progressively warm OS cache conditions; integrity rereads add 120,965,472 source bytes per lookahead session, so lookahead remains opt-in.",
+                        "Windows NTFS deadline/recovery protocol used an unsealed local source because sealed tokenizer authentication is Linux-only. Separate Linux authenticated parity and 24 MiB evidence remains authoritative for those gates.",
+                        "Windows NTFS three-pair benchmark showed a large lookahead regression with uncontrolled, progressively warm OS cache conditions; consumption verification added 120,965,472 source bytes per lookahead session.",
+                        "Windows NTFS protocol used unsealed local-source mode because sealed tokenizer authentication currently requires Linux. Linux authenticated parity and 24 MiB gates remain separately evidenced."
+                    ],
+    "closeout":  {
+                     "ntfs_protocol":  {
+                                           "result":  "PASS",
+                                           "filesystem":  "NTFS",
+                                           "model_sha256":  "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+                                           "model_bytes":  26671328,
+                                           "scheduled_reads":  2128,
+                                           "consumed_reads":  2128,
+                                           "partial_output_bytes_before_expiry":  37,
+                                           "no_callback_started_after_expiry_observed":  true,
+                                           "worker_joined":  true,
+                                           "final_reserved_bytes":  0,
+                                           "final_outstanding_reads":  0,
+                                           "recovery_inference":  "PASS, output/logits parity with successful baseline; worker joined and reservations/outstanding zero",
+                                           "integrity":  "Unsealed local source: Windows sealed-tokenizer authentication requires Linux"
+                                       },
+                     "msvc_collision":  {
+                                            "warning":  "MSB8027",
+                                            "src_llama_object":  "src/llama.cpp -\u003e llama.obj",
+                                            "model_llama_compile":  "src/models/llama.cpp included by generated Unity unity_5_cxx.cxx -\u003e unity_5_cxx.obj",
+                                            "collision_observed":  false,
+                                            "action":  "No fix or suppression: compile outputs are distinct, so no overwrite path exists"
+                                        },
+                     "benchmark":  {
+                                       "artifact":  "benchmarks/evidence/local_lookahead_windows_ntfs_2026-11-22.json",
+                                       "sha256":  "f16876ba93f202785115dcc44891a1029e995a00b8b35b5b245a227e7e7dc6c5",
+                                       "repeated_pairs":  3,
+                                       "synchronous_median_wall_seconds":  7.5568019,
+                                       "lookahead_median_wall_seconds":  16.6058815,
+                                       "synchronous_median_first_token_seconds":  7.3772479,
+                                       "lookahead_median_first_token_seconds":  9.4079329,
+                                       "synchronous_median_decode_steps_per_second":  39.569059,
+                                       "lookahead_median_decode_steps_per_second":  0.974461,
+                                       "median_regression":  "Lookahead slower; extra source reads 120965472 bytes per trial; cache conditions uncontrolled/progressively warm",
+                                       "memory_allowance_bytes":  {
+                                                                      "staging":  4194304,
+                                                                      "fixed":  2097152,
+                                                                      "stack":  1048576,
+                                                                      "accounted_total":  7340032
+                                                                  }
+                                   },
+                     "whitespace":  {
+                                        "check":  "git diff --check",
+                                        "result":  "No whitespace errors; only LF-to-CRLF conversion notices",
+                                        "line_endings":  "No normalization performed"
+                                    },
+                     "build_warning":  {
+                                           "result":  "MSB8027 investigated; generated Unity source/object mapping confirms distinct llama.obj and unity_5_cxx.obj"
+                                       },
+                     "dirty_status_before_commit":  [
+                                                        " M Cargo.lock",
+                                                        " M IMPLEMENTATION_STATUS.md",
+                                                        " M crates/llmbridge-cli/src/main.rs",
+                                                        " M crates/llmbridge-core/Cargo.toml",
+                                                        " M crates/llmbridge-core/build.rs",
+                                                        " M crates/llmbridge-core/examples/cpu_guard_contract.rs",
+                                                        " M crates/llmbridge-core/src/gguf_index.rs",
+                                                        " M crates/llmbridge-core/src/lib.rs",
+                                                        " M crates/llmbridge-core/src/read_cache.rs",
+                                                        " M crates/llmbridge-core/src/storage.rs",
+                                                        " M crates/llmbridge-core/src/storage_auth.rs",
+                                                        " M crates/llmbridge-core/src/streamed.rs",
+                                                        " M crates/llmbridge-core/src/streamed_plan.rs",
+                                                        " M docs/CLI_EXECUTION_DEADLINES.md",
+                                                        " M docs/NATIVE_CPU_COMPATIBILITY.md",
+                                                        " M docs/STREAMED_CACHE.md",
+                                                        " M docs/STREAMED_EXECUTION_DEADLINE.md",
+                                                        " M docs/STREAMED_EXECUTOR.md",
+                                                        " M native/include/llmbridge.h",
+                                                        " M native/src/bridge.cpp",
+                                                        " M native/src/streamed.cpp",
+                                                        " M scripts/check_cli_deadlines.py",
+                                                        " M scripts/check_native_cpu.py",
+                                                        "?? .vscode/",
+                                                        "?? benchmarks/evidence/llmbridge_final_source_validation_2026-11-22.json",
+                                                        "?? benchmarks/evidence/local_lookahead_contract_2026-11-22.json",
+                                                        "?? benchmarks/evidence/local_lookahead_inference_2026-11-22.json",
+                                                        "?? benchmarks/evidence/local_lookahead_windows_ntfs_2026-11-22.json",
+                                                        "?? crates/llmbridge-core/examples/lookahead_parity.rs",
+                                                        "?? crates/llmbridge-core/src/local_lookahead.rs",
+                                                        "?? scripts/check_lookahead_parity.py",
+                                                        "?? scripts/check_native_metadata_refusal.py"
+                                                    ],
+                     "untracked_paths_at_closeout":  [
+                                                         ".vscode/settings.json",
+                                                         "benchmarks/evidence/llmbridge_final_source_validation_2026-11-22.json",
+                                                         "benchmarks/evidence/local_lookahead_contract_2026-11-22.json",
+                                                         "benchmarks/evidence/local_lookahead_inference_2026-11-22.json",
+                                                         "benchmarks/evidence/local_lookahead_windows_ntfs_2026-11-22.json",
+                                                         "crates/llmbridge-core/examples/lookahead_parity.rs",
+                                                         "crates/llmbridge-core/src/local_lookahead.rs",
+                                                         "scripts/check_lookahead_parity.py",
+                                                         "scripts/check_native_metadata_refusal.py"
+                                                     ],
+                     "implementation_diff_sha256":  "4cae081e0f8ab40d8d63876eb705455446f6d0fab5bc099da361b1b0cb1f6736",
+                     "implementation_diff_scope":  [
+                                                       "Cargo.lock",
+                                                       "crates/llmbridge-core/Cargo.toml",
+                                                       "crates/llmbridge-core/build.rs",
+                                                       "crates/llmbridge-core/examples/lookahead_parity.rs",
+                                                       "crates/llmbridge-core/src/gguf_index.rs",
+                                                       "crates/llmbridge-core/src/lib.rs",
+                                                       "crates/llmbridge-core/src/local_lookahead.rs",
+                                                       "crates/llmbridge-core/src/read_cache.rs",
+                                                       "crates/llmbridge-core/src/storage.rs",
+                                                       "crates/llmbridge-core/src/storage_auth.rs",
+                                                       "crates/llmbridge-core/src/streamed.rs",
+                                                       "native/include/llmbridge.h",
+                                                       "native/src/bridge.cpp",
+                                                       "native/src/streamed.cpp",
+                                                       "scripts/check_lookahead_parity.py"
+                                                   ],
+                     "base_head":  "7162e7fa7bfcb7c3e8b32c1188c8b07c8cf29184"
+                 }
+}

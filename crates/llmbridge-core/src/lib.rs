@@ -11,6 +11,7 @@ pub mod f32_residual;
 pub mod f32_stream;
 pub mod f32_swiglu;
 pub mod io_schedule;
+pub mod local_lookahead;
 pub mod memory_budget;
 pub mod memory_plan;
 pub mod memory_pressure;
