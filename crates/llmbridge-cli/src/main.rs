@@ -19,7 +19,7 @@ fn main() {
     }
 }
 fn usage() -> &'static str {
-    "Usage:\n  llmbridge batch <model.gguf> --input prompts.txt --output-dir new-results [--workers 2] [--wait-timeout-ms 30000] [--deadline-ms milliseconds] [--sha256 digest]\n  llmbridge doctor [--json]\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge plan <path.gguf> [--ctx 128] [--workspace-mb 8] [--max-ram-mb 64] [--auto-context] [--auto-cache] [--json]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--cache-pressure-mb floor] [--sha256 trusted-digest] [--verification-mb 8] [--address-space-mb 24] [--auto-context] [--auto-cache] [--max-ram-mb 64] [--logits path.f32] [--deadline-ms milliseconds]\n  llmbridge logit-diff <path.gguf> --prompt <text> [--ctx 128] [--threads 1] [--top-k 10] [--workspace-mb 8] [--max-tokens 1]\n  Planning max-ram-mb is an incremental estimate budget; address-space-mb enforces a separate Linux process limit."
+    "Usage:\n  llmbridge batch <model.gguf> --input prompts.txt --output-dir new-results [--workers 2] [--wait-timeout-ms 30000] [--deadline-ms milliseconds] [--sha256 digest]\n  llmbridge doctor [--json]\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge plan <path.gguf> [--ctx 128] [--workspace-mb 8] [--max-ram-mb 64] [--auto-context] [--auto-cache] [--json]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--cache-pressure-mb floor] [--sha256 trusted-digest] [--verification-mb 8] [--address-space-mb 24] [--auto-context] [--auto-cache] [--max-ram-mb 64] [--logits path.f32] [--deadline-ms milliseconds]\n  llmbridge logit-diff <path.gguf> --prompt <text> [--ctx 128] [--threads 1] [--top-k 10] [--workspace-mb 8] [--max-tokens 1] [--teacher-forced]\n  Planning max-ram-mb is an incremental estimate budget; address-space-mb enforces a separate Linux process limit."
 }
 fn json_number(value: Option<u64>) -> String {
     value.map_or_else(|| "null".to_string(), |x| x.to_string())
@@ -707,6 +707,21 @@ fn chat(_args: &[String]) -> Result<(), String> {
     Err("this binary has no native CPU backend: rebuild with --features native".into())
 }
 
+/// Index of the maximum finite logit (ties resolved to the lowest index),
+/// matching the greedy argmax the decoders use to pick the next token.
+#[cfg(feature = "native")]
+fn argmax_i32(logits: &[f32]) -> i32 {
+    let mut best = 0usize;
+    let mut best_value = f32::NEG_INFINITY;
+    for (i, &v) in logits.iter().enumerate() {
+        if v.is_finite() && v > best_value {
+            best_value = v;
+            best = i;
+        }
+    }
+    best as i32
+}
+
 /// Opt-in diagnostic: capture the streamed decoder's step-0 logits and the
 /// resident llama.cpp logits at the same prompt position, then print numerical
 /// comparison metrics as JSON. Does not alter normal inference.
@@ -721,9 +736,15 @@ fn logit_diff(args: &[String]) -> Result<(), String> {
     let mut top_k: usize = 10;
     let mut workspace_mb: u64 = 8;
     let mut max_tokens: u32 = 1;
+    let mut teacher_forced = false;
     let mut pos = 1;
     while pos < args.len() {
         let flag = &args[pos];
+        if flag == "--teacher-forced" {
+            teacher_forced = true;
+            pos += 1;
+            continue;
+        }
         let value = args
             .get(pos + 1)
             .ok_or_else(|| format!("missing value for {flag}"))?;
@@ -767,6 +788,27 @@ fn logit_diff(args: &[String]) -> Result<(), String> {
             llmbridge_core::logit_diff::resident_prompt_logits(path, &prompt, ctx, threads)?;
         let diff = llmbridge_core::logit_diff::compute(&streamed, &resident, top_k)?;
         println!("LLMBRIDGE_LOGIT_DIFF {}", diff.to_json());
+    } else if teacher_forced {
+        // Teacher forcing: the resident greedy sequence is canonical. Feed the
+        // streamed decoder the SAME tokens so every position shares a prefix, a
+        // valid comparison even where independent greedy decoding would diverge.
+        let resident = llmbridge_core::logit_diff::resident_decode_logits(
+            path, &prompt, ctx, max_tokens, threads,
+        )?;
+        let forced: Vec<i32> = resident
+            .iter()
+            .take(resident.len().saturating_sub(1))
+            .map(|logits| argmax_i32(logits))
+            .collect();
+        let streamed = llmbridge_core::logit_diff::streamed_forced_logits(
+            path,
+            &prompt,
+            ctx,
+            &forced,
+            workspace_bytes,
+        )?;
+        let multi = llmbridge_core::logit_diff::compute_multi(&streamed, &resident, top_k)?;
+        println!("LLMBRIDGE_LOGIT_DIFF_TEACHER_FORCED {}", multi.to_json());
     } else {
         let streamed = llmbridge_core::logit_diff::streamed_decode_logits(
             path,

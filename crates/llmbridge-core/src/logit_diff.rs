@@ -366,6 +366,43 @@ mod capture {
         Ok(steps)
     }
 
+    /// Capture the streamed decoder's logits under teacher forcing: the final
+    /// prompt-position logits, then one vector after each `forced_tokens` token
+    /// is fed (`forced_tokens.len() + 1` vectors). Feeding a fixed sequence keeps
+    /// every position comparable to an independently decoded reference prefix.
+    pub fn streamed_forced_logits(
+        model: &Path,
+        prompt: &str,
+        context_tokens: u32,
+        forced_tokens: &[i32],
+        workspace_bytes: u64,
+    ) -> Result<Vec<Vec<f32>>, String> {
+        let config = StreamedConfig {
+            context_tokens,
+            max_tokens: 1, // unused by the forced path; satisfies config validation
+            workspace_bytes,
+            ..Default::default()
+        };
+        let cancelled = AtomicBool::new(false);
+        let mut steps: Vec<Vec<f32>> = Vec::new();
+        let on_logits = |values: &[f32]| {
+            steps.push(values.to_vec());
+            true
+        };
+        crate::streamed::generate_streamed_forced_logits(
+            model,
+            prompt,
+            config,
+            &cancelled,
+            forced_tokens,
+            on_logits,
+        )?;
+        if steps.is_empty() {
+            return Err("streamed forced backend produced no logits".into());
+        }
+        Ok(steps)
+    }
+
     struct Capture {
         logits: Option<Vec<f32>>,
     }
@@ -449,7 +486,8 @@ mod capture {
 
 #[cfg(feature = "native")]
 pub use capture::{
-    resident_decode_logits, resident_prompt_logits, streamed_decode_logits, streamed_prompt_logits,
+    resident_decode_logits, resident_prompt_logits, streamed_decode_logits, streamed_forced_logits,
+    streamed_prompt_logits,
 };
 
 #[cfg(test)]

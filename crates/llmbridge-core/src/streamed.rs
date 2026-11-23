@@ -184,6 +184,31 @@ extern "C" {
         error: *mut c_char,
         capacity: usize,
     ) -> i32;
+    fn llmbridge_streamed_forced_logits_v1(
+        path: *const c_char,
+        prompt: *const c_char,
+        forced_tokens: *const i32,
+        forced_count: u32,
+        context: u32,
+        file_bytes: u64,
+        max_chunk: usize,
+        workspace: u64,
+        tokenizer_prefix: u64,
+        reader: extern "C" fn(*mut c_void, *mut c_void, u64, usize) -> usize,
+        logits: extern "C" fn(*const f32, usize, *mut c_void) -> i32,
+        poll: extern "C" fn(*mut c_void) -> i32,
+        state: *mut c_void,
+        error: *mut c_char,
+        capacity: usize,
+    ) -> i32;
+}
+
+/// Native operation selector for `generate_streamed_internal`. `Generate` runs
+/// greedy generation (the proven path); `ForcedLogits` feeds caller-supplied
+/// continuation tokens and emits per-position logits only (teacher forcing).
+enum StreamedOp<'a> {
+    Generate,
+    ForcedLogits(&'a [i32]),
 }
 #[derive(Debug, Default)]
 struct RangeReads {
@@ -492,7 +517,33 @@ pub fn generate_streamed<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
         config,
         cancelled,
         StreamedControl::default().into(),
+        StreamedOp::Generate,
         on_piece,
+        on_logits,
+    )
+}
+
+/// Teacher-forced streamed logits: prefill `prompt`, then feed the fixed
+/// `forced_tokens` continuation, invoking `on_logits` once at the final prompt
+/// position and once after each fed token (`forced_tokens.len() + 1` calls).
+/// Samples nothing, so each emitted position shares a prefix with an
+/// independently decoded reference at the same index. Synchronous; no lookahead.
+pub fn generate_streamed_forced_logits<L: FnMut(&[f32]) -> bool>(
+    model: &Path,
+    prompt: &str,
+    config: StreamedConfig,
+    cancelled: &AtomicBool,
+    forced_tokens: &[i32],
+    on_logits: L,
+) -> Result<StreamedMetrics, String> {
+    generate_streamed_internal(
+        model,
+        prompt,
+        config,
+        cancelled,
+        StreamedControl::default().into(),
+        StreamedOp::ForcedLogits(forced_tokens),
+        |_: &[u8]| true,
         on_logits,
     )
 }
@@ -518,6 +569,7 @@ pub fn generate_streamed_verified<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> b
             cache: None,
         }
         .into(),
+        StreamedOp::Generate,
         on_piece,
         on_logits,
     )
@@ -541,6 +593,7 @@ pub fn generate_streamed_controlled<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) ->
         config,
         cancelled,
         control.into(),
+        StreamedOp::Generate,
         on_piece,
         on_logits,
     )
@@ -568,6 +621,7 @@ pub fn generate_streamed_with_deadline<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32])
             deadline: Some(control.deadline),
             lookahead: None,
         },
+        StreamedOp::Generate,
         on_piece,
         on_logits,
     )
@@ -595,16 +649,19 @@ pub fn generate_streamed_with_lookahead<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]
             deadline: Some(deadline.deadline),
             lookahead: Some(lookahead.limits),
         },
+        StreamedOp::Generate,
         on_piece,
         on_logits,
     )
 }
+#[allow(clippy::too_many_arguments)]
 fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>(
     model: &Path,
     prompt: &str,
     config: StreamedConfig,
     cancelled: &AtomicBool,
     execution: ExecutionControl<'_>,
+    op: StreamedOp<'_>,
     on_piece: F,
     on_logits: L,
 ) -> Result<StreamedMetrics, String> {
@@ -706,8 +763,45 @@ fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>
     let mut error = [0 as c_char; 1024];
     let state_ptr = (&mut state as *mut State<'_, F, L>).cast();
     let status = unsafe {
-        if state.lookahead.is_some() {
-            llmbridge_generate_streamed_cpu_v3(
+        match op {
+            StreamedOp::ForcedLogits(forced) => llmbridge_streamed_forced_logits_v1(
+                path.as_ptr(),
+                prompt.as_ptr(),
+                forced.as_ptr(),
+                forced.len() as u32,
+                config.context_tokens,
+                file_bytes,
+                config.chunk_bytes,
+                config.workspace_bytes,
+                sealed.as_ref().map_or(0, |snapshot| snapshot.prefix_bytes),
+                read::<F, L>,
+                logits::<F, L>,
+                poll::<F, L>,
+                state_ptr,
+                error.as_mut_ptr(),
+                error.len(),
+            ),
+            StreamedOp::Generate if state.lookahead.is_some() => {
+                llmbridge_generate_streamed_cpu_v3(
+                    path.as_ptr(),
+                    prompt.as_ptr(),
+                    config.context_tokens,
+                    config.max_tokens,
+                    file_bytes,
+                    config.chunk_bytes,
+                    config.workspace_bytes,
+                    sealed.as_ref().map_or(0, |snapshot| snapshot.prefix_bytes),
+                    read::<F, L>,
+                    schedule::<F, L>,
+                    emit::<F, L>,
+                    logits::<F, L>,
+                    poll::<F, L>,
+                    state_ptr,
+                    error.as_mut_ptr(),
+                    error.len(),
+                )
+            }
+            StreamedOp::Generate => llmbridge_generate_streamed_cpu_v2(
                 path.as_ptr(),
                 prompt.as_ptr(),
                 config.context_tokens,
@@ -717,32 +811,13 @@ fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>
                 config.workspace_bytes,
                 sealed.as_ref().map_or(0, |snapshot| snapshot.prefix_bytes),
                 read::<F, L>,
-                schedule::<F, L>,
                 emit::<F, L>,
                 logits::<F, L>,
                 poll::<F, L>,
                 state_ptr,
                 error.as_mut_ptr(),
                 error.len(),
-            )
-        } else {
-            llmbridge_generate_streamed_cpu_v2(
-                path.as_ptr(),
-                prompt.as_ptr(),
-                config.context_tokens,
-                config.max_tokens,
-                file_bytes,
-                config.chunk_bytes,
-                config.workspace_bytes,
-                sealed.as_ref().map_or(0, |snapshot| snapshot.prefix_bytes),
-                read::<F, L>,
-                emit::<F, L>,
-                logits::<F, L>,
-                poll::<F, L>,
-                state_ptr,
-                error.as_mut_ptr(),
-                error.len(),
-            )
+            ),
         }
     };
     let lookahead_finish = state.lookahead.as_mut().map(LocalLookahead::shutdown);
