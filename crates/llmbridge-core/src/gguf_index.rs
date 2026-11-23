@@ -744,6 +744,26 @@ mod tests {
     }
 
     #[test]
+    fn llama3_rope_freqs_and_kquant_geometry_is_exact() {
+        // Llama-3.2-1B real shapes: dim=2048, head_dim=64 (kvdim=512, 8 kv heads),
+        // n_ff=8192, Q4_K/Q6_K weights, and the baked rope_freqs.weight [32] F32
+        // (head_dim/2) per-pair frequency factors the streamed llama-3 path reads.
+        let (f32_block, f32_bytes) = tensor_layout(0).unwrap();
+        assert_eq!((f32_block, f32_bytes), (1, 4));
+        assert_eq!(32 * f32_bytes, 128); // rope_freqs.weight byte length (head_dim/2)
+                                         // All Llama-3.2 weight rows are 256-divisible, so every weight tensor is a
+                                         // genuine K-quant superblock (no 32-block fallback).
+        let (q4k_block, q4k_bytes) = tensor_layout(12).unwrap(); // Q4_K
+        assert_eq!((q4k_block, q4k_bytes), (256, 144));
+        for cols in [2048u64, 512, 8192] {
+            assert_eq!(cols % q4k_block, 0);
+        }
+        assert_eq!((2048 / q4k_block) * q4k_bytes, 1152); // one attn_q/attn_output row
+        let (q6k_block, q6k_bytes) = tensor_layout(14).unwrap(); // Q6_K
+        assert_eq!((8192 / q6k_block) * q6k_bytes, 6720); // one ffn_down row (8192 wide)
+    }
+
+    #[test]
     fn indexed_tensor_slice_reads_exact_range() {
         let path = write(&fixture(8, 0, 96));
         let index = GgufTensorIndex::inspect(&path).unwrap();

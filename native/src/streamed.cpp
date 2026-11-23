@@ -94,13 +94,13 @@ struct Decoder {
     void *userdata;
     size_t dim, hidden, heads, kvheads, head_dim, kvdim, layers, context, max_context;
     float epsilon, rope_base;
-    bool neox_rope = false, has_qkv_bias = false;
+    bool neox_rope = false, has_qkv_bias = false, has_rope_freqs = false;
     size_t workspace_required, kv_bytes;
-    Tensor embedding, final_norm, output;
+    Tensor embedding, final_norm, output, rope_freqs{};
     std::vector<Layer> blocks;
     std::vector<uint8_t> packed;
     std::vector<float> row, quantized, x, norm, q, k, v, att, projected, gate, up, logits, keys, values, scores, attention_values;
-    std::vector<float> qbias, kbias, vbias;
+    std::vector<float> qbias, kbias, vbias, freq_factors;
 
     void alive() { if (poll(userdata) == 0) throw Cancelled{}; }
     Tensor tensor(const std::string &name, size_t columns, size_t rows) {
@@ -142,7 +142,8 @@ struct Decoder {
         // Reject unimplemented architecture options rather than silently approximate them.
         const std::set<std::string> known = {pre+"context_length", pre+"embedding_length", pre+"block_count",
             pre+"feed_forward_length", pre+"rope.dimension_count", pre+"rope.freq_base",
-            pre+"attention.head_count", pre+"attention.head_count_kv", pre+"attention.layer_norm_rms_epsilon"};
+            pre+"attention.head_count", pre+"attention.head_count_kv", pre+"attention.layer_norm_rms_epsilon",
+            pre+"attention.key_length", pre+"attention.value_length", pre+"vocab_size"};
         for (int64_t i = 0; i < gguf_get_n_kv(g); ++i) {
             if (i % 256 == 0) alive();
             std::string key = gguf_get_key(g, i);
@@ -157,6 +158,15 @@ struct Decoder {
                 dim % heads == 0 && layers && layers <= 128 && vocab && vocab <= 262144 &&
                 context <= max_context, "streamed model configuration exceeds supported limits");
         head_dim = dim / heads; kvdim = head_dim * kvheads;
+        // Optional K/V head width (llama-3 records it) must equal the single head
+        // dimension this decoder rotates and stores; reject mismatches rather than
+        // silently mis-shape attention.
+        for (const char *k : {"attention.key_length", "attention.value_length"}) {
+            if (gguf_find_key(g, (pre + k).c_str()) >= 0)
+                require(number(g, (pre + k).c_str()) == head_dim, "streamed backend requires key/value length == head dim");
+        }
+        if (gguf_find_key(g, (pre + "vocab_size").c_str()) >= 0)
+            require(number(g, (pre + "vocab_size").c_str()) == vocab, "streamed vocab_size disagrees with tokenizer inventory");
         // RoPE dimension count is optional; absent means the full head (qwen2 omits it).
         // When present it must equal head_dim: this decoder only rotates the full head.
         auto rope_dim_key = gguf_find_key(g, (pre+"rope.dimension_count").c_str());
@@ -177,6 +187,11 @@ struct Decoder {
         final_norm = tensor("output_norm.weight", dim, 1);
         auto out_id = gguf_find_tensor(g, "output.weight");
         output = out_id < 0 ? embedding : tensor("output.weight", dim, vocab);
+        // Optional precomputed per-pair RoPE frequency factors (llama-3 "llama3"
+        // scaling, baked into the GGUF at conversion time). head_dim/2 F32 values.
+        auto freqs_id = gguf_find_tensor(g, "rope_freqs.weight");
+        has_rope_freqs = freqs_id >= 0;
+        if (has_rope_freqs) rope_freqs = tensor("rope_freqs.weight", head_dim / 2, 1);
         blocks.reserve(layers);
         for (size_t l = 0; l < layers; ++l) {
             alive();
@@ -193,10 +208,12 @@ struct Decoder {
             }
             blocks.push_back(layer);
         }
-        // Refuse unrecognized tensors (special RoPE, adapters, output bias, etc.).
+        // Refuse unrecognized tensors (adapters, unexpected biases, etc.).
         // qwen2 adds exactly three Q/K/V bias tensors per layer; llama has none.
+        // rope_freqs.weight is the only admitted optional global extra tensor.
         const int64_t per_layer = has_qkv_bias ? 12 : 9;
-        require(gguf_get_n_tensors(g) == static_cast<int64_t>(layers * per_layer + (out_id < 0 ? 2 : 3)),
+        const int64_t extra = has_rope_freqs ? 1 : 0;
+        require(gguf_get_n_tensors(g) == static_cast<int64_t>(layers * per_layer + (out_id < 0 ? 2 : 3) + extra),
                 "unsupported extra tensors in streamed model");
         // Tensor descriptors own their offsets/shapes; no metadata is used by forward().
         g = nullptr;
@@ -209,6 +226,7 @@ struct Decoder {
         att.resize(dim); projected.resize(dim); gate.resize(hidden); up.resize(hidden);
         logits.resize(vocab); keys.resize(kvcount); values.resize(kvcount); scores.resize(context + 255); attention_values.resize(context + 255);
         if (has_qkv_bias) { qbias.resize(dim); kbias.resize(kvdim); vbias.resize(kvdim); }
+        if (has_rope_freqs) freq_factors.resize(head_dim / 2);
     }
     // Read a projection bias row and add it elementwise (qwen2 Q/K/V bias).
     void add_bias(const Tensor &bias, std::vector<float> &target, std::vector<float> &scratch) {
@@ -289,30 +307,26 @@ struct Decoder {
         const float theta_scale = std::pow(rope_base, -2.0f / head_dim);
         for (size_t h = 0; h < count; ++h) {
             float angle = static_cast<float>(pos);
-            if (neox_rope) {
-                // NeoX RoPE: rotate element j against j + head_dim/2 (qwen2).
-                for (size_t j = 0; j < head_dim / 2; ++j) {
-                    float c = std::cos(angle), s = std::sin(angle);
-                    size_t a = h * head_dim + j, b = a + head_dim / 2;
-                    float first = vector[a], second = vector[b];
-                    vector[a] = first*c - second*s; vector[b] = first*s + second*c;
-                    angle *= theta_scale;
-                }
-            } else {
-                // Normal RoPE: rotate consecutive pairs (2i, 2i+1) (llama).
-                for (size_t i = 0; i < head_dim; i += 2) {
-                    float c = std::cos(angle), s = std::sin(angle);
-                    size_t a = h * head_dim + i;
-                    float first = vector[a], second = vector[a+1];
-                    vector[a] = first*c - second*s; vector[a+1] = first*s + second*c;
-                    angle *= theta_scale;
-                }
+            for (size_t j = 0; j < head_dim / 2; ++j) {
+                // Optional per-pair frequency factor (llama-3 scaling): theta / ff[j].
+                // Matches ggml rope_cache_init, which divides theta by freq_factors.
+                const float theta = has_rope_freqs ? angle / freq_factors[j] : angle;
+                const float c = std::cos(theta), s = std::sin(theta);
+                // NeoX rotates (j, j+head_dim/2); normal rotates consecutive (2j, 2j+1).
+                const size_t a = neox_rope ? h * head_dim + j : h * head_dim + 2 * j;
+                const size_t b = neox_rope ? a + head_dim / 2 : a + 1;
+                const float first = vector[a], second = vector[b];
+                vector[a] = first * c - second * s;
+                vector[b] = first * s + second * c;
+                angle *= theta_scale;
             }
         }
     }
     void forward(llama_token token, size_t pos, bool need_logits) {
         require(pos < context && token >= 0 && static_cast<size_t>(token) < embedding.rows, "streamed token/context out of range");
         read_row(embedding, token, x.data());
+        // Position/layer-independent RoPE frequency factors: read once per token.
+        if (has_rope_freqs) read_row(rope_freqs, 0, freq_factors.data());
         for (size_t l = 0; l < layers; ++l) {
             auto &b = blocks[l];
             rms(b.an); matvec(b.q, norm, q); matvec(b.k, norm, k); matvec(b.v, norm, v);

@@ -42,7 +42,8 @@ typedef int32_t (*llmbridge_lookahead_schedule_callback)(void *userdata,
     uint64_t file_offset, size_t length, uint64_t tensor_offset, uint64_t tensor_bytes);
 
 /* Experimental full dense decoder for the llama and qwen2 architectures (qwen2
- * adds NeoX RoPE and Q/K/V projection biases). All weights use bounded range
+ * adds NeoX RoPE and Q/K/V projection biases; llama supports the optional
+ * rope_freqs.weight per-pair frequency factors used by llama-3). Weights use bounded range
  * reads; tokenizer-only loading uses path. Workspace budget excludes tokenizer
  * metadata, parser, allocator and OS pages: it is not a hard RSS cap. Admits F32,
  * Q4_0/Q4_1/Q5_0/Q5_1/Q8_0 and the K-quants Q4_K/Q5_K/Q6_K.
