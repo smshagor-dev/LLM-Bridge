@@ -1,0 +1,89 @@
+{
+  "schema": "llmbridge.native-streamed-memory-feasibility.v1",
+  "recorded_date": "2026-11-23",
+  "summary": "Real native inference under enforced address-space (RLIMIT_AS) limits on native ext4 (WSL2). The streamed backend runs a 26 MB GGUF model out-of-core in a 22 MB address space at ~14.5 MB peak RSS, decoupled from model size. The resident backend needs the full model in RAM. The supported model class is narrow (minimal-metadata dense-llama F32/Q8_0/Q4_0), which is the real barrier to arbitrary large-model support, not memory.",
+  "source": {
+    "branch": "local/streamed-metadata-admission",
+    "commit": "c942b74f63d3cfa280ff5b3b1b72b4ddbbe05e0b",
+    "code_modified": false,
+    "note": "Audit + experiments only; CLI/example built from committed source with no local edits."
+  },
+  "environment": {
+    "host": "WSL2 on Windows 11",
+    "distro": "Ubuntu 26.04.1 LTS",
+    "kernel": "6.18.33.1-microsoft-standard-WSL2",
+    "cpu": "12th Gen Intel(R) Core(TM) i5-12400F",
+    "cpu_cores_logical": 12,
+    "mem_total_kb": 6998672,
+    "note_wsl_not_bare_metal": "WSL2 reports ~6.8 GB to Linux; this is NOT a physical 2 GB dual-core machine. Memory results are address-space/RSS bounds, not a hardware feasibility claim.",
+    "rustc": "1.85.1", "cargo": "1.85.1", "cmake": "4.2.3", "cc": "gcc 15.2.0",
+    "filesystem": "ext4 (native WSL2 disk); models copied off /mnt DrvFs",
+    "cgroup_v2_controllers": "cpuset cpu io memory hugetlb pids rdma (available)"
+  },
+  "architecture_findings": {
+    "backends": {
+      "streamed": "Custom CPU forward pass (native/src/streamed.cpp) that streams weights from the authenticated source each pass in bounded 64 KiB range reads; llama.cpp is used only for the tokenizer (vocab_only=1, n_gpu_layers=0). Weights are never fully resident.",
+      "resident": "Full-model-in-RAM baseline (M1); requires model-size + overhead in memory."
+    },
+    "supported_model_class": "general.architecture == 'llama' only; tensor types F32/Q8_0/Q4_0 only; unknown llama.* metadata keys are rejected (native/src/streamed.cpp:71,93,101). Minimal-metadata dense-llama models (stories15M-class). Q4_1, K-quants, and rich-metadata production GGUFs (e.g. Llama-3/Qwen) are NOT supported.",
+    "memory_accounting": "--address-space-mb enforces RLIMIT_AS over the WHOLE process (model compute + KV + workspace + read buffers). --max-ram-mb is only a planning estimate, not enforced. The lookahead 4 MiB is a separate read-buffer admission. These are layered, not conflated.",
+    "page_cache_note": "Anonymous RSS ~14.5 MB, but cgroup memory.current after a run was ~48.5 MB because the streamed file's page cache is charged to the cgroup. Page cache is reclaimable under pressure; it is not resident anonymous memory."
+  },
+  "models": [
+    {"id": "stories15M-q8_0.gguf", "arch": "llama", "quant": "Q8_0", "bytes": 26671328, "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6", "source": "existing repo fixture (gitignored, not committed)", "license": "fixture derived from llama2.c TinyStories lineage; used as a format-compatibility fixture", "supported": true},
+    {"id": "stories15M-derived-q4_0.gguf", "arch": "llama", "quant": "Q4_0", "bytes": 14469344, "sha256": "b5cd77bb0d1a785a82d7a8a2bcb4170dfe6e43e881b9cbb0d1c8184a6dd99839", "source": "existing repo fixture (gitignored)", "supported": true},
+    {"id": "stories15M-derived-q4_1.gguf", "arch": "llama", "quant": "Q4_1", "bytes": 15994592, "sha256": "not-tested", "supported": false, "reason": "Q4_1 is not in the streamed decoder's supported set {F32,Q8_0,Q4_0}"}
+  ],
+  "coverage_gaps": [
+    "No model in the 100 MB - 2 GB+ range was tested: no compatible (minimal-metadata dense-llama F32/Q8_0/Q4_0) model of that size is available locally, and downloading large GGUFs was not performed (production GGUFs of that size use K-quants/rich metadata the decoder rejects anyway).",
+    "cgroup v2 memory.max enforcement test was skipped: passwordless sudo is unavailable in this WSL2 session. RLIMIT_AS (address-space) was used as the enforced bound instead; cgroup memory.current was still observed via in-process instrumentation."
+  ],
+  "commands": {
+    "build": "cargo build --release -p llmbridge  (CARGO_TARGET_DIR=$HOME/.cache/llmbridge-wsl-target-native; native is a default feature)",
+    "inference": "/usr/bin/time -v llmbridge chat MODEL --prompt 'Once upon a time' --max-tokens 8 --ctx 64 --threads T --backend {streamed|resident} --address-space-mb AS --metrics"
+  },
+  "results": {
+    "streamed_q8_0_address_space_floor": {
+      "fail_exit1_at_mb": [6, 8, 10, 12, 16, 17, 18, 19, 20],
+      "success_exit0_at_mb": [22, 24, 32, 64],
+      "floor_mb_between": [20, 22],
+      "interpretation": "A 26 MB model runs in a 22 MB enforced address space -> weights are NOT resident; out-of-core streaming confirmed."
+    },
+    "streamed_q4_0": {"success_at_mb": [24], "fail_at_mb": [6, 8, 12, 16], "peak_rss_kb_at_24": 14136},
+    "resident_q8_0": {"abort_sigabrt_exit134_at_mb": [48, 64], "refused_exit1_at_mb": [16, 24, 32], "peak_rss_kb_observed": 41808, "interpretation": "Resident backend needs well beyond 48 MB and is not bounded-memory; low-memory execution requires the streamed backend."},
+    "thread_variation_streamed_q8_at_24mb": {"threads_1": {"exit": 0, "rss_kb": 13860, "wall_s": 0.52}, "threads_2": {"exit": 0, "rss_kb": 14024, "wall_s": 0.52}, "threads_4": {"exit": 0, "rss_kb": 13892, "wall_s": 0.52}, "interpretation": "Single-core (dual-core target) succeeds; CPU count does not change memory and barely changes wall time for this tiny model/short decode."},
+    "full_metrics_streamed_q8_24mb_th2": {
+      "total_ns": 526093316, "first_logits_ready_ns": 501794447, "first_piece_ns": 501826876,
+      "sampling_steps": 8, "emitted_pieces": 8, "emitted_bytes": 33, "decode_intervals": 7,
+      "decode_elapsed_ns": 23328138, "decode_steps_per_second": 300.07, "range_callback_ns": 495820573,
+      "generated_text_sample": "..., there was a little girl named L",
+      "streamed_counters": {"range_read_calls": 131283, "range_bytes_requested": 155384503, "weight_read_calls": 2804, "weight_bytes_requested": 154657368, "reader_buffer_bytes": 65536, "source_bytes_read": 155384503, "cache_allocated_bytes": 0},
+      "memory_counters": {"peak_rss_bytes": 14516224, "rss_after_run_bytes": 13320192, "pss_after_run_bytes": 10084352, "cgroup_current_after_run_bytes": 48578560, "cgroup_limit_bytes": null}
+    }
+  },
+  "feasibility_matrix": [
+    {"model": "stories15M-q8_0 (26 MB, Q8_0)", "enforced_limit": "22 MB RLIMIT_AS", "cpus": "1-4 threads", "native_inference": "SUCCESS (real text)", "peak_rss": "14.5 MB", "decode": "300 steps/s", "outcome": "Verified: bounded-memory out-of-core inference"},
+    {"model": "stories15M-derived-q4_0 (14.5 MB, Q4_0)", "enforced_limit": "24 MB RLIMIT_AS", "cpus": "2 threads", "native_inference": "SUCCESS", "peak_rss": "14.1 MB", "decode": "measured", "outcome": "Verified"},
+    {"model": "resident backend, same 26 MB model", "enforced_limit": "<=48 MB", "cpus": "2 threads", "native_inference": "ABORT/refused", "peak_rss": "~41 MB before abort", "decode": "n/a", "outcome": "Verified: resident is not bounded-memory"},
+    {"model": "100 MB - 2 GB+ compatible model", "enforced_limit": "~2 GB", "cpus": "2", "native_inference": "NOT TESTED", "peak_rss": "estimated ~constant (workspace+KV+64KiB buffer, model-decoupled)", "decode": "estimated to scale with model_bytes x passes", "outcome": "Architectural estimate only (no compatible large model available); NOT an experimental result"},
+    {"model": "arbitrary production GGUF (Llama-3/Qwen/K-quant)", "enforced_limit": "any", "cpus": "any", "native_inference": "UNSUPPORTED", "peak_rss": "n/a", "decode": "n/a", "outcome": "Verified limitation: decoder rejects the architecture/quant/metadata"}
+  ],
+  "correctness_security_preserved": {
+    "note": "No code changed; Phase 2 (deadline/mutation/auth/worker-lifecycle) and Phase 3 (synchronous default) guarantees are untouched. The chat runs above used unsealed source (verified=0); authenticated runs are covered by the Phase 2 evidence.",
+    "real_inference_confirmed": true
+  },
+  "feasibility_conclusions": {
+    "bounded_memory_out_of_core": "PROVEN for the supported model class: 26 MB model in 22 MB address space, 14.5 MB peak RSS, decoupled from model size.",
+    "two_gb_target": "Massively satisfied for the supported class (14.5 MB RSS << 2 GB). The memory floor (~20-22 MB) is a near-constant set by workspace (8 MiB) + tokenizer vocab + KV + 64 KiB read buffer + runtime, independent of model size.",
+    "dual_core": "Works (single thread completes; 1/2/4 threads all succeed).",
+    "large_model_barrier": "The barrier to large real models is NOT local memory (out-of-core already bounds it) but the decoder's narrow architecture/quant/metadata support. General large-model local inference requires extending the decoder (broader quants/architectures), which is a major, separate engineering effort.",
+    "remote_vs_local": "Remote bounded range-read storage (Phase 5) would let the same out-of-core decoder stream a remote model within the same bounded memory; it is a transport, not remote compute."
+  },
+  "limitations": [
+    "WSL2 virtualized, not physical 2 GB/dual-core hardware; RSS/address-space bounds are not a hardware feasibility claim.",
+    "Tiny models only (<=26 MB); larger compatible models unavailable; large-size rows in the matrix are architectural estimates, explicitly labeled.",
+    "cgroup memory.max enforcement not tested (no passwordless sudo); RLIMIT_AS used as the enforced bound.",
+    "Chat runs used unsealed source; authenticated-path correctness is covered separately by Phase 2 evidence.",
+    "Decode throughput here is tiny-model/short-decode and not representative of large models."
+  ]
+}
