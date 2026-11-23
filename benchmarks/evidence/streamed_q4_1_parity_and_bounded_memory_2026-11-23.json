@@ -1,0 +1,122 @@
+{
+  "schema": "llmbridge.streamed-q4_1-parity-and-bounded-memory.v1",
+  "recorded_date": "2026-11-23",
+  "summary": "Added Q4_1 tensor support to the out-of-core streamed CPU decoder by admitting GGML_TYPE_Q4_1 to the decoder's tensor-type gate. Dequantization (to_float) and the matrix-vector dot kernel (vec_dot through the Q8_1 activation path) remain delegated to the pinned ggml reference traits, so no hand-written quantization is introduced. Real native inference on a 16 MB Q4_1 Stories15M model produces output byte-identical to the resident llama.cpp reference over 16 greedy tokens, and runs out-of-core under a 22-24 MB address-space limit at ~14.3 MB peak RSS.",
+  "source": {
+    "branch": "local/streamed-metadata-admission",
+    "implementation_commit": "7d56650",
+    "prior_pushed_checkpoint": "59cc57f",
+    "code_modified": true,
+    "files_changed": [
+      "native/src/streamed.cpp (add GGML_TYPE_Q4_1 to Decoder::tensor allowlist; clarifying comment)",
+      "native/include/llmbridge.h (correct stale 'F32/Q8_0 only' capability comment)",
+      "crates/llmbridge-core/src/streamed.rs (correct module-doc capability comment)",
+      "crates/llmbridge-core/src/gguf_index.rs (add q4_1_tensor_geometry_is_indexed_exactly test)"
+    ],
+    "note": "The validated release binary was built from the identical working tree now committed at 7d56650; the gguf_index test addition is test-only and does not change the release binary behaviour. No source edits occurred between the validation build and this commit."
+  },
+  "environment": {
+    "host": "WSL2 on Windows 11",
+    "distro": "Ubuntu 26.04.1 LTS",
+    "kernel": "6.18.33.1-microsoft-standard-WSL2",
+    "cpu": "12th Gen Intel(R) Core(TM) i5-12400F",
+    "cpu_cores_logical": 12,
+    "mem_total_kb": 6998672,
+    "rustc": "1.85.1", "cargo": "1.85.1", "cmake": "4.2.3", "cc": "gcc 15.2.0",
+    "filesystem": "ext4 (native WSL2 disk); models copied off /mnt DrvFs",
+    "llama_cpp_pin": "cd959bae99ff4bed22bef2604f45241c09bbb8c8 (FetchContent, as pinned in the repo)",
+    "note_wsl_not_bare_metal": "WSL2 reports ~6.8 GB to Linux; memory numbers are address-space/RSS bounds, not a physical-hardware feasibility claim."
+  },
+  "change_rationale": {
+    "gate": "native/src/streamed.cpp Decoder::tensor rejected any type outside {F32,Q8_0,Q4_0}; Q4_1 was the only missing 32-element-block affine quant with a complete pinned reference kernel.",
+    "block_geometry": "Q4_1 QK=32, so the existing 'columns % 32 == 0' check is already correct; no geometry change needed.",
+    "kernels": "ggml_get_type_traits(Q4_1)->to_float = dequantize_row_q4_1; ggml_get_type_traits_cpu(Q4_1)->vec_dot with vec_dot_type Q8_1 (from_float present). Both are the locked reference implementations; the decoder adds no arithmetic of its own.",
+    "rust_side": "crates/llmbridge-core/src/gguf_index.rs tensor_layout already mapped Q4_1 to (block 32, 20 bytes), so the authenticated indexer already accepted Q4_1; only the C++ decoder gate was restrictive.",
+    "abi": "No ABI change. Entry points llmbridge_generate_streamed_cpu[_v2/_v3] and llmbridge_inspect_streamed_plan_v1 keep their signatures; ABI version unchanged."
+  },
+  "models": [
+    {"id": "stories15M-q8_0.gguf", "arch": "llama", "quant": "Q8_0", "bytes": 26671328, "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6", "source": "repo fixture (gitignored, not committed)", "license": "fixture derived from llama2.c / TinyStories lineage; format-compatibility fixture", "supported": true},
+    {"id": "stories15M-derived-q4_0.gguf", "arch": "llama", "quant": "Q4_0", "bytes": 14469344, "sha256": "b5cd77bb0d1a785a82d7a8a2bcb4170dfe6e43e881b9cbb0d1c8184a6dd99839", "source": "repo fixture (gitignored)", "supported": true},
+    {"id": "stories15M-derived-q4_1.gguf", "arch": "llama", "quant": "Q4_1", "bytes": 15994592, "sha256": "247d652c0e84138ca31bec8b4f8c8ebdde8e2ee9ea94f2bdd9888fa734e08460", "source": "repo fixture (gitignored); same base weights as the q8_0/q4_0 fixtures at a different quantization", "supported": true, "newly_supported_by": "7d56650"}
+  ],
+  "baseline_before_change": {
+    "streamed_q4_1": {"exit": 1, "error": "streamed generation failed: unsupported streamed tensor type/shape; source: no read error", "interpretation": "decoder rejected Q4_1 at Decoder::tensor gate"},
+    "streamed_q4_0": {"exit": 0, "generated": ", there was a little girl named L"},
+    "resident_q4_1_reference": {"exit": 0, "generated": ", there was a little girl named L", "interpretation": "llama.cpp (resident backend) accepts Q4_1 -> usable as an independent parity reference"}
+  },
+  "real_inference_after_change": {
+    "prompt": "Once upon a time",
+    "settings": {"ctx": 128, "max_tokens": 16, "threads": 1, "greedy": true, "sampling": "argmax (deterministic)"},
+    "streamed_q4_1": ", there was a little girl named Lily. She loved to play outside in",
+    "resident_q4_1_reference": ", there was a little girl named Lily. She loved to play outside in",
+    "streamed_q8_0": ", there was a little girl named Lily. She loved to play outside in",
+    "streamed_q4_0": ", there was a little girl named Lily. She loved to play outside and"
+  },
+  "numerical_parity": {
+    "method": "Deterministic greedy (argmax) token-sequence comparison, single thread, identical prompt/context/tokenizer. The streamed decoder is an independent custom FP32 forward pass (its own RMSNorm/RoPE/attention/softmax/residual); only per-row dequant+dot are shared ggml kernels. Exact multi-token agreement with the resident llama.cpp graph is therefore a cross-implementation parity signal, not a tautology.",
+    "streamed_q4_1_vs_resident_q4_1": "EXACT (16/16 greedy tokens byte-identical)",
+    "streamed_q4_1_vs_streamed_q8_0": "EXACT (16/16) on the same base weights",
+    "streamed_q4_1_vs_streamed_q4_0": "diverges at token 16 ('in' vs 'and'); expected and consistent: Q4_1 carries an affine min/bias term so it tracks the Q8_0 reference more closely than scale-only Q4_0.",
+    "logit_level_diff": "NOT MEASURED: the CLI exposes no per-token logit dump; parity here is deterministic-token-sequence level. A quantitative abs/rel logit-error harness is a documented gap (see limitations)."
+  },
+  "bounded_memory": {
+    "model": "stories15M-derived-q4_1.gguf (15994592 bytes)",
+    "enforced_limit": "24 MB RLIMIT_AS (--address-space-mb 24)",
+    "threads": 2, "ctx": 64, "max_tokens": 8,
+    "exit": 0,
+    "peak_rss_bytes": 14319616,
+    "maximum_resident_set_kbytes": 13984,
+    "rss_after_run_bytes": 13197312,
+    "pss_after_run_bytes": 9967616,
+    "decode_steps_per_second": 421.25,
+    "total_ns": 521688154,
+    "first_logits_ready_ns": 504002804,
+    "source_bytes_read": 91774159,
+    "weight_bytes_requested": 91047024,
+    "range_read_calls": 130283,
+    "max_range_read_bytes": 65520,
+    "reader_buffer_bytes": 65536,
+    "cache_allocated_bytes": 0,
+    "interpretation": "A 16 MB Q4_1 model streams ~91 MB of weight reads in <=65 KB ranges and runs in a 24 MB address space at ~14.3 MB peak RSS. Out-of-core bounded memory is preserved for Q4_1; weights are never fully resident."
+  },
+  "regression": {
+    "fmt_check": "exit 0",
+    "clippy_non_native_D_warnings": "exit 0",
+    "clippy_native_D_warnings": "exit 0 (dev-profile llama.cpp compile 12m44s)",
+    "tests_non_native": "212 passed; 0 failed (was 211; +1 is q4_1_tensor_geometry_is_indexed_exactly)",
+    "tests_native": "254 passed; 0 failed",
+    "new_test_isolated": "gguf_index::tests::q4_1_tensor_geometry_is_indexed_exactly ... ok",
+    "no_default_features_build": "exit 0",
+    "windows_native_lane": "NOT RUN this session (native build goes through WSL2/MSVC; Rust non-native lanes are platform-independent and green)."
+  },
+  "compatibility_matrix": [
+    {"model": "stories15M-q8_0 (26.7 MB)", "arch": "llama", "quant": "Q8_0", "parse": "PASS", "inference": "PASS", "parity": "reference-class (prior evidence)", "peak_rss": "14.5 MB", "result": "VERIFIED (prior)"},
+    {"model": "stories15M-derived-q4_0 (14.5 MB)", "arch": "llama", "quant": "Q4_0", "parse": "PASS", "inference": "PASS", "parity": "matches resident; close to Q8_0 (1-token drift at step 16)", "peak_rss": "~14 MB", "result": "VERIFIED (prior)"},
+    {"model": "stories15M-derived-q4_1 (16.0 MB)", "arch": "llama", "quant": "Q4_1", "parse": "PASS", "inference": "PASS", "parity": "EXACT vs resident llama.cpp (16 greedy tokens)", "peak_rss": "14.3 MB", "result": "VERIFIED (this work, 7d56650)"},
+    {"model": "K-quant Stories/Llama candidate", "arch": "llama", "quant": "Q4_K/Q5_K/Q6_K", "parse": "indexer geometry known (256-block); decoder gate REJECTS", "inference": "UNTESTED", "parity": "UNTESTED", "peak_rss": "n/a", "result": "UNSUPPORTED (no local K-quant llama fixture to validate; not implemented to avoid unvalidated claims)"},
+    {"model": "production Llama-3 / Qwen2 GGUF", "arch": "llama/qwen2", "quant": "typically K-quant", "parse": "REJECTED", "inference": "UNSUPPORTED", "parity": "n/a", "peak_rss": "n/a", "result": "UNSUPPORTED (multiple independent blockers; see remaining_blockers)"}
+  ],
+  "remaining_blockers": {
+    "k_quants": "streamed.cpp:71 allowlist plus the block-geometry check (which assumes 32-element blocks) would need to admit 256-element superblocks (columns % 256 == 0). ggml supplies to_float and vec_dot (Q8_K activation) for Q4_K/Q5_K/Q6_K, and gguf_index.rs already carries their block geometry, so the kernel path is feasible. Blocker: no compatible K-quant llama model is available locally to validate real inference, and the engineering rule forbids declaring support without actual inference + reference comparison. Deferred rather than claimed.",
+    "modern_architectures": "Qwen2/Llama-3 are blocked by several independent decoder assumptions: (1) the llama.* metadata allowlist rejects keys outside the 9 known (e.g. llama.vocab_size shipped by Llama-3); (2) the exact-tensor-count check rejects extra tensors such as Qwen2 attention q/k/v biases; (3) the RoPE implementation is normal (adjacent-pair) only, while Qwen2 uses NEOX-style rotation; (4) production weights are usually K-quant. Each is a separate, larger increment and is documented, not attempted.",
+    "logit_diff_harness": "No per-token logit dump path exists in the CLI; a quantitative logit abs/rel error harness would strengthen parity beyond deterministic token agreement."
+  },
+  "security_and_correctness_preserved": {
+    "note": "Only the tensor-type gate widened by one admitted type plus doc comments and a test. No change to authentication, sealed-manifest verification, mutation detection, deadline/cancellation, worker lifecycle, or memory admission. Finite-value checks (read_row/matvec require std::isfinite) apply to Q4_1 identically. ABI unchanged.",
+    "real_inference_confirmed": true
+  },
+  "limitations": [
+    "Tiny models only (<=26 MB); the Q4_1 fixture is 16 MB. No 100 MB - 2 GB compatible Q4_1 model was available to test scale.",
+    "Parity is deterministic-greedy-token-sequence level, not raw-logit numerical diff (no CLI logit dump).",
+    "WSL2 virtualized, not physical 2 GB/dual-core hardware; memory numbers are address-space/RSS bounds.",
+    "cgroup memory.max enforcement not re-tested here (no passwordless sudo in WSL2); RLIMIT_AS used as the enforced bound, consistent with prior evidence.",
+    "Windows native (MSVC) regression lane not run this session; native validation was performed under WSL2/gcc.",
+    "Fixtures are gitignored and not committed; reproduce by placing the listed sha256 fixtures under models/ and copying to a WSL-local path."
+  ],
+  "commands": {
+    "build": "CARGO_TARGET_DIR=$HOME/.cache/llmbridge-wsl-target-native cargo build --release -p llmbridge",
+    "inference": "llmbridge chat MODEL --prompt 'Once upon a time' --max-tokens 16 --ctx 128 --threads 1 --backend {streamed|resident}",
+    "bounded": "/usr/bin/time -v llmbridge chat MODEL.q4_1 --prompt 'Once upon a time' --max-tokens 8 --ctx 64 --threads 2 --backend streamed --address-space-mb 24 --metrics",
+    "test": "cargo test -p llmbridge-core q4_1_tensor_geometry_is_indexed_exactly"
+  }
+}
