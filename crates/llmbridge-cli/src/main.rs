@@ -19,7 +19,7 @@ fn main() {
     }
 }
 fn usage() -> &'static str {
-    "Usage:\n  llmbridge batch <model.gguf> --input prompts.txt --output-dir new-results [--workers 2] [--wait-timeout-ms 30000] [--deadline-ms milliseconds] [--sha256 digest]\n  llmbridge doctor [--json]\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge plan <path.gguf> [--ctx 128] [--workspace-mb 8] [--max-ram-mb 64] [--auto-context] [--auto-cache] [--json]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--cache-pressure-mb floor] [--sha256 trusted-digest] [--verification-mb 8] [--address-space-mb 24] [--auto-context] [--auto-cache] [--max-ram-mb 64] [--logits path.f32] [--deadline-ms milliseconds]\n  Planning max-ram-mb is an incremental estimate budget; address-space-mb enforces a separate Linux process limit."
+    "Usage:\n  llmbridge batch <model.gguf> --input prompts.txt --output-dir new-results [--workers 2] [--wait-timeout-ms 30000] [--deadline-ms milliseconds] [--sha256 digest]\n  llmbridge doctor [--json]\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge plan <path.gguf> [--ctx 128] [--workspace-mb 8] [--max-ram-mb 64] [--auto-context] [--auto-cache] [--json]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--cache-pressure-mb floor] [--sha256 trusted-digest] [--verification-mb 8] [--address-space-mb 24] [--auto-context] [--auto-cache] [--max-ram-mb 64] [--logits path.f32] [--deadline-ms milliseconds]\n  llmbridge logit-diff <path.gguf> --prompt <text> [--ctx 128] [--threads 1] [--top-k 10] [--workspace-mb 8]\n  Planning max-ram-mb is an incremental estimate budget; address-space-mb enforces a separate Linux process limit."
 }
 fn json_number(value: Option<u64>) -> String {
     value.map_or_else(|| "null".to_string(), |x| x.to_string())
@@ -192,6 +192,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         #[cfg(feature = "native")]
         Some("batch") => batch::run(&args[1..]),
         Some("chat") => chat(&args[1..]),
+        Some("logit-diff") => logit_diff(&args[1..]),
         Some("plan") => plan(&args[1..]),
         _ => Err(usage().to_string()),
     }
@@ -704,6 +705,62 @@ fn chat(args: &[String]) -> Result<(), String> {
 #[cfg(not(feature = "native"))]
 fn chat(_args: &[String]) -> Result<(), String> {
     Err("this binary has no native CPU backend: rebuild with --features native".into())
+}
+
+/// Opt-in diagnostic: capture the streamed decoder's step-0 logits and the
+/// resident llama.cpp logits at the same prompt position, then print numerical
+/// comparison metrics as JSON. Does not alter normal inference.
+#[cfg(feature = "native")]
+fn logit_diff(args: &[String]) -> Result<(), String> {
+    let model_path = args.first().ok_or(
+        "usage: llmbridge logit-diff <model.gguf> --prompt <text> [--ctx 128] [--threads 1] [--top-k 10] [--workspace-mb 8]",
+    )?;
+    let mut prompt: Option<String> = None;
+    let mut ctx: u32 = 128;
+    let mut threads: i32 = 1;
+    let mut top_k: usize = 10;
+    let mut workspace_mb: u64 = 8;
+    let mut pos = 1;
+    while pos < args.len() {
+        let flag = &args[pos];
+        let value = args
+            .get(pos + 1)
+            .ok_or_else(|| format!("missing value for {flag}"))?;
+        match flag.as_str() {
+            "--prompt" => prompt = Some(value.clone()),
+            "--ctx" => ctx = value.parse().map_err(|_| "invalid ctx")?,
+            "--threads" => threads = value.parse().map_err(|_| "invalid threads")?,
+            "--top-k" => top_k = value.parse().map_err(|_| "invalid top-k")?,
+            "--workspace-mb" => workspace_mb = value.parse().map_err(|_| "invalid workspace-mb")?,
+            _ => return Err(format!("unknown flag {flag}")),
+        }
+        pos += 2;
+    }
+    let prompt = prompt.ok_or("--prompt is required")?;
+    if prompt.is_empty() {
+        return Err("empty prompt".into());
+    }
+    if !(64..=8192).contains(&ctx) || !(1..=64).contains(&threads) || top_k == 0 {
+        return Err("ctx, threads or top-k out of supported bounds".into());
+    }
+    llmbridge_core::native_cpu::ensure_compatible()?;
+    let path = Path::new(model_path);
+    let workspace_bytes = workspace_mb
+        .checked_mul(1024 * 1024)
+        .ok_or("workspace overflow")?;
+    // Streamed first, so a streamed-only failure is reported before loading the
+    // full resident reference model.
+    let streamed =
+        llmbridge_core::logit_diff::streamed_prompt_logits(path, &prompt, ctx, workspace_bytes)?;
+    let resident = llmbridge_core::logit_diff::resident_prompt_logits(path, &prompt, ctx, threads)?;
+    let diff = llmbridge_core::logit_diff::compute(&streamed, &resident, top_k)?;
+    println!("LLMBRIDGE_LOGIT_DIFF {}", diff.to_json());
+    Ok(())
+}
+
+#[cfg(not(feature = "native"))]
+fn logit_diff(_args: &[String]) -> Result<(), String> {
+    Err("logit-diff requires the native CPU backend: rebuild with --features native".into())
 }
 
 #[cfg(test)]

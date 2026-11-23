@@ -66,6 +66,15 @@ int32_t llmbridge_generate_streamed_cpu_v3(const char *path, const char *prompt,
     llmbridge_logits_callback logits, llmbridge_cancel_poll poll, void *userdata,
     char *error, size_t capacity);
 
+/* Opt-in diagnostic (additive; ABI version unchanged): decode the prompt with
+ * the resident llama.cpp backend and report the full logit vector at the final
+ * prompt position via emit_logits, called exactly once. Samples/generates
+ * nothing. Returns 0 on success, 2 on cancel (unused here), -1 on error.
+ * Intended as an independent reference for streamed step-0 logits. */
+int32_t llmbridge_resident_prompt_logits_v1(const char *path, const char *prompt,
+    uint32_t context_tokens, int32_t threads, llmbridge_logits_callback emit_logits,
+    void *userdata, char *error, size_t capacity);
+
 /* Reuses decoder validation without allocating activations, KV or weights.
  * Workspace is the native admission requirement, not process RSS. */
 typedef struct llmbridge_streamed_shape_v1 {

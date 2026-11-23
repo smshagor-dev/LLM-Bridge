@@ -154,6 +154,83 @@ int32_t generate(const char *path, const char *prompt, uint32_t context_tokens,
     }
     return 0;
 }
+
+// Opt-in diagnostic: decode the prompt and surface the logit vector at the
+// final prompt position (the position whose argmax is the first generated
+// token). Mirrors generate()'s load/tokenize/prefill exactly but samples
+// nothing, so it is a faithful resident reference for streamed step-0 logits.
+int32_t prompt_logits(const char *path, const char *prompt, uint32_t context_tokens,
+                      int32_t threads, llmbridge_logits_callback emit_logits, void *userdata) {
+    if (!path || !prompt || !emit_logits || !path[0] ||
+        context_tokens < 64 || context_tokens > 8192 ||
+        threads <= 0 || threads > 64 || std::strlen(prompt) > 65536) {
+        throw std::invalid_argument("invalid resident logit-capture arguments");
+    }
+    std::unique_lock<std::mutex> lock(engine_mutex);
+    std::call_once(init_once, [] { llama_backend_init(); });
+    auto mp = llama_model_default_params();
+    mp.n_gpu_layers = 0;
+    std::unique_ptr<llama_model, decltype(&llama_model_free)> model(
+        llama_model_load_from_file(path, mp), llama_model_free);
+    if (!model) {
+        lock.unlock();
+        throw std::runtime_error("cannot load GGUF model for logit capture");
+    }
+    if (llama_model_has_encoder(model.get())) {
+        throw std::runtime_error("logit capture supports decoder-only models");
+    }
+    const auto *vocab = llama_model_get_vocab(model.get());
+    const size_t prompt_bytes = std::strlen(prompt);
+    if (prompt_bytes == 0) {
+        throw std::invalid_argument("empty prompt");
+    }
+    int32_t token_count = llama_tokenize(vocab, prompt,
+        static_cast<int32_t>(prompt_bytes), nullptr, 0, true, true);
+    if (token_count >= 0 || token_count == INT32_MIN) {
+        throw std::runtime_error("failed to determine prompt token count");
+    }
+    token_count = -token_count;
+    if (token_count < 1 || static_cast<uint64_t>(token_count) >= context_tokens) {
+        throw std::invalid_argument("prompt exceeds configured context");
+    }
+    std::vector<llama_token> tokens(static_cast<size_t>(token_count));
+    if (llama_tokenize(vocab, prompt, static_cast<int32_t>(prompt_bytes),
+                       tokens.data(), token_count, true, true) != token_count) {
+        throw std::runtime_error("tokenization failed");
+    }
+    auto cp = llama_context_default_params();
+    cp.n_ctx = context_tokens;
+    cp.n_batch = static_cast<uint32_t>(token_count);
+    cp.n_ubatch = std::min<uint32_t>(static_cast<uint32_t>(token_count), 512);
+    cp.n_threads = threads;
+    cp.n_threads_batch = threads;
+    std::unique_ptr<llama_context, decltype(&llama_free)> ctx(
+        llama_init_from_model(model.get(), cp), llama_free);
+    if (!ctx) {
+        throw std::runtime_error("unable to initialize CPU context for logit capture");
+    }
+    std::unique_ptr<llama_batch_ext, decltype(&llama_batch_ext_free)> batch(
+        llama_batch_ext_init(ctx.get()), llama_batch_ext_free);
+    if (!batch) {
+        throw std::runtime_error("unable to initialize model batch");
+    }
+    set_tokens(batch.get(), tokens.data(), token_count, 0);
+    if (llama_process(ctx.get(), LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
+        throw std::runtime_error("CPU model decode failed");
+    }
+    const float *logits = llama_get_logits_ith(ctx.get(), -1);
+    if (!logits) {
+        throw std::runtime_error("logits unavailable at final prompt position");
+    }
+    const int32_t n_vocab = llama_vocab_n_tokens(vocab);
+    if (n_vocab <= 0) {
+        throw std::runtime_error("invalid vocabulary size");
+    }
+    // Raw logits are reported unmodified; non-finite values are the caller's
+    // diagnostic signal and must not be hidden here.
+    (void)emit_logits(logits, static_cast<size_t>(n_vocab), userdata);
+    return 0;
+}
 } // namespace
 
 extern "C" uint32_t llmbridge_abi_version(void) {
@@ -177,6 +254,21 @@ extern "C" int32_t llmbridge_generate_cpu(
     }
 }
 
+
+extern "C" int32_t llmbridge_resident_prompt_logits_v1(
+    const char *path, const char *prompt, uint32_t context_tokens, int32_t threads,
+    llmbridge_logits_callback emit_logits, void *userdata, char *error, size_t capacity) {
+    write_error(error, capacity, "");
+    try {
+        return prompt_logits(path, prompt, context_tokens, threads, emit_logits, userdata);
+    } catch (const std::exception &e) {
+        write_error(error, capacity, e.what());
+        return -1;
+    } catch (...) {
+        write_error(error, capacity, "unknown resident logit-capture exception");
+        return -1;
+    }
+}
 
 extern "C" int32_t llmbridge_probe_gguf_source(
     uint64_t file_bytes, size_t max_chunk_bytes,
