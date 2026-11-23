@@ -137,6 +137,12 @@ pub struct StreamedMetrics {
     pub lookahead_final_reserved_bytes: usize,
     pub lookahead_final_outstanding_reads: usize,
     pub lookahead_source_bytes_read: u64,
+    pub lookahead_queue_wait_ns: u64,
+    pub lookahead_worker_read_ns: u64,
+    pub lookahead_staging_copy_ns: u64,
+    pub lookahead_consumer_wait_ns: u64,
+    pub lookahead_revalidation_ns: u64,
+    pub lookahead_peak_staging_capacity_bytes: usize,
 }
 
 extern "C" {
@@ -213,6 +219,7 @@ struct State<'a, F, L> {
     scheduled: VecDeque<(u64, usize)>,
     lookahead_scheduled: u64,
     lookahead_consumed: u64,
+    lookahead_revalidation_ns: u64,
 }
 fn apply_cache_control<F, L>(state: &mut State<'_, F, L>) {
     if state.cache_control.is_some_and(CacheControl::take_release) {
@@ -302,11 +309,20 @@ extern "C" fn read<F, L>(
                         });
                         return Ok::<usize, std::io::Error>(0);
                     }
-                    state
-                        .reader
-                        .verify_staged_range_cancellable(offset, staged.bytes(), || {
-                            interrupted(flag, deadline)
-                        })?;
+                    let verification_started = Instant::now();
+                    let verification = state.reader.verify_staged_range_cancellable(
+                        offset,
+                        staged.bytes(),
+                        || interrupted(flag, deadline),
+                    );
+                    state.lookahead_revalidation_ns =
+                        state.lookahead_revalidation_ns.saturating_add(
+                            verification_started
+                                .elapsed()
+                                .as_nanos()
+                                .min(u128::from(u64::MAX)) as u64,
+                        );
+                    verification?;
                     if interrupted(flag, deadline) {
                         state.failure.get_or_insert_with(|| {
                             "lookahead delivery cancelled or deadline expired".into()
@@ -683,6 +699,7 @@ fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>
         scheduled: VecDeque::new(),
         lookahead_scheduled: 0,
         lookahead_consumed: 0,
+        lookahead_revalidation_ns: 0,
     };
     let mut error = [0 as c_char; 1024];
     let state_ptr = (&mut state as *mut State<'_, F, L>).cast();
@@ -791,6 +808,14 @@ fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>
             .as_ref()
             .map_or(0, |f| f.outstanding_reads),
         lookahead_source_bytes_read: lookahead_finish.as_ref().map_or(0, |f| f.source_bytes_read),
+        lookahead_queue_wait_ns: lookahead_finish.as_ref().map_or(0, |f| f.queue_wait_ns),
+        lookahead_worker_read_ns: lookahead_finish.as_ref().map_or(0, |f| f.worker_read_ns),
+        lookahead_staging_copy_ns: lookahead_finish.as_ref().map_or(0, |f| f.staging_copy_ns),
+        lookahead_consumer_wait_ns: lookahead_finish.as_ref().map_or(0, |f| f.consumer_wait_ns),
+        lookahead_revalidation_ns: state.lookahead_revalidation_ns,
+        lookahead_peak_staging_capacity_bytes: lookahead_finish
+            .as_ref()
+            .map_or(0, |f| f.peak_actual_staging_bytes),
     })
 }
 
@@ -867,6 +892,7 @@ mod tests {
             scheduled: VecDeque::new(),
             lookahead_scheduled: 0,
             lookahead_consumed: 0,
+            lookahead_revalidation_ns: 0,
         };
         let pointer = (&mut state as *mut State<'_, Piece, Logits>).cast();
         let mut output = [0xa5u8; 16];

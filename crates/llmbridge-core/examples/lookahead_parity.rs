@@ -15,11 +15,19 @@ const MODEL_SHA256: &str = "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = env::args_os().skip(1).collect::<Vec<_>>();
-    if args.len() != 2 {
-        return Err("usage: lookahead_parity MODEL.gguf OUTPUT_DIR".into());
+    if !(2..=3).contains(&args.len()) {
+        return Err("usage: lookahead_parity MODEL.gguf OUTPUT_DIR [EXPIRY_SECONDS]".into());
     }
     let model = PathBuf::from(&args[0]);
     let out = PathBuf::from(&args[1]);
+    let expiry_seconds = args
+        .get(2)
+        .map(|value| value.to_string_lossy().parse::<u64>())
+        .transpose()?
+        .unwrap_or(15);
+    if expiry_seconds == 0 {
+        return Err("expiry seconds must be nonzero".into());
+    }
     fs::create_dir_all(&out)?;
     let config = StreamedConfig {
         context_tokens: 64,
@@ -141,7 +149,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         sync.source_bytes_read, ahead.source_bytes_read);
     // Partial output before expiry is permitted. Record each consumer entry
     // boundary and prove none starts after the deadline is observed.
-    let expiry = Instant::now() + Duration::from_secs(15);
+    let expiry = Instant::now() + Duration::from_secs(expiry_seconds);
     let late_delivery = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let expiry_observed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let observer_flag = expiry_observed.clone();
@@ -231,7 +239,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Interleaved repeats share the same file, prompt, context, token budget,
     // native build and OS cache policy. We report rather than infer speedup.
     let mut benchmark = Vec::<String>::new();
-    for trial in 0..3 {
+    // Four pairs balance which path runs first (two lookahead-first, two
+    // synchronous-first) while keeping each pair adjacent in time.
+    for trial in 0..4 {
         for lookahead_enabled in [trial % 2 == 0, trial % 2 != 0] {
             let mut text = Vec::new();
             let mut logits = Vec::new();
@@ -283,7 +293,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .decode_steps_per_second()
                 .map_or_else(|| "null".into(), |n| n.to_string());
             benchmark.push(format!(
-                r#"{{"trial":{},"mode":"{}","wall_ns":{},"first_token_ms":{},"decode_steps_per_second":{},"range_read_calls":{},"source_bytes_read":{},"lookahead_scheduled_reads":{},"lookahead_consumed_reads":{},"lookahead_source_bytes_read":{},"admitted_staging_bytes":{},"admitted_fixed_overhead_bytes":{},"admitted_worker_stack_bytes":{},"worker_terminated":{},"final_reserved_bytes":{},"final_outstanding_reads":{}}}"#,
+                r#"{{"trial":{},"mode":"{}","wall_ns":{},"first_token_ms":{},"decode_steps_per_second":{},"range_read_calls":{},"source_bytes_read":{},"lookahead_scheduled_reads":{},"lookahead_consumed_reads":{},"lookahead_source_bytes_read":{},"lookahead_queue_wait_ns":{},"lookahead_worker_read_ns":{},"lookahead_staging_copy_ns":{},"lookahead_consumer_wait_ns":{},"lookahead_revalidation_ns":{},"lookahead_peak_staging_capacity_bytes":{},"time_outside_read_and_consumer_callbacks_ns":{},"lookahead_total_admission_limit_bytes":{},"fixed_overhead_allowance_bytes":{},"worker_stack_allowance_bytes":{},"worker_terminated":{},"final_reserved_bytes":{},"final_outstanding_reads":{}}}"#,
                 trial + 1,
                 if lookahead_enabled { "lookahead" } else { "synchronous" },
                 started.elapsed().as_nanos(),
@@ -294,6 +304,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 metrics.lookahead_scheduled_reads,
                 metrics.lookahead_consumed_reads,
                 metrics.lookahead_source_bytes_read,
+                metrics.lookahead_queue_wait_ns,
+                metrics.lookahead_worker_read_ns,
+                metrics.lookahead_staging_copy_ns,
+                metrics.lookahead_consumer_wait_ns,
+                metrics.lookahead_revalidation_ns,
+                metrics.lookahead_peak_staging_capacity_bytes,
+                performance.total_ns
+                    .saturating_sub(performance.range_callback_ns)
+                    .saturating_sub(performance.consumer_callback_ns),
                 if lookahead_enabled { limits.staging_bytes } else { 0 },
                 if lookahead_enabled { limits.fixed_overhead_bytes } else { 0 },
                 if lookahead_enabled { limits.worker_stack_bytes } else { 0 },
@@ -304,13 +323,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let benchmark_report = format!(
-        "{{\"model_sha256\":\"{}\",\"model_bytes\":{},\"filesystem\":\"Windows NTFS local file; OS cache state uncontrolled, repeated trials progressively warm\",\"integrity\":\"unsealed local source; same policy for synchronous and lookahead\",\"prompt\":\"Once upon a time\",\"context_tokens\":{},\"max_tokens\":{},\"chunk_bytes\":{},\"workspace_bytes\":{},\"lookahead_limits\":{{\"staging_bytes\":{},\"max_outstanding_reads\":{},\"fixed_overhead_bytes\":{},\"worker_stack_bytes\":{}}},\"build\":\"cargo release; native MSVC; pinned llama.cpp cd959bae99ff4bed22bef2604f45241c09bbb8c8; CPU profile from build configuration\",\"trials_interleaved\":[{}]}}",
+        "{{\"model_sha256\":\"{}\",\"model_bytes\":{},\"filesystem\":\"Windows NTFS local file; OS cache state uncontrolled, repeated trials progressively warm\",\"integrity\":\"unsealed local source; same policy for synchronous and lookahead\",\"prompt\":\"Once upon a time\",\"context_tokens\":{},\"max_tokens\":{},\"chunk_bytes\":{},\"workspace_bytes\":{},\"deadline_protocol_seconds\":{},\"lookahead_limits\":{{\"total_admission_limit_bytes\":{},\"max_outstanding_reads\":{},\"fixed_overhead_allowance_bytes\":{},\"worker_stack_allowance_bytes\":{}}},\"build\":\"cargo release; native MSVC; pinned llama.cpp cd959bae99ff4bed22bef2604f45241c09bbb8c8; CPU profile from build configuration\",\"trials_interleaved\":[{}]}}",
         MODEL_SHA256,
         fs::metadata(&model)?.len(),
         config.context_tokens,
         config.max_tokens,
         config.chunk_bytes,
         config.workspace_bytes,
+        expiry_seconds,
         limits.staging_bytes,
         limits.max_outstanding_reads,
         limits.fixed_overhead_bytes,
@@ -319,7 +339,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     fs::write(out.join("ntfs_benchmark.json"), benchmark_report)?;
     println!(
-        "NTFS benchmark: 3 interleaved synchronous/lookahead trials recorded to {}",
+        "NTFS benchmark: 4 balanced interleaved synchronous/lookahead pairs recorded to {}",
         out.join("ntfs_benchmark.json").display()
     );
     Ok(())

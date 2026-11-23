@@ -5,7 +5,7 @@ use std::any::Any;
 use std::io;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
-    mpsc::{self, Receiver, SyncSender, TryRecvError},
+    mpsc::{self, Receiver, RecvTimeoutError, SyncSender},
     Arc,
 };
 use std::thread::{self, JoinHandle};
@@ -31,6 +31,7 @@ struct Request {
     tensor_start: u64,
     tensor_end: u64,
     deadline: Option<Instant>,
+    queued_at: Instant,
     lease: Lease,
 }
 struct ResultBytes {
@@ -40,13 +41,17 @@ struct ResultBytes {
 #[derive(Debug)]
 struct Lease {
     bytes: usize,
+    capacity: usize,
     reserved: Arc<AtomicUsize>,
     outstanding: Arc<AtomicUsize>,
+    actual_staging: Arc<AtomicUsize>,
 }
 impl Drop for Lease {
     fn drop(&mut self) {
         self.reserved.fetch_sub(self.bytes, Ordering::AcqRel);
         self.outstanding.fetch_sub(1, Ordering::AcqRel);
+        self.actual_staging
+            .fetch_sub(self.capacity, Ordering::AcqRel);
     }
 }
 /// A completed result retains its staging reservation until it is dropped.
@@ -78,6 +83,12 @@ pub struct LocalLookahead {
     chunk: usize,
     base_reserved: usize,
     source_bytes: Arc<AtomicU64>,
+    queue_wait_ns: Arc<AtomicU64>,
+    worker_read_ns: Arc<AtomicU64>,
+    staging_copy_ns: Arc<AtomicU64>,
+    consumer_wait_ns: Arc<AtomicU64>,
+    actual_staging: Arc<AtomicUsize>,
+    peak_actual_staging: Arc<AtomicUsize>,
 }
 #[derive(Debug, Clone, Default)]
 pub struct LookaheadFinish {
@@ -86,6 +97,11 @@ pub struct LookaheadFinish {
     pub outstanding_reads: usize,
     pub source_bytes_read: u64,
     pub worker_panic: Option<String>,
+    pub queue_wait_ns: u64,
+    pub worker_read_ns: u64,
+    pub staging_copy_ns: u64,
+    pub consumer_wait_ns: u64,
+    pub peak_actual_staging_bytes: usize,
 }
 impl LocalLookahead {
     pub fn start(reader: BoundedLocalReader, limits: LookaheadLimits) -> io::Result<Self> {
@@ -138,7 +154,18 @@ impl LocalLookahead {
         let reserved = Arc::new(AtomicUsize::new(limits.fixed_overhead_bytes));
         let outstanding = Arc::new(AtomicUsize::new(0));
         let source_bytes = Arc::new(AtomicU64::new(0));
+        let queue_wait_ns = Arc::new(AtomicU64::new(0));
+        let worker_read_ns = Arc::new(AtomicU64::new(0));
+        let staging_copy_ns = Arc::new(AtomicU64::new(0));
+        let consumer_wait_ns = Arc::new(AtomicU64::new(0));
+        let actual_staging = Arc::new(AtomicUsize::new(0));
+        let peak_actual_staging = Arc::new(AtomicUsize::new(0));
+        let worker_actual_staging = Arc::clone(&actual_staging);
+        let worker_peak_staging = Arc::clone(&peak_actual_staging);
         let worker_source_bytes = Arc::clone(&source_bytes);
+        let worker_queue_wait = Arc::clone(&queue_wait_ns);
+        let worker_read_time = Arc::clone(&worker_read_ns);
+        let worker_copy_time = Arc::clone(&staging_copy_ns);
         let worker_cancel = Arc::clone(&cancelled);
         let worker_failed = Arc::clone(&failed);
         let join = thread::Builder::new()
@@ -147,7 +174,8 @@ impl LocalLookahead {
             .spawn(move || {
                 let mut reader = reader;
                 let before_read = before_read;
-                while let Ok(req) = requests.recv() {
+                while let Ok(mut req) = requests.recv() {
+                    add_nanos(&worker_queue_wait, req.queued_at.elapsed());
                     let result = (|| {
                         let end = req
                             .offset
@@ -168,6 +196,11 @@ impl LocalLookahead {
                             )
                         })?;
                         bytes.resize(req.length, 0);
+                        req.lease.capacity = bytes.capacity();
+                        let now = worker_actual_staging
+                            .fetch_add(req.lease.capacity, Ordering::AcqRel)
+                            .saturating_add(req.lease.capacity);
+                        worker_peak_staging.fetch_max(now, Ordering::AcqRel);
                         if let Some(hook) = before_read.as_ref() {
                             hook()?;
                         }
@@ -178,12 +211,17 @@ impl LocalLookahead {
                             ));
                         }
                         let deadline = req.deadline;
-                        let slice =
+                        let read_started = Instant::now();
+                        let read_result =
                             reader.read_range_cancellable(req.offset, req.length, || {
                                 worker_cancel.load(Ordering::Acquire)
                                     || deadline.is_some_and(|d| Instant::now() >= d)
-                            })?;
+                            });
+                        add_nanos(&worker_read_time, read_started.elapsed());
+                        let slice = read_result?;
+                        let copy_started = Instant::now();
                         bytes.copy_from_slice(slice);
+                        add_nanos(&worker_copy_time, copy_started.elapsed());
                         worker_source_bytes.store(reader.disk_bytes_read(), Ordering::Release);
                         if worker_cancel.load(Ordering::Acquire)
                             || deadline.is_some_and(|d| Instant::now() >= d)
@@ -228,6 +266,12 @@ impl LocalLookahead {
             chunk,
             base_reserved: limits.fixed_overhead_bytes,
             source_bytes,
+            queue_wait_ns,
+            worker_read_ns,
+            staging_copy_ns,
+            consumer_wait_ns,
+            actual_staging,
+            peak_actual_staging,
         })
     }
     /// Admission is charged before the request is queued and before worker allocation.
@@ -297,10 +341,13 @@ impl LocalLookahead {
             tensor_start,
             tensor_end,
             deadline,
+            queued_at: Instant::now(),
             lease: Lease {
                 bytes: length,
+                capacity: 0,
                 reserved: Arc::clone(&self.reserved),
                 outstanding: Arc::clone(&self.outstanding),
+                actual_staging: Arc::clone(&self.actual_staging),
             },
         };
         let sent = self
@@ -323,6 +370,7 @@ impl LocalLookahead {
         Ok(())
     }
     pub fn take(&self, cancelled: impl Fn() -> bool) -> io::Result<PrefetchedRange> {
+        let waiting_since = Instant::now();
         loop {
             if cancelled() || self.cancelled.load(Ordering::Acquire) {
                 self.cancelled.store(true, Ordering::Release);
@@ -331,7 +379,11 @@ impl LocalLookahead {
                     "lookahead consumer cancelled",
                 ));
             }
-            match self.rx.try_recv() {
+            // Block on the channel notification rather than parking the current
+            // thread after a poll. The timeout preserves bounded cancellation
+            // and deadline observation while a result wakes this consumer at
+            // once instead of waiting for the polling interval to elapse.
+            match self.rx.recv_timeout(std::time::Duration::from_millis(2)) {
                 Ok(Ok((offset, value))) => {
                     if cancelled() || self.cancelled.load(Ordering::Acquire) {
                         self.cancelled.store(true, Ordering::Release);
@@ -340,6 +392,7 @@ impl LocalLookahead {
                             "lookahead consumer cancelled",
                         ));
                     }
+                    add_nanos(&self.consumer_wait_ns, waiting_since.elapsed());
                     return Ok(PrefetchedRange {
                         offset,
                         bytes: value.bytes,
@@ -350,13 +403,13 @@ impl LocalLookahead {
                     self.failed.store(true, Ordering::Release);
                     return Err(error);
                 }
-                Err(TryRecvError::Disconnected) => {
+                Err(RecvTimeoutError::Disconnected) => {
                     return Err(io::Error::new(
                         io::ErrorKind::BrokenPipe,
                         "lookahead worker stopped",
                     ))
                 }
-                Err(TryRecvError::Empty) => {
+                Err(RecvTimeoutError::Timeout) => {
                     if cancelled() || self.cancelled.load(Ordering::Acquire) {
                         self.cancelled.store(true, Ordering::Release);
                         return Err(io::Error::new(
@@ -364,7 +417,6 @@ impl LocalLookahead {
                             "lookahead consumer cancelled",
                         ));
                     }
-                    thread::park_timeout(std::time::Duration::from_millis(2))
                 }
             }
         }
@@ -430,8 +482,19 @@ impl LocalLookahead {
             outstanding_reads: self.outstanding_reads(),
             source_bytes_read: self.source_bytes_read(),
             worker_panic,
+            queue_wait_ns: self.queue_wait_ns.load(Ordering::Acquire),
+            worker_read_ns: self.worker_read_ns.load(Ordering::Acquire),
+            staging_copy_ns: self.staging_copy_ns.load(Ordering::Acquire),
+            consumer_wait_ns: self.consumer_wait_ns.load(Ordering::Acquire),
+            peak_actual_staging_bytes: self.peak_actual_staging.load(Ordering::Acquire),
         }
     }
+}
+fn add_nanos(counter: &AtomicU64, duration: std::time::Duration) {
+    let nanos = duration.as_nanos().min(u128::from(u64::MAX)) as u64;
+    let _ = counter.fetch_update(Ordering::AcqRel, Ordering::Acquire, |old| {
+        Some(old.saturating_add(nanos))
+    });
 }
 fn panic_message(payload: Box<dyn Any + Send>) -> String {
     if let Some(message) = payload.downcast_ref::<String>() {
