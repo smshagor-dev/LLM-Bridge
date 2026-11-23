@@ -231,6 +231,108 @@ int32_t prompt_logits(const char *path, const char *prompt, uint32_t context_tok
     (void)emit_logits(logits, static_cast<size_t>(n_vocab), userdata);
     return 0;
 }
+
+// Opt-in multi-position diagnostic: greedy-decode up to max_tokens and emit the
+// full logit vector at EACH step before sampling (same timing as the streamed
+// decoder's per-step logits callback). The chosen token is the argmax of the
+// emitted vector, so the caller can reconstruct the generated sequence and
+// confirm an identical prefix before comparing a given position.
+int32_t decode_logits(const char *path, const char *prompt, uint32_t context_tokens,
+                      uint32_t max_tokens, int32_t threads,
+                      llmbridge_logits_callback emit_logits, void *userdata) {
+    if (!path || !prompt || !emit_logits || !path[0] ||
+        context_tokens < 64 || context_tokens > 8192 ||
+        max_tokens == 0 || max_tokens > 2048 ||
+        threads <= 0 || threads > 64 || std::strlen(prompt) > 65536) {
+        throw std::invalid_argument("invalid resident decode-logits arguments");
+    }
+    std::unique_lock<std::mutex> lock(engine_mutex);
+    std::call_once(init_once, [] { llama_backend_init(); });
+    auto mp = llama_model_default_params();
+    mp.n_gpu_layers = 0;
+    std::unique_ptr<llama_model, decltype(&llama_model_free)> model(
+        llama_model_load_from_file(path, mp), llama_model_free);
+    if (!model) {
+        lock.unlock();
+        throw std::runtime_error("cannot load GGUF model for decode-logits");
+    }
+    if (llama_model_has_encoder(model.get())) {
+        throw std::runtime_error("decode-logits supports decoder-only models");
+    }
+    const auto *vocab = llama_model_get_vocab(model.get());
+    const size_t prompt_bytes = std::strlen(prompt);
+    if (prompt_bytes == 0) {
+        throw std::invalid_argument("empty prompt");
+    }
+    int32_t token_count = llama_tokenize(vocab, prompt,
+        static_cast<int32_t>(prompt_bytes), nullptr, 0, true, true);
+    if (token_count >= 0 || token_count == INT32_MIN) {
+        throw std::runtime_error("failed to determine prompt token count");
+    }
+    token_count = -token_count;
+    if (token_count < 1 ||
+        static_cast<uint64_t>(token_count) + max_tokens > context_tokens) {
+        throw std::invalid_argument("prompt and response exceed configured context");
+    }
+    std::vector<llama_token> tokens(static_cast<size_t>(token_count));
+    if (llama_tokenize(vocab, prompt, static_cast<int32_t>(prompt_bytes),
+                       tokens.data(), token_count, true, true) != token_count) {
+        throw std::runtime_error("tokenization failed");
+    }
+    auto cp = llama_context_default_params();
+    cp.n_ctx = context_tokens;
+    cp.n_batch = static_cast<uint32_t>(token_count);
+    cp.n_ubatch = std::min<uint32_t>(static_cast<uint32_t>(token_count), 512);
+    cp.n_threads = threads;
+    cp.n_threads_batch = threads;
+    std::unique_ptr<llama_context, decltype(&llama_free)> ctx(
+        llama_init_from_model(model.get(), cp), llama_free);
+    if (!ctx) {
+        throw std::runtime_error("unable to initialize CPU context for decode-logits");
+    }
+    std::unique_ptr<llama_batch_ext, decltype(&llama_batch_ext_free)> batch(
+        llama_batch_ext_init(ctx.get()), llama_batch_ext_free);
+    if (!batch) {
+        throw std::runtime_error("unable to initialize model batch");
+    }
+    auto chain_params = llama_sampler_chain_default_params();
+    std::unique_ptr<llama_sampler, decltype(&llama_sampler_free)> sampler(
+        llama_sampler_chain_init(chain_params), llama_sampler_free);
+    if (!sampler) {
+        throw std::runtime_error("unable to initialize greedy sampler");
+    }
+    llama_sampler_chain_add(sampler.get(), llama_sampler_init_greedy());
+    const int32_t n_vocab = llama_vocab_n_tokens(vocab);
+    if (n_vocab <= 0) {
+        throw std::runtime_error("invalid vocabulary size");
+    }
+    int32_t position = 0;
+    int32_t current_count = token_count;
+    for (uint32_t generated = 0; generated < max_tokens; ++generated) {
+        set_tokens(batch.get(), tokens.data(), current_count, position);
+        if (llama_process(ctx.get(), LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
+            throw std::runtime_error("CPU model decode failed");
+        }
+        position += current_count;
+        const float *logits = llama_get_logits_ith(ctx.get(), -1);
+        if (!logits) {
+            throw std::runtime_error("logits unavailable during decode");
+        }
+        if (!emit_logits(logits, static_cast<size_t>(n_vocab), userdata)) {
+            return 2;
+        }
+        const llama_token token = llama_sampler_sample(sampler.get(), ctx.get(), -1);
+        if (token < 0) {
+            throw std::runtime_error("sampler returned an invalid token");
+        }
+        if (llama_vocab_is_eog(vocab, token)) {
+            break;
+        }
+        tokens.assign(1, token);
+        current_count = 1;
+    }
+    return 0;
+}
 } // namespace
 
 extern "C" uint32_t llmbridge_abi_version(void) {
@@ -266,6 +368,23 @@ extern "C" int32_t llmbridge_resident_prompt_logits_v1(
         return -1;
     } catch (...) {
         write_error(error, capacity, "unknown resident logit-capture exception");
+        return -1;
+    }
+}
+
+extern "C" int32_t llmbridge_resident_decode_logits_v1(
+    const char *path, const char *prompt, uint32_t context_tokens, uint32_t max_tokens,
+    int32_t threads, llmbridge_logits_callback emit_logits, void *userdata,
+    char *error, size_t capacity) {
+    write_error(error, capacity, "");
+    try {
+        return decode_logits(path, prompt, context_tokens, max_tokens, threads,
+                             emit_logits, userdata);
+    } catch (const std::exception &e) {
+        write_error(error, capacity, e.what());
+        return -1;
+    } catch (...) {
+        write_error(error, capacity, "unknown resident decode-logits exception");
         return -1;
     }
 }

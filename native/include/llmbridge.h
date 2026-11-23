@@ -76,6 +76,15 @@ int32_t llmbridge_resident_prompt_logits_v1(const char *path, const char *prompt
     uint32_t context_tokens, int32_t threads, llmbridge_logits_callback emit_logits,
     void *userdata, char *error, size_t capacity);
 
+/* Opt-in multi-position diagnostic (additive; ABI version unchanged): greedy-
+ * decode up to max_tokens and call emit_logits once per step with the full logit
+ * vector BEFORE sampling (same timing as the streamed per-step logits callback).
+ * The chosen token is the argmax of each emitted vector. Returns 0 on success,
+ * 2 if emit_logits requests stop, -1 on error. */
+int32_t llmbridge_resident_decode_logits_v1(const char *path, const char *prompt,
+    uint32_t context_tokens, uint32_t max_tokens, int32_t threads,
+    llmbridge_logits_callback emit_logits, void *userdata, char *error, size_t capacity);
+
 /* Reuses decoder validation without allocating activations, KV or weights.
  * Workspace is the native admission requirement, not process RSS. */
 typedef struct llmbridge_streamed_shape_v1 {

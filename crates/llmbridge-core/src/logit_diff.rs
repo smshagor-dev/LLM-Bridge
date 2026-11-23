@@ -190,6 +190,64 @@ pub fn compute(streamed: &[f32], resident: &[f32], top_k: usize) -> Result<Logit
     })
 }
 
+/// Per-position comparison across a decoded sequence. `prefix_identical_through`
+/// is the number of leading positions at which both backends' greedy argmax
+/// agree; a positional comparison beyond that point compares logits produced
+/// from DIFFERENT fed prefixes and is flagged as such.
+#[derive(Debug, Clone)]
+pub struct MultiLogitDiff {
+    pub positions: Vec<LogitDiff>,
+    pub prefix_identical_through: usize,
+}
+
+impl MultiLogitDiff {
+    pub fn to_json(&self) -> String {
+        let per: Vec<String> = self
+            .positions
+            .iter()
+            .enumerate()
+            .map(|(i, d)| format!("{{\"position\":{},\"metrics\":{}}}", i, d.to_json()))
+            .collect();
+        format!(
+            "{{\"prefix_identical_through\":{},\"position_count\":{},\"positions\":[{}]}}",
+            self.prefix_identical_through,
+            self.positions.len(),
+            per.join(",")
+        )
+    }
+}
+
+/// Compare two per-position logit sequences (streamed vs resident), one
+/// `LogitDiff` per position over the common length. The sequences must align
+/// position-for-position (identical prompt, deterministic greedy decoding);
+/// `prefix_identical_through` bounds where that alignment is guaranteed.
+pub fn compute_multi(
+    streamed: &[Vec<f32>],
+    resident: &[Vec<f32>],
+    top_k: usize,
+) -> Result<MultiLogitDiff, String> {
+    if streamed.is_empty() || resident.is_empty() {
+        return Err("no logit positions captured".into());
+    }
+    let n = streamed.len().min(resident.len());
+    let mut positions = Vec::with_capacity(n);
+    let mut prefix_identical_through = 0usize;
+    let mut still_identical = true;
+    for i in 0..n {
+        let diff = compute(&streamed[i], &resident[i], top_k)?;
+        if still_identical && diff.streamed_top1 == diff.resident_top1 {
+            prefix_identical_through += 1;
+        } else {
+            still_identical = false;
+        }
+        positions.push(diff);
+    }
+    Ok(MultiLogitDiff {
+        positions,
+        prefix_identical_through,
+    })
+}
+
 #[cfg(feature = "native")]
 mod capture {
     use crate::streamed::{generate_streamed, StreamedConfig};
@@ -211,6 +269,101 @@ mod capture {
             error: *mut c_char,
             capacity: usize,
         ) -> i32;
+        fn llmbridge_resident_decode_logits_v1(
+            path: *const c_char,
+            prompt: *const c_char,
+            context_tokens: u32,
+            max_tokens: u32,
+            threads: c_int,
+            emit_logits: LogitsCallback,
+            userdata: *mut c_void,
+            error: *mut c_char,
+            capacity: usize,
+        ) -> i32;
+    }
+
+    struct MultiCapture {
+        steps: Vec<Vec<f32>>,
+    }
+
+    extern "C" fn multi_sink(data: *const f32, count: usize, userdata: *mut c_void) -> i32 {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if userdata.is_null() || data.is_null() || count == 0 || count > 1 << 22 {
+                return false;
+            }
+            let state = unsafe { &mut *(userdata.cast::<MultiCapture>()) };
+            let slice = unsafe { slice::from_raw_parts(data, count) };
+            state.steps.push(slice.to_vec());
+            true
+        }));
+        i32::from(matches!(result, Ok(true)))
+    }
+
+    /// Capture the resident llama.cpp logit vector at each of the first
+    /// `max_tokens` greedy decode positions.
+    pub fn resident_decode_logits(
+        model: &Path,
+        prompt: &str,
+        context_tokens: u32,
+        max_tokens: u32,
+        threads: i32,
+    ) -> Result<Vec<Vec<f32>>, String> {
+        let path = CString::new(model.to_str().ok_or("non-UTF8 model path")?)
+            .map_err(|_| "invalid model path")?;
+        let prompt = CString::new(prompt).map_err(|_| "prompt contains NUL")?;
+        crate::native_cpu::ensure_compatible()?;
+        let mut state = MultiCapture { steps: Vec::new() };
+        let mut error = [0 as c_char; 1024];
+        let status = unsafe {
+            llmbridge_resident_decode_logits_v1(
+                path.as_ptr(),
+                prompt.as_ptr(),
+                context_tokens,
+                max_tokens,
+                threads,
+                multi_sink,
+                (&mut state as *mut MultiCapture).cast(),
+                error.as_mut_ptr(),
+                error.len(),
+            )
+        };
+        if status != 0 {
+            let diagnostic = unsafe { CStr::from_ptr(error.as_ptr()) }.to_string_lossy();
+            return Err(format!("resident decode-logits failed: {diagnostic}"));
+        }
+        if state.steps.is_empty() {
+            return Err("resident backend produced no logits".into());
+        }
+        Ok(state.steps)
+    }
+
+    /// Capture the streamed decoder's logit vector at each of the first
+    /// `max_tokens` greedy decode positions.
+    pub fn streamed_decode_logits(
+        model: &Path,
+        prompt: &str,
+        context_tokens: u32,
+        max_tokens: u32,
+        workspace_bytes: u64,
+    ) -> Result<Vec<Vec<f32>>, String> {
+        let config = StreamedConfig {
+            context_tokens,
+            max_tokens,
+            workspace_bytes,
+            ..Default::default()
+        };
+        let cancelled = AtomicBool::new(false);
+        let mut steps: Vec<Vec<f32>> = Vec::new();
+        let emit = |_: &[u8]| true;
+        let on_logits = |values: &[f32]| {
+            steps.push(values.to_vec());
+            true
+        };
+        generate_streamed(model, prompt, config, &cancelled, emit, on_logits)?;
+        if steps.is_empty() {
+            return Err("streamed backend produced no logits".into());
+        }
+        Ok(steps)
     }
 
     struct Capture {
@@ -295,7 +448,9 @@ mod capture {
 }
 
 #[cfg(feature = "native")]
-pub use capture::{resident_prompt_logits, streamed_prompt_logits};
+pub use capture::{
+    resident_decode_logits, resident_prompt_logits, streamed_decode_logits, streamed_prompt_logits,
+};
 
 #[cfg(test)]
 mod tests {
@@ -356,5 +511,32 @@ mod tests {
         // NaN/inf never win argmax.
         assert_eq!(d.streamed_top1, 2);
         assert_eq!(d.resident_top1, 1);
+    }
+
+    #[test]
+    fn multi_position_tracks_identical_prefix_length() {
+        // Positions 0 and 1 agree on argmax; position 2 diverges (streamed->0,
+        // resident->1), so the guaranteed-aligned prefix is 2 positions.
+        let streamed = vec![
+            vec![3.0f32, 1.0, 0.0],
+            vec![0.0f32, 5.0, 1.0],
+            vec![9.0f32, 0.0, 1.0],
+        ];
+        let resident = vec![
+            vec![2.5f32, 1.0, 0.0],
+            vec![0.0f32, 4.0, 1.0],
+            vec![0.0f32, 7.0, 1.0],
+        ];
+        let m = compute_multi(&streamed, &resident, 2).unwrap();
+        assert_eq!(m.positions.len(), 3);
+        assert_eq!(m.prefix_identical_through, 2);
+        assert!(m.positions[0].top1_agree);
+        assert!(m.positions[1].top1_agree);
+        assert!(!m.positions[2].top1_agree);
+    }
+
+    #[test]
+    fn multi_position_requires_nonempty_sequences() {
+        assert!(compute_multi(&[], &[vec![1.0]], 1).is_err());
     }
 }
