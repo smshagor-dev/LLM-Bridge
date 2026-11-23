@@ -1,0 +1,86 @@
+﻿{
+  "schema": "llmbridge.final_source_validation.v1",
+  "recorded_at": "2026-11-22",
+  "branch": "local/streamed-metadata-admission",
+  "base_commit": "7162e7fa7bfcb7c3e8b32c1188c8b07c8cf29184",
+  "origin_main_at_check": "7162e7fa7bfcb7c3e8b32c1188c8b07c8cf29184",
+  "verified_source_working_diff_sha256": "5c48d0d3e9ca9eba799a3217e20905c008c54f8d45f67e21a110bf7d38c163e9",
+  "diff_hash_definition": "SHA-256 of the saved build/verified-source-working.diff artifact, captured before adding this evidence JSON and the final-source status entry. The artifact is the Git diff captured at that checkpoint; untracked files, including .vscode/settings.json, are not part of it.",
+  "source_sha256": {
+    "Cargo.lock": "87a37e2a26e02b62365eb706280c148568a5c1a6260fa14103b89762a79f9e00",
+    "crates/llmbridge-core/Cargo.toml": "0b20bea9587dbcf5d85be3ff7ffd5139b37ccae6ead8270161f0d2c2e7b51dc7",
+    "crates/llmbridge-core/src/storage.rs": "b558830a583389272eb98e8e4efa046c608a394f57b817b8b48d2615a0548072",
+    "crates/llmbridge-core/src/gguf_index.rs": "f8ca3a0b78feae6fed291852899a41de6d8cef2a94f7a004f47b5fc238c87157",
+    "crates/llmbridge-core/src/storage_auth.rs": "1f36a236813307893cb7c66a74362f2d6c9e70773167ac28c1d5c588fb9c0b7bb",
+    "crates/llmbridge-core/src/streamed.rs": "746f09633b8d3f08fb7c66a74362f2d6c9e70773167ac28c1d5c588fb9c0b7bb",
+    "crates/llmbridge-core/src/streamed_plan.rs": "9cd59735b526112014730c8957f53bc9c05bd1a3f59194a9e552bd7554fd1981",
+    "crates/llmbridge-cli/src/main.rs": "12517e37f68023e8c18b9214de7536c7acfacdcef1d6e609a6b0e90959515511",
+    "native/src/bridge.cpp": "22a8d23e74c19c3b93e85d1b81addf01f32d3f9c5e20a42ccdb2292bf0ba5833",
+    "native/src/streamed.cpp": "3d5b766125f46692c997d6251e83d08498a5e7335bf6f419f84c0d4f51f9e9ea"
+  },
+  "environment": {
+    "linux": "Ubuntu 26.04 under WSL2, Microsoft kernel 6.18.33.1, Intel Core i5-12400F, 12 logical CPUs, approximately 6.7 GiB RAM; not a 2 GB host.",
+    "windows": "Windows-native x86_64-pc-windows-msvc, Visual Studio 2022 Build Tools/MSVC 19.44, Windows SDK 10.0.26100. Local CMake FetchContent override points at the pinned existing build/reference checkout."
+  },
+  "models_and_reference": {
+    "q8_model": {"sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6", "bytes": 26671328},
+    "derived_q4_0_model": {"sha256": "b5cd77bb0d1a785a82d7a8a2bcb4170dfe6e43e881b9cbb0d1c8184a6dd99839"},
+    "derived_q4_1_negative_fixture": {"sha256": "247d652c0e84138ca31bec8b4f8c8ebdde8e2ee9ea94f2bdd9888fa734e08460"},
+    "independent_reference_commit": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+    "avx2_cli_sha256": "8d88c5e0e5f4c5718ce9037a816a8d966c804ac88b001a437bcfafa54b24cd2f",
+    "sse2_cli_sha256": "095cd3fa9fd0c20ae5c425fda97863118c4cbe785c2e855832a66596385ae26f"
+  },
+  "checks": {
+    "wsl2_linux": {
+      "cargo_test_release_locked_workspace_all_targets_native": "PASS: 261 passed, 0 failed",
+      "cargo_test_release_locked_workspace_all_targets_non_native": "PASS: 208 passed, 0 failed",
+      "python_regression_suite": "PASS: 23 passed",
+      "cargo_fmt_all_check": "PASS",
+      "cargo_clippy_release_locked_workspace_all_targets_native_d_warnings": "PASS",
+      "cargo_clippy_release_locked_workspace_all_targets_non_native_d_warnings": "PASS",
+      "native_contract_examples_build": "PASS: streamed_deadline_contract and cpu_guard_contract"
+    },
+    "windows_native": {
+      "cargo_test_locked_workspace_all_targets_x86_64_pc_windows_msvc_single_thread": "PASS: 234 passed, 0 failed across 21 harnesses",
+      "covers": ["sequential native model-load failure cleanup", "Windows same-size/same-time path replacement identity"]
+    },
+    "real_model_and_contracts": {
+      "verified_adaptive_plan_deadline_expiry": "PASS: authentication exceeded original model end; no successful plan, stdout or logits trace",
+      "sealed_metadata_planning_and_source_mutation_refusal": "PASS",
+      "resident_q8_reference_output_parity": "PASS",
+      "streamed_q8_reference_output_and_logits_parity": "PASS: 3 prompts, 256000 logits each, RLIMIT_AS 25165824 bytes",
+      "authenticated_cached_q8_parity": "PASS: 1 MiB cache, unchanged RLIMIT_AS 25165824 bytes",
+      "streamed_q4_0_reference_output_and_logits_parity": "PASS",
+      "sse2_baseline_q8_parity": "PASS: RLIMIT_AS 25165824 bytes",
+      "qemu_core2duo_sse2_q8_parity": "PASS: emulated CPU compatibility only, no memory-cap claim",
+      "exact_workspace_and_admission_boundaries": "PASS",
+      "cancellation_and_descriptor_cleanup": "PASS: descriptors 4 before and after; no post-expiry piece callback",
+      "queued_deadline_and_reservation_cleanup": "PASS: final_pending=0, final_reserved=0",
+      "batch_resume_and_q4_1_refusal": "PASS"
+    }
+  },
+  "failed_or_unverified": {
+    "ntfs_direct_adaptive_chat": "FAILED: streamed generation deadline expired after plan output; 14 stdout bytes and a partial logits trace were produced. Separate from passing adaptive-planning-expiry test.",
+    "physical_2gb_hardware_feasibility": "NOT VERIFIED; WSL2 resource limits do not establish physical hardware feasibility.",
+    "physical_core2_performance": "NOT VERIFIED; QEMU CPUID emulation is not physical hardware.",
+    "windows_clippy_and_fmt": "NOT RUN; no result claimed."
+  },
+  "logs": [
+    "build/fmt-postfix.log",
+    "build/native-tests-postfix.log",
+    "build/native-clippy-postfix.log",
+    "build/native-examples-postfix.log",
+    "build/non-native-tests-postfix.log",
+    "build/non-native-clippy-postfix.log",
+    "build/python-tests-postfix.log",
+    "build/windows-tests-final-source.log",
+    "build/metadata-evidence/final-source-verified/cli-deadlines.json",
+    "build/metadata-evidence/final-source-verified/plan.json",
+    "build/metadata-evidence/final-source-verified/streamed_deadline_contract-final.log",
+    "build/metadata-evidence/final-source-verified/queued_deadline_contract-final.log",
+    "build/metadata-evidence/final-source-verified/verified_contract-final.log",
+    "build/metadata-evidence/final-source-verified/ntfs-adaptive.log"
+  ]
+}
+
+\n

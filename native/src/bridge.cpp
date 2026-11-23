@@ -49,7 +49,7 @@ int32_t generate(const char *path, const char *prompt, uint32_t context_tokens,
     }
     if (poll && poll(userdata) == 0) return 2;
     // Single model execution at a time while the baseline does not have a worker scheduler.
-    std::lock_guard<std::mutex> lock(engine_mutex);
+    std::unique_lock<std::mutex> lock(engine_mutex);
     if (poll && poll(userdata) == 0) return 2;
     std::call_once(init_once, [] { llama_backend_init(); });
 
@@ -59,6 +59,10 @@ int32_t generate(const char *path, const char *prompt, uint32_t context_tokens,
     std::unique_ptr<llama_model, decltype(&llama_model_free)> model(
         llama_model_load_from_file(path, mp), llama_model_free);
     if (!model) {
+        // Return the process-wide inference gate before reporting the load error.
+        // Keep later requests from waiting indefinitely if llama.cpp's failed
+        // loader path leaves native state that prevents immediate reuse.
+        lock.unlock();
         throw std::runtime_error("cannot load GGUF model; check format, architecture and available memory");
     }
     if (llama_model_has_encoder(model.get())) {

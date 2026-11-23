@@ -14,8 +14,28 @@ impl SealedMetadata {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    /// Copy into the native parser's scratch, which may be uninitialized.
+    ///
+    /// # Safety
+    /// `output` must be nonnull and exclusively writable for `length` bytes.
+    #[cfg(feature = "native")]
+    pub(crate) unsafe fn read_into_native(
+        &self,
+        offset: u64,
+        output: *mut u8,
+        length: usize,
+    ) -> io::Result<()> {
+        // Initialize the native storage before creating a Rust byte slice.
+        let output = unsafe {
+            output.write_bytes(0, length);
+            std::slice::from_raw_parts_mut(output, length)
+        };
+        self.read_into(offset, output)
+    }
+
     /// Read only the authenticated sealed metadata prefix, never sparse weight holes.
-    #[cfg(any(feature = "native", test))]
+    #[cfg(any(feature = "native", all(test, target_os = "linux")))]
     pub(crate) fn read_into(&self, offset: u64, output: &mut [u8]) -> io::Result<()> {
         if offset
             .checked_add(output.len() as u64)

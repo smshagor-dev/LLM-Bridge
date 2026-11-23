@@ -96,6 +96,37 @@ impl CachedLocalReader {
         self.source.disk_bytes_read()
     }
 
+    /// Re-read and verify a staged lookahead range at consumption time.
+    /// Authenticated sources re-hash the same source block through the normal
+    /// reader path; unauthenticated sources retain the normal identity checks.
+    /// The prefetched bytes are never trusted solely because the worker read
+    /// them earlier. A mismatch refuses publication and the staging owner can
+    /// then be dropped to release its reservation.
+    pub fn verify_staged_range_cancellable(
+        &mut self,
+        offset: u64,
+        staged: &[u8],
+        mut cancelled: impl FnMut() -> bool,
+    ) -> io::Result<()> {
+        if staged.is_empty() || staged.len() > self.source.allocated_chunk_bytes() {
+            return Err(invalid("staged range exceeds source/chunk bounds"));
+        }
+        let current = self.read_range_cancellable(offset, staged.len(), &mut cancelled)?;
+        if cancelled() {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "staged range verification cancelled",
+            ));
+        }
+        if current != staged {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "source range changed after lookahead; refusing staged bytes",
+            ));
+        }
+        Ok(())
+    }
+
     /// Drop optional cache-owned allocations without allocating replacements.
     /// Source buffer/authentication stay live. Allocator page retention means
     /// this is not an assertion that process RSS immediately decreases.

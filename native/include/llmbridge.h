@@ -36,6 +36,10 @@ int32_t llmbridge_generate_cpu(const char *model_path,
  * Native GGUF metadata parser does not own userdata or output after callback returns. */
 typedef size_t (*llmbridge_range_callback)(void *userdata, void *output,
                                             uint64_t file_offset, size_t length);
+/* v3 opt-in lookahead hint: native supplies the exact next tensor row batch
+ * and enclosing tensor range. Return 1 when admitted, 0 for synchronous fallback. */
+typedef int32_t (*llmbridge_lookahead_schedule_callback)(void *userdata,
+    uint64_t file_offset, size_t length, uint64_t tensor_offset, uint64_t tensor_bytes);
 
 /* Experimental full dense Llama decoder. All weights use bounded range reads;
  * tokenizer-only loading uses path. Workspace budget excludes tokenizer metadata,
@@ -54,6 +58,13 @@ int32_t llmbridge_generate_streamed_cpu_v2(const char *path, const char *prompt,
     uint64_t workspace_budget, uint64_t tokenizer_prefix_bytes, llmbridge_range_callback reader,
     llmbridge_token_callback emit, llmbridge_logits_callback logits,
     llmbridge_cancel_poll poll, void *userdata, char *error, size_t capacity);
+/* Additive opt-in ABI. Existing v1/v2 callers retain their synchronous behavior. */
+int32_t llmbridge_generate_streamed_cpu_v3(const char *path, const char *prompt,
+    uint32_t context, uint32_t max_tokens, uint64_t file_bytes, size_t max_chunk,
+    uint64_t workspace_budget, uint64_t tokenizer_prefix_bytes, llmbridge_range_callback reader,
+    llmbridge_lookahead_schedule_callback schedule, llmbridge_token_callback emit,
+    llmbridge_logits_callback logits, llmbridge_cancel_poll poll, void *userdata,
+    char *error, size_t capacity);
 
 /* Reuses decoder validation without allocating activations, KV or weights.
  * Workspace is the native admission requirement, not process RSS. */

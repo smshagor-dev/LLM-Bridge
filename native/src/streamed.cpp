@@ -51,6 +51,7 @@ struct Decoder {
     uint64_t file_bytes;
     size_t chunk;
     llmbridge_range_callback reader;
+    llmbridge_lookahead_schedule_callback schedule;
     llmbridge_cancel_poll poll;
     void *userdata;
     size_t dim, hidden, heads, kvheads, head_dim, kvdim, layers, context;
@@ -84,8 +85,9 @@ struct Decoder {
     }
     Decoder(const gguf_context *metadata, uint64_t size, size_t max_chunk,
             llmbridge_range_callback source, llmbridge_cancel_poll cancel, void *state,
-            size_t ctx, size_t vocab, uint64_t budget, bool allocate_state = true)
-        : g(metadata), file_bytes(size), chunk(max_chunk), reader(source), poll(cancel), userdata(state), context(ctx) {
+            size_t ctx, size_t vocab, uint64_t budget, bool allocate_state = true,
+            llmbridge_lookahead_schedule_callback lookahead = nullptr)
+        : g(metadata), file_bytes(size), chunk(max_chunk), reader(source), schedule(lookahead), poll(cancel), userdata(state), context(ctx) {
         auto architecture = gguf_find_key(g, "general.architecture");
         require(architecture >= 0 && gguf_get_kv_type(g, architecture) == GGUF_TYPE_STRING &&
                 std::string(gguf_get_val_str(g, architecture)) == "llama", "streamed backend supports llama only");
@@ -94,6 +96,7 @@ struct Decoder {
             "llama.feed_forward_length", "llama.rope.dimension_count", "llama.rope.freq_base",
             "llama.attention.head_count", "llama.attention.head_count_kv", "llama.attention.layer_norm_rms_epsilon"};
         for (int64_t i = 0; i < gguf_get_n_kv(g); ++i) {
+            if (i % 256 == 0) alive();
             std::string key = gguf_get_key(g, i);
             require(key.rfind("llama.", 0) != 0 || known.count(key), "unsupported llama metadata option in streamed backend");
         }
@@ -124,6 +127,7 @@ struct Decoder {
         output = out_id < 0 ? embedding : tensor("output.weight", dim, vocab);
         blocks.reserve(layers);
         for (size_t l = 0; l < layers; ++l) {
+            alive();
             std::string p = "blk." + std::to_string(l) + ".";
             blocks.push_back({tensor(p+"attn_norm.weight", dim, 1), tensor(p+"attn_q.weight", dim, dim),
                 tensor(p+"attn_k.weight", dim, kvdim), tensor(p+"attn_v.weight", dim, kvdim),
@@ -177,6 +181,15 @@ struct Decoder {
             alive();
             const size_t rows = std::min(rows_per_read, t.rows - first);
             const size_t bytes = rows * t.row_bytes; // <= chunk, validated tensor geometry.
+            // Tell Rust the exact next row batch from this tensor descriptor.
+            // Admission refusal is an explicit synchronous fallback.
+            if (schedule && first + rows < t.rows) {
+                const size_t next_rows = std::min(rows_per_read, t.rows - first - rows);
+                const uint64_t next_offset = t.offset + (first + rows) * t.row_bytes;
+                const uint64_t tensor_bytes = t.row_bytes * t.rows;
+                (void)schedule(userdata, next_offset, next_rows * t.row_bytes,
+                               t.offset, tensor_bytes);
+            }
             require(reader(userdata, packed.data(), t.offset + first * t.row_bytes, bytes) == bytes,
                     "streamed matrix row batch read failed");
             for (size_t local = 0; local < rows; ++local) {
@@ -261,10 +274,11 @@ struct Decoder {
 };
 } // namespace
 
-extern "C" int32_t llmbridge_generate_streamed_cpu_v2(
+static int32_t generate_streamed_cpu(
     const char *path, const char *prompt, uint32_t context, uint32_t max_tokens,
     uint64_t file_bytes, size_t max_chunk, uint64_t workspace_budget, uint64_t tokenizer_prefix,
-    llmbridge_range_callback reader, llmbridge_token_callback emit,
+    llmbridge_range_callback reader, llmbridge_lookahead_schedule_callback schedule,
+    llmbridge_token_callback emit,
     llmbridge_logits_callback emit_logits, llmbridge_cancel_poll poll, void *userdata,
     char *error, size_t capacity) {
     if (error && capacity) error[0] = '\0';
@@ -287,7 +301,7 @@ extern "C" int32_t llmbridge_generate_streamed_cpu_v2(
                 "missing/invalid tokenizer token inventory");
         const auto vocabulary_size = gguf_get_arr_n(metadata.get(), tokenizer);
         Decoder decoder(metadata.get(), file_bytes, max_chunk, reader, poll, userdata, context,
-                        vocabulary_size, workspace_budget, false);
+                        vocabulary_size, workspace_budget, false, schedule);
         // Resolve owned tensor descriptors first, then retire the duplicate GGUF token
         // inventory before the upstream vocabulary and decoder workspace are allocated.
         metadata.reset();
@@ -324,6 +338,32 @@ extern "C" int32_t llmbridge_generate_streamed_cpu_v2(
     } catch (...) { if (error && capacity) std::snprintf(error, capacity, "unknown streamed native exception"); return -1; }
 }
 
+extern "C" int32_t llmbridge_generate_streamed_cpu_v2(
+    const char *path, const char *prompt, uint32_t context, uint32_t max_tokens,
+    uint64_t file_bytes, size_t max_chunk, uint64_t workspace_budget, uint64_t tokenizer_prefix,
+    llmbridge_range_callback reader, llmbridge_token_callback emit,
+    llmbridge_logits_callback emit_logits, llmbridge_cancel_poll poll, void *userdata,
+    char *error, size_t capacity) {
+    return generate_streamed_cpu(path, prompt, context, max_tokens, file_bytes, max_chunk,
+        workspace_budget, tokenizer_prefix, reader, nullptr, emit, emit_logits, poll,
+        userdata, error, capacity);
+}
+
+extern "C" int32_t llmbridge_generate_streamed_cpu_v3(
+    const char *path, const char *prompt, uint32_t context, uint32_t max_tokens,
+    uint64_t file_bytes, size_t max_chunk, uint64_t workspace_budget, uint64_t tokenizer_prefix,
+    llmbridge_range_callback reader, llmbridge_lookahead_schedule_callback schedule,
+    llmbridge_token_callback emit, llmbridge_logits_callback emit_logits,
+    llmbridge_cancel_poll poll, void *userdata, char *error, size_t capacity) {
+    if (!schedule) {
+        if (error && capacity) std::snprintf(error, capacity, "%s", "lookahead callback is required for ABI v3");
+        return -1;
+    }
+    return generate_streamed_cpu(path, prompt, context, max_tokens, file_bytes, max_chunk,
+        workspace_budget, tokenizer_prefix, reader, schedule, emit, emit_logits, poll,
+        userdata, error, capacity);
+}
+
 // Preserve additive ABI-v1 callers; v2 optionally binds a sealed vocabulary prefix.
 extern "C" int32_t llmbridge_generate_streamed_cpu(
     const char *path, const char *prompt, uint32_t context, uint32_t max_tokens,
@@ -349,6 +389,7 @@ extern "C" int32_t llmbridge_inspect_streamed_plan_v1(
         std::unique_ptr<gguf_context, decltype(&gguf_free)> metadata(
             gguf_init_from_callback(reader, userdata, chunk, file_bytes, gp), gguf_free);
         require(static_cast<bool>(metadata), "streamed plan GGUF parse failed");
+        if (!poll(userdata)) return 2;
         auto g = metadata.get();
         auto tokenizer = gguf_find_key(g, "tokenizer.ggml.tokens");
         require(tokenizer >= 0 && gguf_get_kv_type(g, tokenizer) == GGUF_TYPE_ARRAY &&
@@ -358,6 +399,7 @@ extern "C" int32_t llmbridge_inspect_streamed_plan_v1(
         if (!poll(userdata)) return 2;
         uint64_t payload = 0;
         for (int64_t i = 0; i < gguf_get_n_tensors(g); ++i) {
+            if (!poll(userdata)) return 2;
             auto size = gguf_get_tensor_size(g, i);
             require(size <= UINT64_MAX - payload, "planned tensor payload overflow"); payload += size;
         }
@@ -367,6 +409,7 @@ extern "C" int32_t llmbridge_inspect_streamed_plan_v1(
             file_bytes, payload, gguf_get_data_offset(g), number(g, "llama.context_length"),
             d.dim, d.heads, d.kvheads, d.layers, d.hidden, vocab, chunk};
         return 0;
+    } catch (const Cancelled &) { return 2;
     } catch (const std::exception &e) { if (error && capacity) std::snprintf(error, capacity, "%s", e.what()); return -1;
     } catch (...) { if (error && capacity) std::snprintf(error, capacity, "unknown plan probe exception"); return -1; }
 }

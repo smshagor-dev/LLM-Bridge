@@ -1,0 +1,108 @@
+﻿{
+    "schema":  "llmbridge.local-lookahead-contract.v1",
+    "captured_utc":  "2026-11-22",
+    "branch":  "local/streamed-metadata-admission",
+    "base_commit":  "7162e7fa7bfcb7c3e8b32c1188c8b07c8cf29184",
+    "scope":  "Lookahead primitive only; not integrated into streamed inference.",
+    "working_diff":  {
+                         "path":  "build/local-lookahead-working.diff",
+                         "sha256":  "3bb5c223aa1781413e6850d710e3721fb24374a92d0933b94459a7ccf1296f0c",
+                         "note":  "Tracked diff snapshot; untracked files and pre-existing user work are not included."
+                     },
+    "source_sha256":  {
+                          "crates/llmbridge-core/src/local_lookahead.rs":  "b00b1d42e4c9b9774f28238e36dafb45932d79cce0e5620a391ba562225d459d",
+                          "crates/llmbridge-core/src/lib.rs":  "931f1497ba295944b78968d8217c785a05c736997332890d1bebacafecbbbdca",
+                          "crates/llmbridge-core/src/storage_auth.rs":  "e7adc2c5ba5d234e9313e5e49bd1aabe09b57bf2cde96d0985da68a94268abe9",
+                          "docs/STREAMED_CACHE.md":  "03431995433dcfe84dc12443b39972c09a3037fc62b5a7745354c340bdf4e78f",
+                          "IMPLEMENTATION_STATUS.md":  "2ebe308673cbc8a0f68e584dece13d16155be41691d840562ebb1264130ec9cd"
+                      },
+    "checks":  [
+                   {
+                       "environment":  "Windows native Rust, non-native feature",
+                       "command":  "cargo fmt --all -- --check",
+                       "result":  "PASS"
+                   },
+                   {
+                       "environment":  "Windows native Rust, non-native feature",
+                       "command":  "cargo clippy -p llmbridge-core --all-targets -- -D warnings",
+                       "result":  "PASS"
+                   },
+                   {
+                       "environment":  "Windows native Rust, non-native feature",
+                       "command":  "cargo test -p llmbridge-core --lib local_lookahead -- --nocapture",
+                       "result":  "PASS: 4 tests"
+                   },
+                   {
+                       "environment":  "WSL2 Linux",
+                       "command":  "cargo test -p llmbridge-core --lib local_lookahead -- --nocapture",
+                       "result":  "PASS: 5 tests, including Linux authenticated mutation case"
+                   },
+                   {
+                       "environment":  "WSL2 Linux",
+                       "command":  "cargo clippy -p llmbridge-core --all-targets -- -D warnings",
+                       "result":  "PASS"
+                   },
+                   {
+                       "environment":  "WSL2 Linux",
+                       "command":  "cargo test -p llmbridge-core --all-targets",
+                       "result":  "PASS: 202 unit + 6 runtime admission + 2 tensor boundary tests"
+                   },
+                   {
+                       "environment":  "WSL2 Linux",
+                       "command":  "cargo fmt --all -- --check",
+                       "result":  "PASS"
+                   },
+                   {
+                       "environment":  "Windows native feature",
+                       "command":  "cargo clippy/test with --features native",
+                       "result":  "NOT COMPLETED: cl.exe unavailable in shell; CMake FetchContent configure did not complete"
+                   }
+               ],
+    "required_not_run":  [
+                             "Complete output and logits comparison against synchronous inference and pinned independent reference",
+                             "Authenticated Q8 under unchanged 24 MiB RLIMIT_AS with lookahead",
+                             "Generation callback integration and cleanup/reservation checks",
+                             "Slow or injected failed reads; deterministic cancellation during an active OS read",
+                             "NTFS post-expiry delivery silence and resource cleanup on this source",
+                             "Performance comparison; no speed claim",
+                             "Physical 2 GB hardware feasibility"
+                         ],
+    "ntfs_generation_deadline_historical":  {
+                                                "observed":  "Historical final-source attempt exited with deadline expired after 14 stdout bytes and a partial logits trace",
+                                                "artifact":  "build/metadata-evidence/final-source-verified/ntfs-adaptive.stdout and ntfs-adaptive.f32",
+                                                "classification":  "Partial output before expiry is permitted. No delivery after the point expiry was observed is not established by the saved artifact; generation-level reservation cleanup is not established. Not a pass and not rerun on this later source."
+                                            },
+    "limitations":  [
+                        "WSL2 test results are virtualized and do not establish physical 2 GB feasibility.",
+                        "Core tests exercised the new low-level reader primitive; no inference path consumes it.",
+                        "Dropping the session joins the worker, but a blocked OS read may delay cancellation completion."
+                    ],
+    "integration_followup":  {
+                                 "source_sha256":  {
+                                                       "crates/llmbridge-core/src/local_lookahead.rs":  "F2CE2CC2B09FEF0F6C00E51A9C640DCEC6BD03AE4388FFAAA44B9867072AD0CF",
+                                                       "crates/llmbridge-core/src/read_cache.rs":  "9A5BABEEB9DA02D8EA32A1AB2D6B6EEBFC7A820D6B8EF897D0D42753D7AA0EFD",
+                                                       "native/include/llmbridge.h":  "83F9D092ACD16B81A686C2DBCC8FAB7B511A95B8B6A2305132B0BA52272AA60A",
+                                                       "native/src/streamed.cpp":  "C9FB1C7A7048FD652204996E5F76DEEAC8F0349AA42439A01442EF55926F011F"
+                                                   },
+                                 "windows_host":  [
+                                                      "cargo fmt --all -- --check: PASS",
+                                                      "cargo clippy -p llmbridge-core --all-targets -- -D warnings: PASS",
+                                                      "cargo test -p llmbridge-core --lib local_lookahead -- --nocapture: PASS, 4 tests"
+                                                  ],
+                                 "wsl2_linux":  [
+                                                    "cargo fmt --all -- --check: PASS",
+                                                    "cargo test -p llmbridge-core --lib local_lookahead -- --nocapture: PASS, 6 tests including authenticated post-prefetch mutation refusal",
+                                                    "cargo clippy -p llmbridge-core --all-targets -- -D warnings: PASS",
+                                                    "cargo test -p llmbridge-core --features native --no-run: CANCELLED while CMake FetchContent git activity continued; no native compilation result"
+                                                ],
+                                 "native_abi":  "Additive v3 exact tensor-row-batch scheduling callback groundwork; Rust does not yet call v3, so not integrated",
+                                 "not_verified":  [
+                                                      "Lookahead-enabled inference output/logit parity vs synchronous and pinned reference",
+                                                      "Authenticated cached Q8 under unchanged 24 MiB RLIMIT_AS",
+                                                      "Injected slow/failed reads and queue saturation",
+                                                      "Lookahead generation cancellation/deadline/worker cleanup and delivery-after-expiry instrumentation",
+                                                      "Native C++ build, Windows-native native feature build, physical 2 GB feasibility",
+                                                      "Any speed improvement"
+                                                  ]
+                             }
+}

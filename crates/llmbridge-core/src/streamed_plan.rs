@@ -187,11 +187,16 @@ impl StreamedPlan {
 #[cfg(feature = "native")]
 mod native {
     use super::*;
-    use crate::{gguf_index::GgufTensorIndex, storage::BoundedLocalReader};
+    use crate::{
+        gguf_index::GgufTensorIndex,
+        storage::{BoundedLocalReader, SealedMetadata},
+        streamed::{deadline_expired, interrupted},
+    };
     use std::{
         ffi::{c_char, c_void, CStr},
         path::Path,
         sync::atomic::{AtomicBool, Ordering},
+        time::Instant,
     };
     extern "C" {
         fn llmbridge_abi_version() -> u32;
@@ -208,7 +213,9 @@ mod native {
     }
     struct State<'a> {
         reader: BoundedLocalReader,
+        sealed: Option<&'a SealedMetadata>,
         cancelled: &'a AtomicBool,
+        deadline: Option<Instant>,
         limit: u64,
         failure: Option<String>,
     }
@@ -218,7 +225,7 @@ mod native {
         }
         // SAFETY: the synchronous native call borrows a live State only.
         let s = unsafe { &*(state.cast::<State<'_>>()) };
-        i32::from(!s.cancelled.load(Ordering::Acquire))
+        i32::from(!interrupted(s.cancelled, s.deadline))
     }
     extern "C" fn read(state: *mut c_void, out: *mut c_void, offset: u64, count: usize) -> usize {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -226,6 +233,14 @@ mod native {
                 return 0;
             }
             let s = unsafe { &mut *(state.cast::<State<'_>>()) };
+            let stopped = || interrupted(s.cancelled, s.deadline);
+            if stopped() {
+                return 0;
+            }
+            if count > s.reader.allocated_chunk_bytes() {
+                s.failure = Some("plan reader exceeds configured chunk".into());
+                return 0;
+            }
             match offset.checked_add(count as u64) {
                 Some(end) if end <= s.limit => {}
                 _ => {
@@ -233,12 +248,20 @@ mod native {
                     return 0;
                 }
             }
-            match s
-                .reader
-                .read_range_cancellable(offset, count, || s.cancelled.load(Ordering::Acquire))
-            {
+            if let Some(metadata) = s.sealed {
+                // SAFETY: the parser supplies a writable bounded destination.
+                return match unsafe { metadata.read_into_native(offset, out.cast(), count) } {
+                    Ok(()) if !stopped() => count,
+                    Ok(()) => 0,
+                    Err(error) => {
+                        s.failure = Some(error.to_string());
+                        0
+                    }
+                };
+            }
+            match s.reader.read_range_cancellable(offset, count, stopped) {
                 Ok(bytes) => {
-                    if s.cancelled.load(Ordering::Acquire) {
+                    if stopped() {
                         return 0;
                     }
                     // SAFETY: native supplies count writable non-overlapping bytes.
@@ -260,7 +283,7 @@ mod native {
         chunk: usize,
         cancelled: &AtomicBool,
     ) -> Result<StreamedShape, String> {
-        inspect(model, chunk, cancelled, None)
+        inspect_streamed_shape_controlled(model, chunk, cancelled, None, None)
     }
     pub fn inspect_streamed_shape_verified(
         model: &Path,
@@ -269,50 +292,76 @@ mod native {
         expected: &str,
         budget: usize,
     ) -> Result<StreamedShape, String> {
-        inspect(model, chunk, cancelled, Some((expected, budget)))
+        inspect_streamed_shape_controlled(model, chunk, cancelled, None, Some((expected, budget)))
     }
-    fn inspect(
+
+    fn check_active(cancelled: &AtomicBool, deadline: Option<Instant>) -> Result<(), String> {
+        if cancelled.load(Ordering::Acquire) {
+            Err("streamed plan cancelled".into())
+        } else if deadline_expired(deadline) {
+            Err("streamed generation deadline expired".into())
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Inspect a streamed model under an optional absolute deadline. If given,
+    /// `integrity` contains an independently trusted SHA-256 and its byte budget.
+    /// Interruption is cooperative and cannot preempt a blocking read.
+    pub fn inspect_streamed_shape_controlled(
         model: &Path,
         chunk: usize,
         cancelled: &AtomicBool,
+        deadline: Option<Instant>,
         integrity: Option<(&str, usize)>,
     ) -> Result<StreamedShape, String> {
         if cancelled.load(Ordering::Acquire) {
             return Err("streamed plan cancelled before inspection".into());
         }
+        check_active(cancelled, deadline)?;
         if !(34..=1024 * 1024).contains(&chunk) {
             return Err("invalid plan chunk".into());
         }
         crate::native_cpu::ensure_compatible()?;
-        let index = GgufTensorIndex::inspect(model).map_err(|e| e.to_string())?;
-        let mut reader =
-            BoundedLocalReader::open(model, chunk, chunk * 2).map_err(|e| e.to_string())?;
-        if reader.identity() != &index.source_identity {
+        let stopped = || interrupted(cancelled, deadline);
+        let index = GgufTensorIndex::inspect_cancellable(model, stopped);
+        check_active(cancelled, deadline)?;
+        let GgufTensorIndex {
+            file_bytes,
+            data_offset,
+            source_identity,
+            ..
+        } = index.map_err(|e| e.to_string())?;
+        let reader = BoundedLocalReader::open(model, chunk, chunk * 2);
+        check_active(cancelled, deadline)?;
+        let mut reader = reader.map_err(|e| e.to_string())?;
+        if reader.identity() != &source_identity {
             return Err("model changed before plan inspection".into());
         }
         // Verified auto-planning authenticates before exposing metadata to native parsing.
-        let _sealed = integrity
+        let sealed = integrity
             .map(|(expected, budget)| {
-                reader.authenticate_model(expected, index.data_offset, budget, || {
-                    cancelled.load(Ordering::Acquire)
-                })
+                reader.authenticate_model(expected, data_offset, budget, stopped)
             })
-            .transpose()
-            .map_err(|e| e.to_string())?;
+            .transpose();
+        check_active(cancelled, deadline)?;
+        let sealed = sealed.map_err(|e| e.to_string())?;
         if unsafe { llmbridge_abi_version() } != 1 {
             return Err("native plan ABI mismatch".into());
         }
         let mut s = State {
             reader,
+            sealed: sealed.as_ref(),
             cancelled,
-            limit: index.data_offset,
+            deadline,
+            limit: data_offset,
             failure: None,
         };
         let mut out = StreamedShape::default();
         let mut error = [0 as c_char; 1024];
         let status = unsafe {
             llmbridge_inspect_streamed_plan_v1(
-                index.file_bytes,
+                file_bytes,
                 chunk,
                 read,
                 poll,
@@ -322,7 +371,8 @@ mod native {
                 error.len(),
             )
         };
-        if cancelled.load(Ordering::Acquire) || status == 2 {
+        check_active(cancelled, deadline)?;
+        if status == 2 {
             return Err("streamed plan cancelled".into());
         }
         if status != 0 {
@@ -332,8 +382,10 @@ mod native {
                 s.failure.as_deref().unwrap_or("no read error")
             ));
         }
-        s.reader.validate_source().map_err(|e| e.to_string())?;
-        if out.file_bytes != index.file_bytes || out.metadata_prefix_bytes != index.data_offset {
+        let validation = s.reader.validate_source();
+        check_active(cancelled, deadline)?;
+        validation.map_err(|e| e.to_string())?;
+        if out.file_bytes != file_bytes || out.metadata_prefix_bytes != data_offset {
             return Err("native/Rust plan disagreement".into());
         }
         Ok(out)
@@ -355,7 +407,9 @@ mod native {
             let reader = BoundedLocalReader::open(&path, 8, 16).unwrap();
             let mut state = State {
                 reader,
+                sealed: None,
                 cancelled: &flag,
+                deadline: None,
                 limit: 4,
                 failure: None,
             };
@@ -368,6 +422,13 @@ mod native {
             assert_eq!(&destination[..2], b"bc");
             flag.store(true, Ordering::Release);
             destination.fill(0x55);
+            assert_eq!(read(pointer, destination.as_mut_ptr().cast(), 0, 2), 0);
+            assert_eq!(state.reader.disk_bytes_read(), 2);
+            assert_eq!(destination, [0x55; 8]);
+            flag.store(false, Ordering::Release);
+            state.deadline = Some(Instant::now());
+            let pointer = (&mut state as *mut State<'_>).cast();
+            assert_eq!(poll(pointer), 0);
             assert_eq!(read(pointer, destination.as_mut_ptr().cast(), 0, 2), 0);
             assert_eq!(state.reader.disk_bytes_read(), 2);
             assert_eq!(destination, [0x55; 8]);
@@ -385,10 +446,67 @@ mod native {
             .unwrap_err()
             .contains("cancelled before inspection"));
         }
+        #[test]
+        fn expired_plan_never_opens_the_model_or_sets_cancel_flag() {
+            let flag = AtomicBool::new(false);
+            let result = inspect_streamed_shape_controlled(
+                Path::new("/absent.gguf"),
+                65536,
+                &flag,
+                Some(Instant::now()),
+                Some((&"0".repeat(64), 8 * 1024 * 1024)),
+            );
+            assert_eq!(result.unwrap_err(), "streamed generation deadline expired");
+            assert!(!flag.load(Ordering::Acquire));
+        }
+
+        #[cfg(target_os = "linux")]
+        #[test]
+        fn verified_probe_reads_only_the_sealed_prefix_after_authentication() {
+            use sha2::{Digest, Sha256};
+            let path = std::env::temp_dir().join(format!(
+                "llmbridge-verified-plan-callback-{}",
+                std::process::id()
+            ));
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .unwrap();
+            let model = b"abcdefghijkl";
+            std::io::Write::write_all(&mut file, model).unwrap();
+            let mut reader = BoundedLocalReader::open(&path, 8, 16).unwrap();
+            let sealed = reader
+                .authenticate_model(&format!("{:x}", Sha256::digest(model)), 10, 8192, || false)
+                .unwrap();
+            let bytes_before = reader.disk_bytes_read();
+            let flag = AtomicBool::new(false);
+            let mut state = State {
+                reader,
+                sealed: Some(&sealed),
+                cancelled: &flag,
+                deadline: None,
+                limit: sealed.prefix_bytes,
+                failure: None,
+            };
+            let mut destination = [0; 10];
+            let pointer = (&mut state as *mut State<'_>).cast();
+            assert_eq!(read(pointer, destination.as_mut_ptr().cast(), 0, 9), 0);
+            assert_eq!(read(pointer, destination.as_mut_ptr().cast(), 9, 2), 0);
+            assert_eq!(destination, [0; 10]);
+            let mut scratch = std::mem::MaybeUninit::<[u8; 8]>::uninit();
+            assert_eq!(read(pointer, scratch.as_mut_ptr().cast(), 0, 8), 8);
+            // The callback returned all eight bytes in the native destination.
+            assert_eq!(&unsafe { scratch.assume_init() }, b"abcdefgh");
+            assert_eq!(state.reader.disk_bytes_read(), bytes_before);
+            std::fs::remove_file(path).unwrap();
+        }
     }
 }
 #[cfg(feature = "native")]
-pub use native::{inspect_streamed_shape, inspect_streamed_shape_verified};
+pub use native::{
+    inspect_streamed_shape, inspect_streamed_shape_controlled, inspect_streamed_shape_verified,
+};
 #[cfg(test)]
 mod tests {
     use super::*;

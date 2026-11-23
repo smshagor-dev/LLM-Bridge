@@ -20,6 +20,7 @@ fn main() {
         return;
     }
     println!("cargo:rerun-if-env-changed=LLMBRIDGE_CPU_PROFILE");
+    println!("cargo:rerun-if-env-changed=LLMBRIDGE_LLAMA_CPP_SOURCE");
     let requested = env::var("LLMBRIDGE_CPU_PROFILE").unwrap_or_else(|_| "avx2".into());
     assert!(
         matches!(requested.as_str(), "avx2" | "baseline"),
@@ -44,7 +45,13 @@ fn main() {
         "cargo:rerun-if-changed={}",
         native.join("CMakeLists.txt").display()
     );
-    let out = cmake::Config::new(native)
+    let mut config = cmake::Config::new(native);
+    if let Some(source) = env::var_os("LLMBRIDGE_LLAMA_CPP_SOURCE") {
+        // CMake's supported FetchContent source override. The project still
+        // pins the exact revision; callers are responsible for pointing at it.
+        config.define("FETCHCONTENT_SOURCE_DIR_LLAMA_CPP", PathBuf::from(source));
+    }
+    let out = config
         .profile("Release")
         .define("GGML_OPENMP", "OFF")
         .define("GGML_BLAS", "OFF")

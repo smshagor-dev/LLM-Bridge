@@ -33,6 +33,22 @@ The comparison gate requires identical model/binary/cap configuration, successfu
 
 Regression coverage includes adjacent reads, cross-block/EOF ranges, LRU eviction, disabled mode, budget rejection, changed sources, cancellation on hits/refills, late source changes and invalidated failed refills. Real-model cancellation/workspace/context contracts run with cache both disabled and enabled. Optional Linux authenticated sessions now feed verified blocks into this cache; see [VERIFIED_MODEL_SESSIONS.md](VERIFIED_MODEL_SESSIONS.md). Portable authentication, asynchronous prefetch, persistent caches and adaptive cache scheduling remain future work.
 
+## Opt-in streamed inference lookahead
+
+`streamed::generate_streamed_with_lookahead` opts one session into native ABI v3. Existing generation entry points still call ABI v2 and remain synchronous. Native matvec code derives the next exact row batch from the current tensor descriptor and reports `(offset, length, tensor range)`; Rust never predicts a future range by incrementing file offsets. Insufficient budget or a full bounded queue falls back to the synchronous reader.
+
+Admission covers staging/result payload reservations, a separately opened bounded reader buffer, bounded request/result channel slots, descriptors, and the caller's fixed worker allowance. The worker stack is explicitly requested and must be at least 1 MiB. `minimum_fixed_overhead_bytes` reports the modeled minimum. Allocator metadata, OS thread bookkeeping, filesystem/kernel buffers and page cache are not precisely bounded by this reservation.
+
+The worker's source identity is checked at open and by ordinary bounded reads. Prefetched data is still untrusted at consumption: the main session rereads the exact range through its own `CachedLocalReader`, which performs the normal authenticated-block rehash and identity checks, compares bytes, checks deadline/cancellation, and only then copies into native memory. Revalidation uses that reader's bounded buffer rather than another response-sized allocation. It can add source I/O; no speed improvement is claimed.
+
+Every exit stops scheduling, joins the worker and drops outstanding buffers/reservations. Cancellation and deadlines are cooperative; a blocking OS read may delay join. Deadline callbacks are checked immediately before consumer delivery. Output already delivered before expiry may remain partial. Evidence records worker termination, source bytes, outstanding reads and final reservations.
+
 ## Current execution and authentication policy
 
 Matrix rows are now grouped within the existing bounded native chunk. Authenticated sessions bypass this LRU and rehash every requested block per public range call. The configured cache reservation can still be released, but it does not provide authenticated cache hits. The numerical/read-call results above are historical measurements of the stated earlier source, not current authenticated-performance claims. See [bounded row batching](BOUNDED_ROW_BATCHING.md).
+
+## Exact-range local lookahead
+
+`llmbridge_core::local_lookahead::LocalLookahead` is integrated into streamed inference only through the explicit `generate_streamed_with_lookahead` API. It uses one local-reader worker, bounded channels, pre-allocation byte reservations and a caller-configured outstanding-read limit. Native ABI v3 reports the next exact row batch within the current tensor; existing ABI v1/v2 and default Rust calls stay synchronous.
+
+The worker's staged bytes remain untrusted. At consumption the normal session reader rereads the exact range into its existing bounded buffer, performs source identity and authenticated-block checks, compares the prefetched bytes and only then delivers. This adds I/O: on the measured Windows NTFS Q8 case lookahead regressed median wall time from 7.56 s to 16.61 s. It remains opt-in; no acceleration is claimed. The same benchmark records first-token latency, decode rate, read counts, cache conditions and admitted worker memory in `benchmarks/evidence/local_lookahead_windows_ntfs_2026-11-22.json`.

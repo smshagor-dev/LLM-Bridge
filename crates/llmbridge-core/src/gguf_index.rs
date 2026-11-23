@@ -5,7 +5,7 @@ use crate::storage::{BoundedLocalReader, SourceIdentity};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs::File;
-use std::io::{self, BufReader, Read, Seek, SeekFrom};
+use std::io::{self, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -43,15 +43,17 @@ pub struct GgufTensorIndex {
     pub source_identity: SourceIdentity,
 }
 
-struct MetadataReader {
+struct MetadataReader<F> {
     file: BufReader<File>,
     offset: u64,
     file_bytes: u64,
     source_identity: SourceIdentity,
+    interrupted: F,
 }
 
-impl MetadataReader {
-    fn open(path: &Path) -> io::Result<Self> {
+impl<F: Fn() -> bool> MetadataReader<F> {
+    fn open(path: &Path, interrupted: F) -> io::Result<Self> {
+        check_inspection(interrupted())?;
         let metadata = std::fs::symlink_metadata(path)?;
         if !metadata.is_file() || metadata.file_type().is_symlink() {
             return Err(io::Error::new(
@@ -61,16 +63,20 @@ impl MetadataReader {
         }
         let file = File::open(path)?;
         let opened = file.metadata()?;
-        let source_identity = SourceIdentity::from_metadata(&opened);
+        let source_identity = SourceIdentity::from_file(&file)?;
+        let path_file = File::open(path)?;
         // The path can be replaced between symlink_metadata and File::open.
         // Check both the opened descriptor and the current path before parsing.
         if !opened.is_file()
-            || source_identity != SourceIdentity::from_metadata(&metadata)
+            || source_identity != SourceIdentity::from_file(&path_file)?
             || std::fs::symlink_metadata(path)
                 .map(|current| {
                     current.file_type().is_symlink()
                         || !current.is_file()
-                        || SourceIdentity::from_metadata(&current) != source_identity
+                        || File::open(path)
+                            .and_then(|current| SourceIdentity::from_file(&current))
+                            .map(|identity| identity != source_identity)
+                            .unwrap_or(true)
                 })
                 .unwrap_or(true)
         {
@@ -85,10 +91,12 @@ impl MetadataReader {
             offset: 0,
             file_bytes,
             source_identity,
+            interrupted,
         })
     }
 
-    fn advance(&mut self, amount: u64) -> io::Result<u64> {
+    fn advance(&mut self, amount: u64) -> io::Result<()> {
+        check_inspection((self.interrupted)())?;
         let end = self
             .offset
             .checked_add(amount)
@@ -97,7 +105,7 @@ impl MetadataReader {
             return Err(invalid("GGUF metadata exceeds file or bounded parse limit"));
         }
         self.offset = end;
-        Ok(end)
+        Ok(())
     }
 
     fn read_exact<const N: usize>(&mut self) -> io::Result<[u8; N]> {
@@ -116,9 +124,10 @@ impl MetadataReader {
     }
 
     fn skip(&mut self, amount: u64) -> io::Result<()> {
-        let end = self.advance(amount)?;
-        self.file.seek(SeekFrom::Start(end))?;
-        Ok(())
+        self.advance(amount)?;
+        // The bounded metadata size fits in i64. Keep buffered bytes when the
+        // skipped value (often a short tokenizer string) fits in the buffer.
+        self.file.seek_relative(amount as i64)
     }
 
     fn string(&mut self, max_bytes: u64) -> io::Result<String> {
@@ -175,6 +184,16 @@ impl MetadataReader {
     }
 }
 
+fn check_inspection(interrupted: bool) -> io::Result<()> {
+    if interrupted {
+        return Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            "GGUF metadata inspection interrupted",
+        ));
+    }
+    Ok(())
+}
+
 fn primitive_width(value_type: u32) -> Option<u64> {
     match value_type {
         0 | 1 | 7 => Some(1),
@@ -223,10 +242,11 @@ fn assert_metadata_source_unchanged(
     expected: &SourceIdentity,
 ) -> io::Result<()> {
     let current_path = std::fs::symlink_metadata(path)?;
+    let current_file = File::open(path)?;
     if current_path.file_type().is_symlink()
         || !current_path.is_file()
-        || SourceIdentity::from_metadata(&current_path) != *expected
-        || SourceIdentity::from_metadata(&file.metadata()?) != *expected
+        || SourceIdentity::from_file(&current_file)? != *expected
+        || SourceIdentity::from_file(file)? != *expected
     {
         return Err(invalid(
             "GGUF file or path changed during tensor index construction",
@@ -240,8 +260,14 @@ impl GgufTensorIndex {
     /// Bounded metadata parsing prevents untrusted declared lengths from allocating whole weights.
     /// A tensor whose quantization layout is not explicitly known is rejected.
     pub fn inspect(path: impl AsRef<Path>) -> io::Result<Self> {
-        let path = path.as_ref();
-        let mut reader = MetadataReader::open(path)?;
+        Self::inspect_cancellable(path.as_ref(), || false)
+    }
+
+    pub(crate) fn inspect_cancellable(
+        path: &Path,
+        interrupted: impl Fn() -> bool,
+    ) -> io::Result<Self> {
+        let mut reader = MetadataReader::open(path, interrupted)?;
         if reader.read_exact::<4>()? != *b"GGUF" {
             return Err(invalid("not a GGUF file"));
         }
@@ -335,6 +361,7 @@ impl GgufTensorIndex {
         }
         let mut ranges = Vec::with_capacity(tensors.len());
         for t in &mut tensors {
+            check_inspection((reader.interrupted)())?;
             t.file_offset = data_offset
                 .checked_add(t.relative_offset)
                 .ok_or_else(|| invalid("GGUF tensor absolute offset overflow"))?;
@@ -355,6 +382,7 @@ impl GgufTensorIndex {
         }
 
         assert_metadata_source_unchanged(path, reader.file.get_ref(), &reader.source_identity)?;
+        check_inspection((reader.interrupted)())?;
         Ok(Self {
             path: path.to_path_buf(),
             file_bytes: reader.file_bytes,
@@ -579,6 +607,37 @@ mod tests {
         ));
         File::create(&path).unwrap().write_all(bytes).unwrap();
         path
+    }
+
+    #[test]
+    fn inspection_stops_between_metadata_fields_and_reopens_cleanly() {
+        let path = write(&fixture(8, 0, 96));
+        let checks = std::cell::Cell::new(0);
+        let result = GgufTensorIndex::inspect_cancellable(&path, || {
+            checks.set(checks.get() + 1);
+            checks.get() >= 8
+        });
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Interrupted);
+        assert_eq!(checks.get(), 8);
+        assert_eq!(GgufTensorIndex::inspect(&path).unwrap().tensors.len(), 2);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn skip_preserves_metadata_position_across_buffer_boundaries() {
+        let mut bytes = 8u32.to_le_bytes().to_vec(); // string element type
+        bytes.extend_from_slice(&3u64.to_le_bytes());
+        for value in ["a", &"x".repeat(70 * 1024), ""] {
+            str_field(&mut bytes, value);
+        }
+        bytes.extend_from_slice(&42u32.to_le_bytes());
+        let path = write(&bytes);
+        let mut reader = MetadataReader::open(&path, || false).unwrap();
+        reader.skip_value(9).unwrap();
+        assert_eq!(reader.u32().unwrap(), 42);
+        assert_eq!(reader.offset, bytes.len() as u64);
+        drop(reader);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

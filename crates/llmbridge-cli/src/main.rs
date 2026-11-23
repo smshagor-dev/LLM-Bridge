@@ -533,20 +533,17 @@ fn chat(args: &[String]) -> Result<(), String> {
     check_execution_deadline(deadline)?;
     if backend == "streamed" && (auto_context || auto_cache || max_admission_mb.is_some()) {
         use llmbridge_core::streamed_plan::{
-            inspect_streamed_shape, inspect_streamed_shape_verified, plan_streamed_shape,
-            StreamedPlanRequest,
+            inspect_streamed_shape_controlled, plan_streamed_shape, StreamedPlanRequest,
         };
-        let shape = if let Some(hash) = expected_hash.as_deref() {
-            inspect_streamed_shape_verified(
-                model_path,
-                64 * 1024,
-                &cancelled,
-                hash,
-                verification_mb * 1024 * 1024,
-            )?
-        } else {
-            inspect_streamed_shape(model_path, 64 * 1024, &cancelled)?
-        };
+        let shape = inspect_streamed_shape_controlled(
+            model_path,
+            64 * 1024,
+            &cancelled,
+            deadline,
+            expected_hash
+                .as_deref()
+                .map(|hash| (hash, verification_mb * 1024 * 1024)),
+        )?;
         let process_headroom = address_space_mb
             .map(|mb| -> Result<u64, String> {
                 let limit = mb
@@ -581,7 +578,9 @@ fn chat(args: &[String]) -> Result<(), String> {
             adapt_cache: auto_cache,
             ..Default::default()
         };
-        let plan = plan_streamed_shape(shape, &hardware::profile(), request)?;
+        let plan = plan_streamed_shape(shape, &hardware::profile(), request);
+        check_execution_deadline(deadline)?;
+        let plan = plan?;
         eprintln!("LLMBRIDGE_PLAN {}", plan.to_json(&shape, &request));
         ctx = plan.selected_context;
         cache_bytes =
