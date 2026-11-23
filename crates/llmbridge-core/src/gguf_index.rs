@@ -705,6 +705,24 @@ mod tests {
     }
 
     #[test]
+    fn kquant_and_extended_block_geometry_is_exact() {
+        // Block cadence (elements) and quantized block byte size for every type
+        // the streamed decoder now admits, matching the pinned ggml definitions.
+        assert_eq!(tensor_layout(6), Some((32, 22))); // Q5_0
+        assert_eq!(tensor_layout(7), Some((32, 24))); // Q5_1
+        assert_eq!(tensor_layout(12), Some((256, 144))); // Q4_K
+        assert_eq!(tensor_layout(13), Some((256, 176))); // Q5_K
+        assert_eq!(tensor_layout(14), Some((256, 210))); // Q6_K
+                                                         // A 768-wide Q6_K row (the stories ffn_down width) is 3 superblocks.
+        let (block, bytes_per_block) = tensor_layout(14).unwrap();
+        assert_eq!(768 % block, 0);
+        assert_eq!((768 / block) * bytes_per_block, 630);
+        // A 288-wide tensor is NOT a whole number of 256-element superblocks and
+        // is rejected by the indexer's dimension-divisibility guard.
+        assert_ne!(288 % block, 0);
+    }
+
+    #[test]
     fn indexed_tensor_slice_reads_exact_range() {
         let path = write(&fixture(8, 0, 96));
         let index = GgufTensorIndex::inspect(&path).unwrap();

@@ -44,6 +44,24 @@ float real(const gguf_context *g, const char *key, float fallback) {
 struct Tensor { uint64_t offset; size_t columns, rows, row_bytes; ggml_type type; };
 struct Layer { Tensor an, q, k, v, o, fn, gate, up, down; };
 
+// Tensor element types the streamed decoder admits. Dequantization (to_float)
+// and the dot kernel (vec_dot through the type's activation path) are always the
+// pinned ggml reference traits; this decoder adds no quantization arithmetic.
+// K-quants (256-element superblocks) require the block-size-aware geometry check
+// in Decoder::tensor; 32-element quants (Q4_0/Q4_1/Q5_0/Q5_1/Q8_0) share it.
+bool streamed_supported_type(ggml_type type) {
+    switch (type) {
+        case GGML_TYPE_F32:
+        case GGML_TYPE_Q8_0:
+        case GGML_TYPE_Q4_0:
+        case GGML_TYPE_Q4_1:
+        case GGML_TYPE_Q6_K:
+            return true;
+        default:
+            return false;
+    }
+}
+
 // The vocabulary-only upstream loader allocates tokenizer metadata, never weights.
 // Every weight row used by this decoder arrives through the caller's range reader.
 struct Decoder {
@@ -68,14 +86,15 @@ struct Decoder {
         require(id >= 0, "required streamed tensor missing");
         auto ne = gguf_get_tensor_ne(g, id);
         auto type = gguf_get_tensor_type(g, id);
-        require((type == GGML_TYPE_F32 || type == GGML_TYPE_Q8_0 || type == GGML_TYPE_Q4_0 ||
-                 type == GGML_TYPE_Q4_1) &&
+        require(streamed_supported_type(type) &&
                 ne[0] == static_cast<int64_t>(columns) && ne[1] == static_cast<int64_t>(rows) &&
                 ne[2] == 1 && ne[3] == 1, "unsupported streamed tensor type/shape");
-        // Q4_0/Q4_1/Q8_0 all use 32-element blocks; dequant (to_float) and the dot
-        // kernel (vec_dot via Q8_0/Q8_1 activation) are the pinned ggml references,
-        // so no hand-written quantization is introduced for Q4_1.
-        require(type == GGML_TYPE_F32 || columns % 32 == 0, "invalid streamed quantized block geometry");
+        // Block-size-aware geometry: F32 blck=1, 32-element quants blck=32,
+        // K-quant superblocks blck=256. The pinned ggml traits own the layout,
+        // so one check covers every admitted type with no hardcoded block size.
+        const int64_t block = ggml_blck_size(type);
+        require(block > 0 && columns % static_cast<size_t>(block) == 0,
+                "invalid streamed quantized block geometry");
         // Keep packed row bytes consistent with the pinned ggml dot/type traits.
         size_t rb = static_cast<size_t>(ggml_row_size(type, columns));
         uint64_t base = gguf_get_data_offset(g), relative = gguf_get_tensor_offset(g, id);
