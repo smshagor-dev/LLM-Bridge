@@ -780,10 +780,32 @@ mod tests {
         assert!(worker.take(|| false).is_err());
         assert_eq!(worker.reserved_bytes(), 0);
         drop(worker);
+        // Deterministically order the source mutation before the worker's read so
+        // the rejection proves mutation detection, not a lucky read/write race.
         let f = Fixture::new();
-        let worker = f.start(8, 1);
+        let entered = Arc::new(std::sync::Barrier::new(2));
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let worker_entered = Arc::clone(&entered);
+        let worker_release = Arc::clone(&release);
+        let worker = LocalLookahead::start_with_test_hook(
+            f.reader(),
+            LookaheadLimits {
+                staging_bytes: TEST_FIXED_OVERHEAD + 8,
+                max_outstanding_reads: 1,
+                fixed_overhead_bytes: TEST_FIXED_OVERHEAD,
+                worker_stack_bytes: TEST_WORKER_STACK,
+            },
+            Box::new(move || {
+                worker_entered.wait();
+                worker_release.wait();
+                Ok(())
+            }),
+        )
+        .unwrap();
         worker.schedule(0, 8, 0, 16, None).unwrap();
+        entered.wait(); // worker is parked at before-read, prior to any OS read
         fs::write(&f.0, b"replacement contents different").unwrap();
+        release.wait(); // the read now observes the mutated source, never a race
         assert_eq!(
             worker.take(|| false).unwrap_err().kind(),
             io::ErrorKind::InvalidData
