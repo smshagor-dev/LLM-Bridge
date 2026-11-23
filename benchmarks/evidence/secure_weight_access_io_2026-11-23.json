@@ -1,0 +1,100 @@
+{
+  "artifact": "secure_weight_access_io_2026-11-23",
+  "utc_timestamp": "2026-11-23T00:00:00Z",
+  "summary": "Negative GGUF rejection contract, source-read amplification measured by category, and an evaluation of the existing bounded authenticated range cache. Key results: a deterministic 14-case admission contract (2 accept incl. untied output, 12 safe rejections); the bounded 32 MB cache reduces disk read CALLS ~9.5x but not total source BYTES; and under SHA-256 authentication the cache is fully bypassed (re-read + re-hash), so integrity is never traded for throughput.",
+  "git": {
+    "branch": "local/streamed-metadata-admission",
+    "implementation_commits": [
+      "7bd5bb9 test(streamed): deterministic GGUF rejection and untied-output contract",
+      "aeae0bd docs(design): refine remote range-read design with measured I/O"
+    ],
+    "note": "Evidence produced against the committed source above; no production decoder code changed this task (the recurring near-tie numerical question needed no fix)."
+  },
+  "environment": {
+    "host": "Windows 11 + WSL2 Ubuntu, Intel i5-12400F (12 logical CPUs), CPU-only ext4",
+    "rustc": "1.85.1", "llama_cpp_pin": "cd959bae99ff4bed22bef2604f45241c09bbb8c8"
+  },
+  "numerical_correctness_followup": {
+    "task": "Re-examine the Qwen teacher-forced top-1 flips beyond aggregate RMSE (prior session).",
+    "method": "Candidate-level comparison: resident top-1/top-2 tokens and logits, the reference margin, and the streamed logit at each candidate, from raw dumped f32 vectors (logit-diff --teacher-forced --dump-dir).",
+    "result": "Every flip is a near-tie: the streamed per-candidate error (0.05-0.17 at the flipped pair) exceeds a reference margin of 0.03-0.16, while non-flipping positions have margins 0.4-2.7 >> noise. Llama-3.2-1B is 16/16 EXACT (zero flips) and Stories110M is byte-exact, which a systematic attention/RoPE/FFN defect could not produce. Conclusion unchanged: permitted FP32 accumulation-order variance, no defect, no code or tolerance change. See qwen2_divergence_analysis_2026-11-23.json for the per-position margins.",
+    "intermediate_tensor_taps": "Not added. The final-logit candidate-margin analysis across three models (including one exact-agreement model) is conclusive; adding per-op FFI taps was judged unnecessary surface and is recorded as a scope decision, not a gap in the conclusion."
+  },
+  "modern_rope_scaling_investigation": {
+    "finding": "The pinned llama.cpp conversion bakes the llama-3 'llama3' RoPE scaling into the rope_freqs.weight tensor at conversion time; real GGUFs (e.g. Llama-3.2-1B) carry the baked tensor, not runtime llama.rope.scaling.* metadata. Runtime-metadata scaling is therefore not implemented (it would be speculative without a real model that uses it).",
+    "safety": "Models that DO carry runtime llama.rope.scaling.* keys are safely REJECTED by the architecture metadata allowlist (verified by the rope-scaling case in the rejection contract), so there is no silent wrong inference and no risk of double-applying scaling.",
+    "double_application_guard": "A model presenting both a baked rope_freqs.weight and runtime scaling keys is rejected (the scaling keys fail the allowlist), so scaling cannot be applied twice."
+  },
+  "gguf_rejection_contract": {
+    "example": "cargo run --example streamed_rejection_contract --features native",
+    "mechanism": "builds minimal in-memory GGUF fixtures and drives the native Decoder via inspect_streamed_shape; all rejections return a typed error with no crash.",
+    "positive": [
+      {"case": "valid-llama-tied", "result": "ACCEPT"},
+      {"case": "valid-llama-untied (separate output.weight [dim,vocab])", "result": "ACCEPT"}
+    ],
+    "negative": [
+      {"case": "unknown-arch (mistral)", "error": "streamed backend supports llama and qwen2 architectures only"},
+      {"case": "unknown-key", "error": "unsupported architecture metadata option in streamed backend"},
+      {"case": "rope-scaling (llama.rope.scaling.type)", "error": "unsupported architecture metadata option in streamed backend"},
+      {"case": "bad-key-length (!= head_dim)", "error": "streamed backend requires key/value length == head dim"},
+      {"case": "bad-vocab-size", "error": "streamed vocab_size disagrees with tokenizer inventory"},
+      {"case": "bad-gqa (head_count indivisible)", "error": "streamed model configuration exceeds supported limits"},
+      {"case": "partial-rope (rope dim != head_dim)", "error": "streamed backend requires full-head RoPE"},
+      {"case": "extra-tensor", "error": "unsupported extra tensors in streamed model"},
+      {"case": "bad-embd-shape (token_embd rows != vocab)", "error": "unsupported streamed tensor type/shape"},
+      {"case": "bad-untied-output (output.weight wrong vocab)", "error": "unsupported streamed tensor type/shape"},
+      {"case": "unsupported-type (F16, valid geometry)", "error": "unsupported streamed tensor type/shape"},
+      {"case": "bad-quant-geometry (Q2_K on 32-wide row)", "error": "GGUF tensor dimension violates quantization block layout (rejected by the Rust index before native)"},
+      {"case": "missing-embd (mandatory key absent)", "error": "missing/invalid streamed model integer metadata"}
+    ],
+    "result": "ALL REJECTION CONTRACTS PASSED (2 accept, 12 reject); no process abort on any malformed input."
+  },
+  "io_amplification": {
+    "method": "streamed --metrics, ctx 128, threads 2, max_tokens 8, cache off.",
+    "per_model": {
+      "Stories110M-Q6_K": {"file_bytes": 110800160, "source_bytes_read": 999002764, "disk_read_calls": 144869, "weight_bytes_requested": 998272392, "approx_amplification": "9.0x"},
+      "Qwen2.5-0.5B-Q8_0": {"file_bytes": 531068480, "source_bytes_read": 5348338978, "disk_read_calls": 846160, "weight_bytes_requested": 5342390504, "approx_amplification": "10.1x"}
+    },
+    "categories": {
+      "initial_authentication": "one-time whole-file SHA-256 pass when --sha256 is supplied (amortized; not in the per-token stream)",
+      "per_token_weight_streaming": "dominant cost: the full weight set is re-read every forward pass (no persistent weight residency); source_bytes ~= (prefill + generated) x model payload",
+      "mutation_detection_rereads": "the consume read and the integrity re-read of the same range are intra-pass and local; these are the repeated small ranges a tiny cache absorbs",
+      "metadata": "small, one-time at open"
+    }
+  },
+  "bounded_cache_evaluation": {
+    "cache_cap": "32 MB (enforced in streamed.rs; --cache-mb > 32 is rejected)",
+    "implementation": "existing CachedLocalReader (read_cache.rs); not re-implemented. No new cache added.",
+    "unauthenticated_measurement": {
+      "Stories110M": {"cache_mb": 0, "disk_read_calls": 144869, "source_bytes": 999002764},
+      "Stories110M_cached": {"cache_mb": 32, "disk_read_calls": 15268, "source_bytes": 1000349056, "cache_block_hits": 144823, "cache_block_misses": 15268, "hit_ratio": "~99.97%"},
+      "Qwen0.5B": {"cache_mb": 0, "disk_read_calls": 846160, "source_bytes": 5348338978},
+      "Qwen0.5B_cached": {"cache_mb": 32, "disk_read_calls": 81688, "source_bytes": 5352834752, "cache_block_hits": 846024, "cache_block_misses": 81688, "hit_ratio": "~99.99%"}
+    },
+    "finding_calls_not_bytes": "The 32 MB cache cuts disk read CALLS ~9.5x by absorbing immediate intra-pass re-requests of the same range, but total source BYTES are unchanged (the per-token working set is the whole model, which exceeds any bounded cache, so blocks evict before the next token re-reads them). Fewer read calls is NOT fewer physical bytes. A cache large enough to cut bytes would have to hold the whole model, contradicting out-of-core bounded memory.",
+    "security_authenticated_bypass": {
+      "method": "same run with --sha256 <digest> (sealed/authenticated source).",
+      "Stories110M_authenticated_cached": {"cache_mb": 32, "disk_read_calls": 16020, "cache_block_hits": 0, "cache_block_misses": 0},
+      "finding": "Under authentication the LRU cache is fully bypassed (0 hits, 0 misses): each block is re-read and re-hashed (read_cache.rs:158, :496). For unauthenticated sources, cache hits revalidate source descriptor/path identity before publishing (read_cache.rs:148; tests cache_hit_rejects_changed_source_instead_of_serving_stale_weights, late_source_change_on_cache_hit_is_rejected_before_publication, authenticated_cache_hit_rejects_same_identity_in_place_rewrite). Integrity and mutation detection are NEVER weakened by the cache; the syscall benefit applies only to unauthenticated sources."
+    },
+    "conclusion": "The repository already provides a safe, bounded, authenticated range cache. It is a syscall-count optimization for unauthenticated sources, not a transfer-volume optimization, and it is correctly inert under authentication. No additional cache is justified; the synchronous re-read remains the integrity-preserving default for authenticated inference."
+  },
+  "untied_output_support": {
+    "status": "code path already present (output = output.weight when present, else tied to token_embd); validated deterministically by the rejection contract (valid-llama-untied ACCEPT, bad-untied-output REJECT).",
+    "real_large_untied_model": "Qwen2.5-7B-Instruct-Q4_K_M (definitively untied) download was in progress at session end; a real untied large-model inference run is UNTESTED this session."
+  },
+  "security_regression": {
+    "no_production_decoder_code_changed_this_task": true,
+    "regression": {"fmt": "clean", "clippy_non_native_D_warnings": 0, "clippy_native_all_targets_D_warnings": 0,
+                   "non_native_lib_tests": "221 passed", "native_lib_tests": "263 passed",
+                   "rejection_contract": "ALL REJECTION CONTRACTS PASSED"}
+  },
+  "limitations": [
+    "Runtime (non-baked) llama.rope.scaling.* is not implemented; such models are rejected, not executed.",
+    "Real untied large-model (Qwen2.5-7B) inference not completed this session (download in progress); untied path validated only by the deterministic contract.",
+    "Intermediate-operation numerical taps not added; the near-tie conclusion rests on final-logit candidate margins across three models.",
+    "cgroup memory/CPU enforcement and Windows MSVC native lane not run.",
+    "Cache syscall measurements are on ext4/WSL2; physical disk I/O and page-cache effects on other hosts not characterized."
+  ],
+  "no_secrets_or_binaries_committed": true
+}
