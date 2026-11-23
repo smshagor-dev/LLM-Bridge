@@ -19,7 +19,7 @@ fn main() {
     }
 }
 fn usage() -> &'static str {
-    "Usage:\n  llmbridge batch <model.gguf> --input prompts.txt --output-dir new-results [--workers 2] [--wait-timeout-ms 30000] [--deadline-ms milliseconds] [--sha256 digest]\n  llmbridge doctor [--json]\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge plan <path.gguf> [--ctx 128] [--workspace-mb 8] [--max-ram-mb 64] [--auto-context] [--auto-cache] [--json]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--cache-pressure-mb floor] [--sha256 trusted-digest] [--verification-mb 8] [--address-space-mb 24] [--auto-context] [--auto-cache] [--max-ram-mb 64] [--logits path.f32] [--deadline-ms milliseconds]\n  llmbridge logit-diff <path.gguf> --prompt <text> [--ctx 128] [--threads 1] [--top-k 10] [--workspace-mb 8] [--max-tokens 1] [--teacher-forced]\n  Planning max-ram-mb is an incremental estimate budget; address-space-mb enforces a separate Linux process limit."
+    "Usage:\n  llmbridge batch <model.gguf> --input prompts.txt --output-dir new-results [--workers 2] [--wait-timeout-ms 30000] [--deadline-ms milliseconds] [--sha256 digest]\n  llmbridge doctor [--json]\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge plan <path.gguf> [--ctx 128] [--workspace-mb 8] [--max-ram-mb 64] [--auto-context] [--auto-cache] [--json]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--cache-pressure-mb floor] [--sha256 trusted-digest] [--verification-mb 8] [--address-space-mb 24] [--auto-context] [--auto-cache] [--max-ram-mb 64] [--logits path.f32] [--deadline-ms milliseconds]\n  llmbridge logit-diff <path.gguf> --prompt <text> [--ctx 128] [--threads 1] [--top-k 10] [--workspace-mb 8] [--max-tokens 1] [--teacher-forced] [--dump-dir path]\n  Planning max-ram-mb is an incremental estimate budget; address-space-mb enforces a separate Linux process limit."
 }
 fn json_number(value: Option<u64>) -> String {
     value.map_or_else(|| "null".to_string(), |x| x.to_string())
@@ -737,6 +737,7 @@ fn logit_diff(args: &[String]) -> Result<(), String> {
     let mut workspace_mb: u64 = 8;
     let mut max_tokens: u32 = 1;
     let mut teacher_forced = false;
+    let mut dump_dir: Option<String> = None;
     let mut pos = 1;
     while pos < args.len() {
         let flag = &args[pos];
@@ -755,6 +756,7 @@ fn logit_diff(args: &[String]) -> Result<(), String> {
             "--top-k" => top_k = value.parse().map_err(|_| "invalid top-k")?,
             "--workspace-mb" => workspace_mb = value.parse().map_err(|_| "invalid workspace-mb")?,
             "--max-tokens" => max_tokens = value.parse().map_err(|_| "invalid max-tokens")?,
+            "--dump-dir" => dump_dir = Some(value.clone()),
             _ => return Err(format!("unknown flag {flag}")),
         }
         pos += 2;
@@ -807,6 +809,27 @@ fn logit_diff(args: &[String]) -> Result<(), String> {
             &forced,
             workspace_bytes,
         )?;
+        // Opt-in: persist raw per-position f32 logit vectors for offline first-
+        // divergence margin analysis. Little-endian f32, one file per backend/position.
+        if let Some(dir) = dump_dir.as_ref() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("dump-dir create: {e}"))?;
+            let write = |name: &str, v: &[f32]| -> Result<(), String> {
+                let mut bytes = Vec::with_capacity(v.len() * 4);
+                for &x in v {
+                    bytes.extend_from_slice(&x.to_le_bytes());
+                }
+                std::fs::write(Path::new(dir).join(name), bytes)
+                    .map_err(|e| format!("dump write: {e}"))
+            };
+            for (i, (s, r)) in streamed.iter().zip(resident.iter()).enumerate() {
+                write(&format!("pos_{i:02}_streamed.f32"), s)?;
+                write(&format!("pos_{i:02}_resident.f32"), r)?;
+            }
+            eprintln!(
+                "dumped {} positions to {dir}",
+                streamed.len().min(resident.len())
+            );
+        }
         let multi = llmbridge_core::logit_diff::compute_multi(&streamed, &resident, top_k)?;
         println!("LLMBRIDGE_LOGIT_DIFF_TEACHER_FORCED {}", multi.to_json());
     } else {
