@@ -1,4 +1,6 @@
-//! Experimental complete Llama F32/Q8_0/Q4_0/Q4_1 decoder backed by bounded local reads.
+//! Experimental complete Llama decoder backed by bounded local reads. Admits
+//! F32, the 32-element quants Q4_0/Q4_1/Q5_0/Q5_1/Q8_0, and the K-quant
+//! superblocks Q4_K/Q5_K/Q6_K; all dequant/dot kernels are pinned ggml traits.
 //! The explicit workspace budget is not an enforced process RSS limit.
 use crate::{
     gguf_index::GgufTensorIndex,
