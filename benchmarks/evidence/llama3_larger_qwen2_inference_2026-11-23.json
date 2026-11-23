@@ -1,0 +1,122 @@
+{
+  "artifact": "llama3_larger_qwen2_inference_2026-11-23",
+  "utc_timestamp": "2026-11-23T00:00:00Z",
+  "summary": "Llama-3 architecture support (optional rope_freqs.weight per-pair frequency factors = the baked llama3 RoPE scaling, plus key_length/value_length/vocab_size architecture-aware validation) and a larger Qwen2.5-1.5B model, both validated end-to-end on the custom out-of-core streamed CPU decoder against the resident llama.cpp reference. No custom quant kernels; dequant/matvec remain pinned ggml traits.",
+  "git": {
+    "branch": "local/streamed-metadata-admission",
+    "note": "Evidence produced against the committed llama-3 implementation source in this session's local commits."
+  },
+  "environment": {
+    "host": "Windows 11 + WSL2 Ubuntu, Intel i5-12400F (12 logical CPUs), CPU-only",
+    "rustc": "1.85.1", "llama_cpp_pin": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+    "cargo_target_dir": "$HOME/.cache/llmbridge-wsl-target-native (ext4)"
+  },
+  "llama3_architecture_audit": {
+    "identifier_hazard": "Llama-3 GGUFs use general.architecture == 'llama' (same id as Stories/Llama-2). The decoder must NOT assume the Stories math from the id alone.",
+    "found_in_pinned_reference_and_real_gguf": {
+      "rope_type": "normal (consecutive-pair) RoPE, same as llama-2",
+      "rope_scaling": "the HF 'llama3' rope scaling is baked at conversion time into a global rope_freqs.weight tensor (head_dim/2 F32 factors). Runtime applies it as ggml freq_factors: theta_pair_j = (pos * theta_scale^j) / rope_freqs[j].",
+      "extra_metadata": "llama.attention.key_length, llama.attention.value_length, llama.vocab_size (not present on Stories models)",
+      "gqa": "32 query heads / 8 kv heads (4:1) - already supported",
+      "tied_embeddings": true, "head_dim": 64, "rope_freq_base": 500000.0
+    },
+    "implemented": "Accept optional rope_freqs.weight (head_dim/2 F32); read once per token; divide each RoPE pair angle by its factor (applies to both normal and NeoX branches). Allow key_length/value_length/vocab_size keys and validate them (key_length==value_length==head_dim, vocab_size==tokenizer count) else reject. Tensor-count guard admits exactly one optional global extra tensor (rope_freqs.weight).",
+    "rejection_before_change": "Prior to this change the decoder safely REJECTED Llama-3 GGUFs (unknown llama.vocab_size key failed the allowlist; rope_freqs.weight failed the tensor-count guard) - no silent wrong inference."
+  },
+  "models": {
+    "Llama-3.2-1B-Instruct-Q4_K_M": {
+      "repository": "bartowski/Llama-3.2-1B-Instruct-GGUF", "base_model": "meta-llama/Llama-3.2-1B-Instruct",
+      "license": "llama3.2 (Llama 3.2 Community License)",
+      "bytes": 807694464, "sha256": "6f85a640a97cf2bf5b8e764087b1e83da0fdb51d7c9fab7d0fece9385611df83",
+      "arch": "llama", "layers": 16, "embedding_length": 2048, "feed_forward_length": 8192,
+      "head_count": 32, "head_count_kv": 8, "head_dim": 64, "rope_freq_base": 500000.0, "vocab_size": 128256,
+      "tied_output_embeddings": true, "tokenizer_model": "gpt2", "tokenizer_pre": "llama-bpe",
+      "tensor_type_histogram": {"F32": 34, "Q4_K": 96, "Q6_K": 17},
+      "coverage": "113/113 eligible weight tensors are K-quant (all rows 256-divisible); 34 F32 = 32 norms + output_norm + rope_freqs.weight[32]"
+    },
+    "Qwen2.5-1.5B-Instruct-Q4_K_M": {
+      "repository": "bartowski/Qwen2.5-1.5B-Instruct-GGUF", "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "license": "apache-2.0",
+      "bytes": 986048768, "sha256": "1adf0b11065d8ad2e8123ea110d1ec956dab4ab038eab665614adba04b6c3370",
+      "arch": "qwen2", "layers": 28, "embedding_length": 1536, "feed_forward_length": 8960,
+      "head_count": 12, "head_count_kv": 2, "head_dim": 128, "rope_freq_base": 1000000.0, "vocab_size": 151936,
+      "tied_output_embeddings": true,
+      "tensor_type_histogram": {"F32": 141, "Q4_K": 168, "Q6_K": 29},
+      "coverage": "197/197 eligible weight tensors are K-quant (dim 1536 and n_ff 8960 both 256-divisible); 141 F32 = 56 norms + 84 Q/K/V biases + output_norm"
+    }
+  },
+  "real_inference": {
+    "prompt": "Once upon a time", "decode": "greedy, ctx 128, threads 2, max_tokens 16",
+    "Llama-3.2-1B": {
+      "streamed": ", in a small village nestled in the rolling hills of the countryside, there lived",
+      "resident": ", in a small village nestled in the rolling hills of the countryside, there lived",
+      "greedy_parity": "EXACT (16 tokens)",
+      "single_position_rmse": 0.126195833, "single_position_top1_agree": true, "single_position_topk10": "10/10",
+      "teacher_forced": "prefix_identical_through=16, top1_agree 16/16", "nonfinite": 0
+    },
+    "Qwen2.5-1.5B": {
+      "streamed": ", there was a king who loved to play chess. He had a chessboard",
+      "resident": ", there was a young boy named Timmy who loved to play with his toy",
+      "greedy_parity": "diverges early (near-ties, see qwen2_divergence_analysis_2026-11-23.json)",
+      "single_position_rmse": 0.197963502, "single_position_top1_agree": true, "single_position_topk10": "10/10",
+      "teacher_forced": "prefix_identical_through=4, top1_agree 12/16 (all 4 flips are near-ties with margin < noise)", "nonfinite": 0
+    }
+  },
+  "bounded_memory": {
+    "method": "streamed backend, --address-space-mb enforces Linux RLIMIT_AS; ctx 64, threads 2, max_tokens 8, workspace 24 MB.",
+    "Llama-3.2-1B": {"rlimit_as_mb": [256, 512], "all_exit": 0, "peak_rss_bytes": 75919360},
+    "Qwen2.5-1.5B": {"rlimit_as_mb": [256, 512], "all_exit": 0, "peak_rss_bytes": 62017536},
+    "finding": "Both run under a 256 MB address-space limit at ~62-76 MB peak RSS. RSS is dominated by the large vocab-only tokenizer (128256 / 151936 tokens), NOT the ~0.8-1.0 GB model weights. Out-of-core weight streaming holds: RSS is decoupled from model file size.",
+    "note": "RLIMIT_AS is a process address-space bound, not physical RAM; passing under 256 MB RLIMIT_AS on WSL2 does not by itself prove physical 2 GB device compatibility."
+  },
+  "cpu_affinity": {
+    "method": "taskset pins the process to specific logical CPUs (verified via /proc/self/status Cpus_allowed_list), separate from the --threads count.",
+    "model": "Llama-3.2-1B-Q4_K_M, prompt 'Once upon a time', ctx 128, max_tokens 16",
+    "two_core": {"taskset": "-c 0,1", "threads": 2, "cpus_allowed_list": "0-1", "percent_cpu": "97%", "wall_s": 7.50, "peak_rss_kb": 74112},
+    "four_core": {"taskset": "-c 0-3", "threads": 4, "percent_cpu": "99%", "wall_s": 6.84, "peak_rss_kb": 74228},
+    "finding": "Real 2-core OS affinity verified. Going 2->4 cores/threads improves wall time only marginally (7.50s -> 6.84s, not ~2x) because streamed inference is I/O-bound on per-token weight re-streaming, not compute-bound. --threads alone does not constrain cores; taskset does."
+  },
+  "storage_io": {
+    "method": "streamed --metrics, ctx 64, threads 2, max_tokens 8, cache disabled.",
+    "Llama-3.2-1B": {"source_bytes_read": 8744293541, "model_bytes": 807694464, "read_amplification_approx": "10.8x"},
+    "Qwen2.5-1.5B": {"source_bytes_read": 10212701470, "model_bytes": 986048768, "read_amplification_approx": "10.4x"},
+    "analysis": "Each forward pass re-streams the full weight set (no persistent weight residency), so source bytes ~= (prefill + generated tokens) x model payload, giving ~10x amplification for an 8-token workload. This is the documented synchronous per-token re-stream design; the consumption-time re-read is a mutation-detection security dependency and is not removed.",
+    "remote_feasibility_derived": "At ~10x amplification a remote source would need roughly model_size x tokens of transfer per request absent coalescing. For a ~0.8-1.0 GB model generating tens of tokens this implies multi-GB transfers: impractical over 10/100 Mbps, bandwidth-bound over 1 Gbps, and latency-sensitive given ~846k small range ops per the 0.5B measurement. A verified bounded cache or sealed-manifest staged-range mechanism (not implemented here) would be required; remote range-read remains future work."
+  },
+  "backward_compatibility": {
+    "stories110M_Q6_K_llama": "streamed == resident EXACT (16 tokens) - the unified RoPE refactor preserves the normal-RoPE path byte-for-byte",
+    "qwen2_5_0_5b_Q8_0_qwen2": "teacher-forced 15/16 unchanged from pre-llama3 change (rope refactor numerically neutral for qwen2)",
+    "conclusion": "No regression from the llama-3 changes; rope_freqs path is inert when the tensor is absent."
+  },
+  "security_regression": {
+    "changes_touch": "streamed decoder RoPE/metadata validation + an opt-in CLI logit dump only",
+    "unchanged": "SHA-256 authenticated source access, sealed-manifest integrity, source mutation detection, deadline/cancellation, worker lifecycle, memory admission, isfinite guards, bounded range reads; ABI version unchanged.",
+    "regression": {"fmt": "clean", "clippy_non_native_D_warnings": 0, "clippy_native_D_warnings": 0,
+                   "non_native_lib_tests": "221 passed", "native_lib_tests": "263 passed", "native_all_targets": "passed"}
+  },
+  "compatibility_matrix": {
+    "Stories110M Q6_K (llama)": "VERIFIED (regression, EXACT)",
+    "Qwen2.5-0.5B Q8_0 / Q4_K_M (qwen2)": "VERIFIED (prior session)",
+    "Qwen2.5-1.5B Q4_K_M (qwen2, head_dim 128)": "VERIFIED (real inference, 197/197 K-quant, teacher-forced 12/16 all near-ties, bounded <=256 MB)",
+    "Llama-3.2-1B Q4_K_M (llama-3 rope scaling)": "VERIFIED (streamed==resident EXACT, teacher-forced 16/16, 113/113 K-quant, bounded <=256 MB)",
+    "Llama-3 with runtime rope_scaling metadata keys (not baked to rope_freqs)": "UNSUPPORTED (allowlist rejects llama.rope.scaling.*)",
+    "Qwen3 / Gemma / Phi / Mistral": "UNSUPPORTED (resolve_arch rejects)",
+    "larger Qwen2.5 (3B/7B, possibly untied) and other Llama-3 sizes": "UNTESTED",
+    "Windows MSVC native lane / cgroup memory.max enforcement": "UNTESTED"
+  },
+  "limitations": [
+    "Only one Llama-3 configuration (3.2-1B) tested; other sizes and non-tied-output Llama-3 variants untested.",
+    "Llama-3 models that carry runtime llama.rope.scaling.* metadata (rather than a baked rope_freqs.weight) are rejected, not executed.",
+    "Synthetic unsupported-architecture GGUF negative integration tests not added; rejection is enforced by resolve_arch, the metadata allowlist, key_length/value_length/vocab_size validation, and the tensor-count guard (code-level), and was confirmed by Llama-3 having been rejected before this change.",
+    "cgroup memory.max and CPU quota enforcement not applied (no passwordless privilege); Windows MSVC native lane not run.",
+    "Bounded-memory tested at 256/512 MB; larger 1024/2048 MB limits have ample headroom but were not individually swept."
+  ],
+  "test_commands": [
+    "llmbridge chat <model>.gguf --prompt 'Once upon a time' --max-tokens 16 --ctx 128 --threads 2 --backend streamed --workspace-mb 48",
+    "llmbridge logit-diff <model>.gguf --prompt 'Once upon a time' --ctx 128 --threads 2 --top-k 10 --max-tokens 16 --teacher-forced [--dump-dir path]",
+    "llmbridge chat <model>.gguf ... --backend streamed --address-space-mb 256 --workspace-mb 24 --metrics",
+    "taskset -c 0,1 llmbridge chat <model>.gguf ... --threads 2 --backend streamed",
+    "cargo clippy --features native --all-targets -- -D warnings; cargo test --features native -p llmbridge-core"
+  ],
+  "no_secrets_or_binaries_committed": true
+}
