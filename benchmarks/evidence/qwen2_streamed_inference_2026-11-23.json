@@ -1,0 +1,162 @@
+{
+  "artifact": "qwen2_streamed_inference_2026-11-23",
+  "utc_timestamp": "2026-11-23T00:00:00Z",
+  "summary": "First modern-architecture (Qwen2) support in the custom out-of-core streamed CPU decoder: NeoX RoPE + Q/K/V projection biases + architecture-aware metadata validation, delegating all quantized math to the pinned ggml traits. Genuine streamed inference on a real Qwen2.5-0.5B-Instruct GGUF matches the resident llama.cpp reference under teacher forcing; out-of-core weight streaming and existing llama/Stories support preserved.",
+  "git": {
+    "branch": "local/streamed-metadata-admission",
+    "implementation_commits": [
+      "e613dcc feat(streamed): qwen2 architecture support and teacher-forced logit FFI",
+      "975308f feat(diag): teacher-forced streamed-vs-resident logit comparison"
+    ],
+    "working_tree": "clean except untracked .vscode/ (plus this evidence file)",
+    "note": "Evidence produced against the committed implementation source above."
+  },
+  "environment": {
+    "host": "Windows 11 + WSL2 Ubuntu, Intel i5-12400F, CPU-only",
+    "rustc": "1.85.1 (4eb161250 2025-03-15)",
+    "rust_edition": "2021",
+    "llama_cpp_pin": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+    "cargo_target_dir": "$HOME/.cache/llmbridge-wsl-target-native (ext4)",
+    "native_cli_package": "llmbridge (native default feature)"
+  },
+  "architecture_audit": {
+    "decoder_was": "llama-only: hardcoded general.architecture==llama, llama.* key allowlist, mandatory llama.rope.dimension_count, normal consecutive-pair RoPE, no projection bias, per-layer tensor count = 9.",
+    "qwen2_requirements_found_in_pinned_reference": {
+      "rope_type": "LLAMA_ROPE_TYPE_NEOX (src/llama-model.cpp:3700) - pairs offset by n_rot/2; theta_scale = freq_base^(-2/n_dims), theta accumulated per pair from pos (ggml-cpu/ops.cpp rope_cache_init + rotate_pairs).",
+      "qkv_bias": "separate Q/K/V path adds wq_b/wk_b/wv_b right after projection, before RoPE (llama-graph.cpp build_qkv:1897-1906; model loader src/models/qwen2.cpp create_tensor_qkv).",
+      "gqa": "grouped-query attention (14 query heads / 2 kv heads) - already supported by the streamed attention loop.",
+      "rope_dimension_count": "qwen2 GGUF omits the key; reference defaults n_rot to head_dim.",
+      "tied_embeddings": "qwen2.5-0.5B has no output.weight; output = token_embd - already handled.",
+      "activation_and_norm": "LLM_FFN_SILU + LLM_FFN_PAR (SwiGLU) and RMSNorm - identical to llama."
+    },
+    "implemented": "Typed ArchSpec{prefix, neox_rope, qkv_bias}; metadata allowlist built from prefix; optional rope.dimension_count (must equal head_dim when present); NeoX branch in rope(); add_bias() after q/k/v matvec; per-layer tensor count 12 for qwen2; capability comment updated. No hand-written quant kernels; dequant/matvec remain pinned ggml traits."
+  },
+  "model_provenance": {
+    "repository": "bartowski/Qwen2.5-0.5B-Instruct-GGUF (HuggingFace)",
+    "base_model": "Qwen/Qwen2.5-0.5B-Instruct",
+    "publisher": "Qwen (Alibaba); GGUF conversion by bartowski",
+    "license": "apache-2.0 (general.license in metadata)",
+    "architecture": "qwen2",
+    "hparams": {
+      "embedding_length": 896, "feed_forward_length": 4864, "block_count": 24,
+      "head_count": 14, "head_count_kv": 2, "head_dim": 64, "gqa_ratio": "7:1",
+      "context_length": 32768, "rope_freq_base": 1000000.0,
+      "attention.layer_norm_rms_epsilon": 9.999999974752427e-07,
+      "vocab_size": 151936, "tied_output_embeddings": true,
+      "tokenizer_model": "gpt2", "tokenizer_pre": "qwen2"
+    },
+    "quantizations": [
+      {"name": "Q8_0", "file": "Qwen2.5-0.5B-Instruct-Q8_0.gguf", "bytes": 531068480,
+       "sha256": "25130a98aa782284a7dabea0c23245b2fd371ed47244e79d78b8ec23245fdf96",
+       "tensor_type_histogram": {"F32": 121, "Q8_0": 169},
+       "eligible_weight_tensors": 169, "weight_tensors_quantized": "169/169 Q8_0 (0 fallback)",
+       "f32_tensors": "48 norms + 72 Q/K/V biases + 1 output_norm = 121"},
+      {"name": "Q4_K_M", "file": "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf", "bytes": 397808192,
+       "sha256": "6eb923e7d26e9cea28811e1a8e852009b21242fb157b26149d3b188f3a8c8653",
+       "tensor_type_histogram": {"F32": 121, "Q5_0": 132, "Q8_0": 13, "Q4_K": 12, "Q6_K": 12},
+       "eligible_weight_tensors": 169,
+       "kquant_tensors": "24 genuine K-quant superblocks (12 Q4_K + 12 Q6_K) on 256-divisible rows (ffn_down width 4864 etc.)",
+       "fallback_tensors": "145 32-element-block tensors (132 Q5_0 + 13 Q8_0) on 896-wide rows (896 % 256 != 0, cannot be K-quant)",
+       "note": "genuinely exercises Q4_K, Q6_K, Q5_0 and Q8_0 kernels together in one model"}
+    ],
+    "model_binaries_committed": false
+  },
+  "real_inference": {
+    "prompt": "Once upon a time",
+    "decode": "greedy, ctx 128, threads 2, max_tokens 16",
+    "results": {
+      "Q8_0": {
+        "streamed_backend": ", there was a young man named John who was very good at math. He",
+        "resident_backend": ", there was a young man named John. He was very good at math and",
+        "greedy_sequences_match": false,
+        "note": "coherent on both; first ~8 tokens identical, then a borderline-logit greedy flip - see teacher-forced parity"
+      },
+      "Q4_K_M": {
+        "streamed_backend": ", there was a young man named John. He was a very talented musician,",
+        "resident_backend": ", there was a young man named John. He was a very good student and",
+        "greedy_sequences_match": false
+      },
+      "workspace_mb": 32,
+      "both_backends_exit": 0
+    }
+  },
+  "numerical_parity": {
+    "single_position_final_prompt_logits": {
+      "Q8_0": {"vocab": 151936, "rmse": 0.088801075, "max_abs_err": 0.452740669, "mean_abs_err": 0.070739621,
+               "streamed_nonfinite": 0, "resident_nonfinite": 0, "top1_agree": true, "topk_overlap": "10/10",
+               "resident_top1_rank_in_streamed": 0},
+      "Q4_K_M": {"vocab": 151936, "rmse": 0.136159598, "max_abs_err": 0.644926071, "mean_abs_err": 0.108065067,
+                 "streamed_nonfinite": 0, "resident_nonfinite": 0, "top1_agree": true, "topk_overlap": "9/10",
+                 "resident_top1_rank_in_streamed": 0}
+    },
+    "teacher_forced_multi_position": {
+      "method": "resident greedy sequence is canonical; its argmax tokens fed to the streamed decoder so every position shares an identical prefix (valid even past independent-greedy divergence). CLI: logit-diff --max-tokens 16 --teacher-forced.",
+      "Q8_0": {"positions": 16, "prefix_identical_through_independent_greedy": 8,
+               "top1_agree_positions_teacher_forced": "15/16",
+               "per_position_rmse_range": "0.0698 - 0.0964 (position 8 = 0.1429)",
+               "divergence_position": {"index": 8, "top1_agree": false, "rmse": 0.142861711, "topk_overlap": "10/10",
+                 "interpretation": "single borderline flip; reference token stays in streamed top-10 (rank 1) - FP32 precision, not structural"}},
+      "Q4_K_M": {"positions": 16, "prefix_identical_through_independent_greedy": 13,
+                 "top1_agree_positions_teacher_forced": "15/16"}
+    },
+    "root_cause": "The streamed custom FP32 forward pass differs from the llama.cpp graph only by permissible floating-point accumulation order. RMSE (0.089 Q8_0, 0.136 Q4_K_M) is in the same regime as the already-validated llama/Stories path (Stories Q8_0 ~0.185). Divergence is confined to isolated borderline-logit greedy flips where the reference token remains in the streamed top-10; teacher-forced positions re-agree after a flip, so there is no cascading/structural error. No defect found; no production correction made.",
+    "acceptance": "Numerical equivalence is NOT claimed. Reported: measured per-position errors + top-1/top-k agreement under valid identical-prefix comparison."
+  },
+  "bounded_memory": {
+    "method": "streamed backend, --address-space-mb enforces Linux RLIMIT_AS; ctx 64, threads 2, max_tokens 8, workspace 12-16 MB.",
+    "results": {
+      "Q8_0": {"rlimit_as_mb": [96, 128, 192, 256], "all_exit": 0, "peak_rss_bytes": 62091264},
+      "Q4_K_M": {"rlimit_as_mb": [96, 128, 192, 256], "all_exit": 0, "peak_rss_bytes": 62197760}
+    },
+    "finding": "Both run under a 96 MB address-space limit at ~62 MB peak RSS. The footprint is dominated by the 151,936-token vocab-only tokenizer load (token + merge strings), NOT the model weights - so the floor is higher than the small-vocab Stories models (64 MB) despite smaller weights. Out-of-core weight streaming holds: RSS is decoupled from the 398-531 MB model file.",
+    "note": "RLIMIT_AS is a process address-space bound, not physical RAM; WSL2 is not a 2 GB device."
+  },
+  "io_read_amplification": {
+    "method": "streamed --metrics, ctx 64, threads 2, max_tokens 8, cache disabled (cache_bytes 0).",
+    "Q8_0": {"source_bytes_read": 5348338978, "weight_bytes_requested": 5342390504,
+             "range_read_calls": 846160, "max_range_read_bytes": 64736, "model_payload_bytes": 525120000},
+    "Q4_K_M": {"source_bytes_read": 3882475810},
+    "analysis": "Each forward pass re-streams the full weight set (no persistent weight residency), so source bytes ~= passes x model payload. For Q8_0 at 8 generated tokens + prefill the ~5.35 GB read vs ~525 MB weights is ~10x read amplification, matching the documented synchronous per-token re-stream design. This is the measured requirement input for a future remote range-read transport (not implemented here); it is a security dependency (consumption-time re-read authenticates against mutation), so it is not eliminated.",
+    "remote_transport_implication": "A remote source would need ~model_payload x tokens bandwidth per request under this design, or a verified bounded cache / sealed-manifest staged-range mechanism to reduce it."
+  },
+  "backward_compatibility": {
+    "llama_regression": {
+      "stories110M-Q6_K": {"streamed": ", there was a little girl named Lily. She loved to play outside in",
+                           "resident": ", there was a little girl named Lily. She loved to play outside in",
+                           "parity": "EXACT (16 greedy tokens)"},
+      "note": "llama path is byte-identical to pre-change: arch descriptor yields prefix=llama, neox_rope=false, qkv_bias=false -> original code paths. stories15M not re-downloaded this session."
+    }
+  },
+  "security_regression": {
+    "changes_touch": "streamed decoder math + metadata validation + additive diagnostic FFIs only",
+    "unchanged": "SHA-256 authenticated source access, sealed-manifest integrity, source mutation detection, deadline/cancellation, worker lifecycle, memory admission, isfinite guards, bounded range reads; ABI version unchanged (new FFIs additive, all catch C++ exceptions).",
+    "regression": {"fmt": "clean", "clippy_non_native_D_warnings": 0, "clippy_native_D_warnings": 0,
+                   "non_native_lib_tests": "220 passed", "native_lib_tests": "262 passed",
+                   "native_all_targets": "exit 0"}
+  },
+  "compatibility_matrix": {
+    "qwen2 (Qwen2.5-0.5B-Instruct) Q8_0": "VERIFIED - parse, 169/169 Q8_0 coverage, real streamed inference, teacher-forced 15/16 top-1, bounded <=96 MB",
+    "qwen2 (Qwen2.5-0.5B-Instruct) Q4_K_M": "VERIFIED - mixed K-quant coverage, real streamed inference, teacher-forced 15/16 top-1, bounded <=96 MB",
+    "llama (Stories110M)": "VERIFIED (regression, EXACT 16 tokens)",
+    "qwen2 other sizes / GQA ratios": "UNTESTED (only 0.5B tested)",
+    "qwen2.5 larger (1.5B/3B/7B) and non-tied output": "UNTESTED",
+    "qwen3 / llama-3 / gemma / phi": "UNSUPPORTED (rejected by resolve_arch)",
+    "windows MSVC native lane": "UNTESTED this session (built/tested under WSL2)"
+  },
+  "limitations": [
+    "Only Qwen2.5-0.5B tested; other Qwen2 sizes, GQA ratios, and non-tied-output variants untested.",
+    "Address-space floor (~96 MB) is set by the large tokenizer vocabulary, not weights; larger enforced limits (512/1024/2048 MB) have ample headroom but were not individually swept.",
+    "No synthetic unsupported-architecture GGUF integration test added; rejection is enforced by resolve_arch and the metadata allowlist (code-level).",
+    "cgroup memory.max enforcement and CPU-affinity pinning not applied; Windows MSVC native lane not run.",
+    "qwen3/llama-3/gemma and RoPE scaling (YaRN/linear) remain unimplemented and are rejected."
+  ],
+  "test_commands": [
+    "cargo build --release -p llmbridge (native)",
+    "llmbridge chat <qwen>.gguf --prompt 'Once upon a time' --max-tokens 16 --ctx 128 --threads 2 --backend streamed --workspace-mb 32",
+    "llmbridge chat <qwen>.gguf ... --backend resident",
+    "llmbridge logit-diff <qwen>.gguf --prompt 'Once upon a time' --ctx 128 --threads 2 --top-k 10 (single position)",
+    "llmbridge logit-diff <qwen>.gguf ... --max-tokens 16 --teacher-forced",
+    "llmbridge chat <qwen>.gguf ... --backend streamed --address-space-mb 96 --workspace-mb 12 --metrics",
+    "cargo clippy --features native --all-targets -- -D warnings; cargo test --features native -p llmbridge-core"
+  ]
+}
