@@ -41,9 +41,10 @@ typedef size_t (*llmbridge_range_callback)(void *userdata, void *output,
 typedef int32_t (*llmbridge_lookahead_schedule_callback)(void *userdata,
     uint64_t file_offset, size_t length, uint64_t tensor_offset, uint64_t tensor_bytes);
 
-/* Experimental full dense Llama decoder. All weights use bounded range reads;
- * tokenizer-only loading uses path. Workspace budget excludes tokenizer metadata,
- * parser, allocator and OS pages: it is not a hard RSS cap. Admits F32,
+/* Experimental full dense decoder for the llama and qwen2 architectures (qwen2
+ * adds NeoX RoPE and Q/K/V projection biases). All weights use bounded range
+ * reads; tokenizer-only loading uses path. Workspace budget excludes tokenizer
+ * metadata, parser, allocator and OS pages: it is not a hard RSS cap. Admits F32,
  * Q4_0/Q4_1/Q5_0/Q5_1/Q8_0 and the K-quants Q4_K/Q5_K/Q6_K.
  * Logits callback receives the complete vocabulary before greedy sampling. */
 typedef int32_t (*llmbridge_logits_callback)(const float *values, size_t count, void *userdata);
@@ -84,6 +85,21 @@ int32_t llmbridge_resident_prompt_logits_v1(const char *path, const char *prompt
 int32_t llmbridge_resident_decode_logits_v1(const char *path, const char *prompt,
     uint32_t context_tokens, uint32_t max_tokens, int32_t threads,
     llmbridge_logits_callback emit_logits, void *userdata, char *error, size_t capacity);
+
+/* Opt-in teacher-forced streamed diagnostic (additive; ABI version unchanged):
+ * prefill the prompt, emit the final-prompt-position logits, then feed each
+ * caller-supplied continuation token in order and emit the logits after each.
+ * Emits forced_count + 1 logit vectors. Unlike the generate path, it samples
+ * nothing: the fed tokens are fixed, so every emitted position shares a prefix
+ * with an independently decoded reference at the same index (valid multi-
+ * position comparison even after greedy sequences would diverge).
+ * tokenizer_prefix behaves as in _v2. Returns 0, 2 on cancel/stop, -1 on error. */
+int32_t llmbridge_streamed_forced_logits_v1(const char *path, const char *prompt,
+    const int32_t *forced_tokens, uint32_t forced_count, uint32_t context,
+    uint64_t file_bytes, size_t max_chunk, uint64_t workspace_budget,
+    uint64_t tokenizer_prefix_bytes, llmbridge_range_callback reader,
+    llmbridge_logits_callback emit_logits, llmbridge_cancel_poll poll,
+    void *userdata, char *error, size_t capacity);
 
 /* Reuses decoder validation without allocating activations, KV or weights.
  * Workspace is the native admission requirement, not process RSS. */

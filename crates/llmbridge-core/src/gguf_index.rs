@@ -723,6 +723,27 @@ mod tests {
     }
 
     #[test]
+    fn qwen2_tensor_and_bias_geometry_is_exact() {
+        // Qwen2.5-0.5B real shapes: Q8_0 (type 8) weights and F32 (type 0) Q/K/V
+        // biases. dim=896, kvdim=128 (2 kv heads x 64), n_ff=4864. This pins the
+        // indexer geometry the streamed qwen2 decoder depends on.
+        let (q8_block, q8_bytes) = tensor_layout(8).unwrap(); // Q8_0
+        assert_eq!((q8_block, q8_bytes), (32, 34));
+        // Attention/embedding rows are 896 wide: a multiple of 32 but NOT of 256,
+        // which is why a Q4_K_M quantization keeps these tensors non-K-quant.
+        assert_eq!(896 % q8_block, 0);
+        assert_ne!(896 % 256, 0);
+        assert_eq!((896 / q8_block) * q8_bytes, 952); // one attn_q/attn_output row
+        assert_eq!((4864 / q8_block) * q8_bytes, 5168); // one ffn_down row (4864 wide)
+        assert_eq!(4864 % 256, 0); // n_ff is K-quant eligible
+                                   // F32 biases are dense 4-byte rows; attn_q.bias is 896 wide, attn_k/v 128.
+        let (f32_block, f32_bytes) = tensor_layout(0).unwrap();
+        assert_eq!((f32_block, f32_bytes), (1, 4));
+        assert_eq!(896 * f32_bytes, 3584); // attn_q.bias byte length
+        assert_eq!(128 * f32_bytes, 512); // attn_k.bias / attn_v.bias byte length
+    }
+
+    #[test]
     fn indexed_tensor_slice_reads_exact_range() {
         let path = write(&fixture(8, 0, 96));
         let index = GgufTensorIndex::inspect(&path).unwrap();

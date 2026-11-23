@@ -42,7 +42,9 @@ float real(const gguf_context *g, const char *key, float fallback) {
     return v;
 }
 struct Tensor { uint64_t offset; size_t columns, rows, row_bytes; ggml_type type; };
-struct Layer { Tensor an, q, k, v, o, fn, gate, up, down; };
+// qb/kb/vb are the optional Q/K/V projection biases (qwen2); they stay
+// default-initialized and unread for architectures without QKV bias.
+struct Layer { Tensor an, q, k, v, o, fn, gate, up, down; Tensor qb{}, kb{}, vb{}; };
 
 // Tensor element types the streamed decoder admits. Dequantization (to_float)
 // and the dot kernel (vec_dot through the type's activation path) are always the
@@ -66,6 +68,20 @@ bool streamed_supported_type(ggml_type type) {
     }
 }
 
+// Typed architecture descriptor: replaces scattered "llama"-only string checks.
+// prefix selects the metadata key namespace; the flags select the two
+// architecture-specific behaviors this decoder now implements.
+struct ArchSpec {
+    std::string prefix;  // metadata key namespace, e.g. "llama" or "qwen2"
+    bool neox_rope;      // NeoX half-split RoPE (qwen2) vs normal consecutive-pair (llama)
+    bool qkv_bias;       // separate Q/K/V projection biases present and required
+};
+ArchSpec resolve_arch(const std::string &name) {
+    if (name == "llama") return {"llama", false, false};
+    if (name == "qwen2") return {"qwen2", true, true};
+    throw std::runtime_error("streamed backend supports llama and qwen2 architectures only");
+}
+
 // The vocabulary-only upstream loader allocates tokenizer metadata, never weights.
 // Every weight row used by this decoder arrives through the caller's range reader.
 struct Decoder {
@@ -76,13 +92,15 @@ struct Decoder {
     llmbridge_lookahead_schedule_callback schedule;
     llmbridge_cancel_poll poll;
     void *userdata;
-    size_t dim, hidden, heads, kvheads, head_dim, kvdim, layers, context;
+    size_t dim, hidden, heads, kvheads, head_dim, kvdim, layers, context, max_context;
     float epsilon, rope_base;
+    bool neox_rope = false, has_qkv_bias = false;
     size_t workspace_required, kv_bytes;
     Tensor embedding, final_norm, output;
     std::vector<Layer> blocks;
     std::vector<uint8_t> packed;
     std::vector<float> row, quantized, x, norm, q, k, v, att, projected, gate, up, logits, keys, values, scores, attention_values;
+    std::vector<float> qbias, kbias, vbias;
 
     void alive() { if (poll(userdata) == 0) throw Cancelled{}; }
     Tensor tensor(const std::string &name, size_t columns, size_t rows) {
@@ -116,29 +134,36 @@ struct Decoder {
             llmbridge_lookahead_schedule_callback lookahead = nullptr)
         : g(metadata), file_bytes(size), chunk(max_chunk), reader(source), schedule(lookahead), poll(cancel), userdata(state), context(ctx) {
         auto architecture = gguf_find_key(g, "general.architecture");
-        require(architecture >= 0 && gguf_get_kv_type(g, architecture) == GGUF_TYPE_STRING &&
-                std::string(gguf_get_val_str(g, architecture)) == "llama", "streamed backend supports llama only");
+        require(architecture >= 0 && gguf_get_kv_type(g, architecture) == GGUF_TYPE_STRING,
+                "missing/invalid streamed model architecture");
+        const ArchSpec spec = resolve_arch(gguf_get_val_str(g, architecture));
+        neox_rope = spec.neox_rope; has_qkv_bias = spec.qkv_bias;
+        const std::string pre = spec.prefix + ".";
         // Reject unimplemented architecture options rather than silently approximate them.
-        const std::set<std::string> known = {"llama.context_length", "llama.embedding_length", "llama.block_count",
-            "llama.feed_forward_length", "llama.rope.dimension_count", "llama.rope.freq_base",
-            "llama.attention.head_count", "llama.attention.head_count_kv", "llama.attention.layer_norm_rms_epsilon"};
+        const std::set<std::string> known = {pre+"context_length", pre+"embedding_length", pre+"block_count",
+            pre+"feed_forward_length", pre+"rope.dimension_count", pre+"rope.freq_base",
+            pre+"attention.head_count", pre+"attention.head_count_kv", pre+"attention.layer_norm_rms_epsilon"};
         for (int64_t i = 0; i < gguf_get_n_kv(g); ++i) {
             if (i % 256 == 0) alive();
             std::string key = gguf_get_key(g, i);
-            require(key.rfind("llama.", 0) != 0 || known.count(key), "unsupported llama metadata option in streamed backend");
+            require(key.rfind(pre, 0) != 0 || known.count(key), "unsupported architecture metadata option in streamed backend");
         }
-        dim = number(g, "llama.embedding_length"); hidden = number(g, "llama.feed_forward_length");
-        heads = number(g, "llama.attention.head_count"); layers = number(g, "llama.block_count");
-        auto kh = gguf_find_key(g, "llama.attention.head_count_kv");
-        kvheads = kh < 0 ? heads : number(g, "llama.attention.head_count_kv");
+        dim = number(g, (pre+"embedding_length").c_str()); hidden = number(g, (pre+"feed_forward_length").c_str());
+        heads = number(g, (pre+"attention.head_count").c_str()); layers = number(g, (pre+"block_count").c_str());
+        auto kh = gguf_find_key(g, (pre+"attention.head_count_kv").c_str());
+        kvheads = kh < 0 ? heads : number(g, (pre+"attention.head_count_kv").c_str());
+        max_context = number(g, (pre+"context_length").c_str());
         require(dim && dim <= 8192 && hidden && hidden <= 32768 && heads && kvheads && heads % kvheads == 0 &&
                 dim % heads == 0 && layers && layers <= 128 && vocab && vocab <= 262144 &&
-                context <= number(g, "llama.context_length"), "streamed model configuration exceeds supported limits");
+                context <= max_context, "streamed model configuration exceeds supported limits");
         head_dim = dim / heads; kvdim = head_dim * kvheads;
-        require(head_dim % 2 == 0 && number(g, "llama.rope.dimension_count") == head_dim,
-                "streamed backend requires full-head normal RoPE");
-        epsilon = real(g, "llama.attention.layer_norm_rms_epsilon", 1e-5f);
-        rope_base = real(g, "llama.rope.freq_base", 10000.f);
+        // RoPE dimension count is optional; absent means the full head (qwen2 omits it).
+        // When present it must equal head_dim: this decoder only rotates the full head.
+        auto rope_dim_key = gguf_find_key(g, (pre+"rope.dimension_count").c_str());
+        const size_t rope_dim = rope_dim_key < 0 ? head_dim : number(g, (pre+"rope.dimension_count").c_str());
+        require(head_dim % 2 == 0 && rope_dim == head_dim, "streamed backend requires full-head RoPE");
+        epsilon = real(g, (pre+"attention.layer_norm_rms_epsilon").c_str(), 1e-5f);
+        rope_base = real(g, (pre+"rope.freq_base").c_str(), 10000.f);
         // Fixed workspace: O(layers * context * KV width), no weight-matrix allocation.
         auto kvcount = checked_mul(checked_mul(layers, context), kvdim);
         auto floats = checked_mul(kvcount, 2) + checked_mul(dim, 7) + checked_mul(kvdim, 2) +
@@ -156,14 +181,22 @@ struct Decoder {
         for (size_t l = 0; l < layers; ++l) {
             alive();
             std::string p = "blk." + std::to_string(l) + ".";
-            blocks.push_back({tensor(p+"attn_norm.weight", dim, 1), tensor(p+"attn_q.weight", dim, dim),
+            Layer layer{tensor(p+"attn_norm.weight", dim, 1), tensor(p+"attn_q.weight", dim, dim),
                 tensor(p+"attn_k.weight", dim, kvdim), tensor(p+"attn_v.weight", dim, kvdim),
                 tensor(p+"attn_output.weight", dim, dim), tensor(p+"ffn_norm.weight", dim, 1),
                 tensor(p+"ffn_gate.weight", dim, hidden), tensor(p+"ffn_up.weight", dim, hidden),
-                tensor(p+"ffn_down.weight", hidden, dim)});
+                tensor(p+"ffn_down.weight", hidden, dim)};
+            if (has_qkv_bias) {
+                layer.qb = tensor(p+"attn_q.bias", dim, 1);
+                layer.kb = tensor(p+"attn_k.bias", kvdim, 1);
+                layer.vb = tensor(p+"attn_v.bias", kvdim, 1);
+            }
+            blocks.push_back(layer);
         }
-        // Refuse unrecognized tensors (biases, special RoPE, adapters, etc.).
-        require(gguf_get_n_tensors(g) == static_cast<int64_t>(layers * 9 + (out_id < 0 ? 2 : 3)),
+        // Refuse unrecognized tensors (special RoPE, adapters, output bias, etc.).
+        // qwen2 adds exactly three Q/K/V bias tensors per layer; llama has none.
+        const int64_t per_layer = has_qkv_bias ? 12 : 9;
+        require(gguf_get_n_tensors(g) == static_cast<int64_t>(layers * per_layer + (out_id < 0 ? 2 : 3)),
                 "unsupported extra tensors in streamed model");
         // Tensor descriptors own their offsets/shapes; no metadata is used by forward().
         g = nullptr;
@@ -175,6 +208,16 @@ struct Decoder {
         x.resize(dim); norm.resize(dim); q.resize(dim); k.resize(kvdim); v.resize(kvdim);
         att.resize(dim); projected.resize(dim); gate.resize(hidden); up.resize(hidden);
         logits.resize(vocab); keys.resize(kvcount); values.resize(kvcount); scores.resize(context + 255); attention_values.resize(context + 255);
+        if (has_qkv_bias) { qbias.resize(dim); kbias.resize(kvdim); vbias.resize(kvdim); }
+    }
+    // Read a projection bias row and add it elementwise (qwen2 Q/K/V bias).
+    void add_bias(const Tensor &bias, std::vector<float> &target, std::vector<float> &scratch) {
+        require(bias.columns == target.size() && scratch.size() == target.size(), "streamed bias shape mismatch");
+        read_row(bias, 0, scratch.data());
+        for (size_t i = 0; i < target.size(); ++i) {
+            target[i] += scratch[i];
+            require(std::isfinite(target[i]), "nonfinite streamed biased projection");
+        }
     }
     void read_row(const Tensor &t, size_t index, float *destination) {
         alive();
@@ -240,16 +283,30 @@ struct Decoder {
         for (size_t i = 0; i < dim; ++i) { norm[i] = x[i] * scale * row[i]; require(std::isfinite(norm[i]), "RMS overflow"); }
     }
     void rope(std::vector<float> &vector, size_t count, size_t pos) {
-        // Match the pinned normal-RoPE incremental FP32 angle sequence.
+        // Match the pinned ggml incremental FP32 angle sequence (theta *= theta_scale
+        // per pair, starting at pos). NORM and NEOX share this angle schedule and
+        // differ only in which two head elements each angle rotates.
         const float theta_scale = std::pow(rope_base, -2.0f / head_dim);
         for (size_t h = 0; h < count; ++h) {
             float angle = static_cast<float>(pos);
-            for (size_t i = 0; i < head_dim; i += 2) {
-                float c = std::cos(angle), s = std::sin(angle);
-                size_t a = h * head_dim + i;
-                float first = vector[a], second = vector[a+1];
-                vector[a] = first*c - second*s; vector[a+1] = first*s + second*c;
-                angle *= theta_scale;
+            if (neox_rope) {
+                // NeoX RoPE: rotate element j against j + head_dim/2 (qwen2).
+                for (size_t j = 0; j < head_dim / 2; ++j) {
+                    float c = std::cos(angle), s = std::sin(angle);
+                    size_t a = h * head_dim + j, b = a + head_dim / 2;
+                    float first = vector[a], second = vector[b];
+                    vector[a] = first*c - second*s; vector[b] = first*s + second*c;
+                    angle *= theta_scale;
+                }
+            } else {
+                // Normal RoPE: rotate consecutive pairs (2i, 2i+1) (llama).
+                for (size_t i = 0; i < head_dim; i += 2) {
+                    float c = std::cos(angle), s = std::sin(angle);
+                    size_t a = h * head_dim + i;
+                    float first = vector[a], second = vector[a+1];
+                    vector[a] = first*c - second*s; vector[a+1] = first*s + second*c;
+                    angle *= theta_scale;
+                }
             }
         }
     }
@@ -259,6 +316,7 @@ struct Decoder {
         for (size_t l = 0; l < layers; ++l) {
             auto &b = blocks[l];
             rms(b.an); matvec(b.q, norm, q); matvec(b.k, norm, k); matvec(b.v, norm, v);
+            if (has_qkv_bias) { add_bias(b.qb, q, qbias); add_bias(b.kb, k, kbias); add_bias(b.vb, v, vbias); }
             rope(q, heads, pos); rope(k, kvheads, pos);
             auto base = (l * context + pos) * kvdim;
             std::copy(k.begin(), k.end(), keys.begin() + base);
@@ -402,6 +460,67 @@ extern "C" int32_t llmbridge_generate_streamed_cpu(
         max_chunk, workspace_budget, 0, reader, emit, logits, poll, userdata, error, capacity);
 }
 
+// Teacher-forced streamed logits: prefill prompt, then feed fixed continuation
+// tokens, emitting the full logit vector at the final prompt position and after
+// each fed token. Setup mirrors generate_streamed_cpu but samples nothing.
+extern "C" int32_t llmbridge_streamed_forced_logits_v1(
+    const char *path, const char *prompt,
+    const int32_t *forced_tokens, uint32_t forced_count, uint32_t context,
+    uint64_t file_bytes, size_t max_chunk, uint64_t workspace_budget, uint64_t tokenizer_prefix,
+    llmbridge_range_callback reader, llmbridge_logits_callback emit_logits,
+    llmbridge_cancel_poll poll, void *userdata, char *error, size_t capacity) {
+    if (error && capacity) error[0] = '\0';
+    try {
+        require(std::endian::native == std::endian::little, "streamed backend requires little endian");
+        require(path && prompt && reader && emit_logits && poll && userdata && context >= 64 && context <= 8192 &&
+                (forced_count == 0 || forced_tokens) && forced_count <= 2048 && max_chunk >= 34 &&
+                max_chunk <= 1024*1024 && workspace_budget && workspace_budget <= 1024ull*1024*1024 &&
+                std::strlen(prompt) <= 65536, "invalid streamed forced-logits arguments");
+        if (!poll(userdata)) return 2;
+        gguf_init_params gp{}; gp.no_alloc = true; gp.ctx = nullptr;
+        std::unique_ptr<gguf_context, decltype(&gguf_free)> metadata(
+            gguf_init_from_callback(reader, userdata, max_chunk, file_bytes, gp), gguf_free);
+        require(static_cast<bool>(metadata), "streamed GGUF parse failed");
+        if (tokenizer_prefix) require(gguf_get_data_offset(metadata.get()) == tokenizer_prefix, "authenticated tokenizer metadata prefix mismatch");
+        if (!poll(userdata)) return 2;
+        auto tokenizer = gguf_find_key(metadata.get(), "tokenizer.ggml.tokens");
+        require(tokenizer >= 0 && gguf_get_kv_type(metadata.get(), tokenizer) == GGUF_TYPE_ARRAY &&
+                gguf_get_arr_type(metadata.get(), tokenizer) == GGUF_TYPE_STRING,
+                "missing/invalid tokenizer token inventory");
+        const auto vocabulary_size = gguf_get_arr_n(metadata.get(), tokenizer);
+        Decoder decoder(metadata.get(), file_bytes, max_chunk, reader, poll, userdata, context,
+                        vocabulary_size, workspace_budget, false, nullptr);
+        metadata.reset();
+        decoder.alive();
+        auto mp = llama_model_default_params(); mp.vocab_only = true; mp.n_gpu_layers = 0;
+        std::unique_ptr<llama_model, decltype(&llama_model_free)> vocabulary(llama_model_load_from_file(path, mp), llama_model_free);
+        require(static_cast<bool>(vocabulary), "streamed tokenizer load failed");
+        auto vocab = llama_model_get_vocab(vocabulary.get());
+        require(static_cast<size_t>(llama_vocab_n_tokens(vocab)) == vocabulary_size, "streamed tokenizer inventory changed");
+        int count = llama_tokenize(vocab, prompt, static_cast<int32_t>(std::strlen(prompt)), nullptr, 0, true, true);
+        require(count < 0 && count != INT32_MIN, "streamed prompt tokenization failed"); count = -count;
+        require(static_cast<uint64_t>(count) + forced_count <= context, "streamed prompt and forced tokens exceed context");
+        std::vector<llama_token> tokens(count);
+        require(llama_tokenize(vocab, prompt, static_cast<int32_t>(std::strlen(prompt)), tokens.data(), count, true, true) == count,
+                "streamed prompt tokenization changed");
+        for (uint32_t i = 0; i < forced_count; ++i)
+            require(forced_tokens[i] >= 0 && static_cast<size_t>(forced_tokens[i]) < vocabulary_size, "forced token outside vocabulary");
+        decoder.alive();
+        decoder.allocate_workspace(vocabulary_size);
+        for (size_t i = 0; i < tokens.size(); ++i) decoder.forward(tokens[i], i, i+1 == tokens.size());
+        if (!emit_logits(decoder.logits.data(), decoder.logits.size(), userdata)) return 2;
+        size_t position = tokens.size();
+        for (uint32_t i = 0; i < forced_count; ++i) {
+            decoder.alive();
+            decoder.forward(static_cast<llama_token>(forced_tokens[i]), position++, true);
+            if (!emit_logits(decoder.logits.data(), decoder.logits.size(), userdata)) return 2;
+        }
+        return 0;
+    } catch (const Cancelled &) { return 2;
+    } catch (const std::exception &e) { if (error && capacity) std::snprintf(error, capacity, "%s", e.what()); return -1;
+    } catch (...) { if (error && capacity) std::snprintf(error, capacity, "unknown streamed forced-logits exception"); return -1; }
+}
+
 extern "C" int32_t llmbridge_inspect_streamed_plan_v1(
     uint64_t file_bytes, size_t chunk, llmbridge_range_callback reader,
     llmbridge_cancel_poll poll, void *userdata, llmbridge_streamed_shape_v1 *out,
@@ -433,7 +552,7 @@ extern "C" int32_t llmbridge_inspect_streamed_plan_v1(
         uint64_t kv_per_token = d.kv_bytes / 64;
         uint64_t workspace_per_token = kv_per_token + 2 * sizeof(float);
         *out = {d.workspace_required - 64*workspace_per_token, workspace_per_token, kv_per_token,
-            file_bytes, payload, gguf_get_data_offset(g), number(g, "llama.context_length"),
+            file_bytes, payload, gguf_get_data_offset(g), d.max_context,
             d.dim, d.heads, d.kvheads, d.layers, d.hidden, vocab, chunk};
         return 0;
     } catch (const Cancelled &) { return 2;
