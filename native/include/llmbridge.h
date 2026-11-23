@@ -43,7 +43,7 @@ typedef int32_t (*llmbridge_lookahead_schedule_callback)(void *userdata,
 
 /* Experimental full dense Llama decoder. All weights use bounded range reads;
  * tokenizer-only loading uses path. Workspace budget excludes tokenizer metadata,
- * parser, allocator and OS pages: it is not a hard RSS cap. F32/Q8_0 only.
+ * parser, allocator and OS pages: it is not a hard RSS cap. F32/Q8_0/Q4_0/Q4_1.
  * Logits callback receives the complete vocabulary before greedy sampling. */
 typedef int32_t (*llmbridge_logits_callback)(const float *values, size_t count, void *userdata);
 int32_t llmbridge_generate_streamed_cpu(const char *path, const char *prompt,

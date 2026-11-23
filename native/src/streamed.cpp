@@ -68,9 +68,13 @@ struct Decoder {
         require(id >= 0, "required streamed tensor missing");
         auto ne = gguf_get_tensor_ne(g, id);
         auto type = gguf_get_tensor_type(g, id);
-        require((type == GGML_TYPE_F32 || type == GGML_TYPE_Q8_0 || type == GGML_TYPE_Q4_0) &&
+        require((type == GGML_TYPE_F32 || type == GGML_TYPE_Q8_0 || type == GGML_TYPE_Q4_0 ||
+                 type == GGML_TYPE_Q4_1) &&
                 ne[0] == static_cast<int64_t>(columns) && ne[1] == static_cast<int64_t>(rows) &&
                 ne[2] == 1 && ne[3] == 1, "unsupported streamed tensor type/shape");
+        // Q4_0/Q4_1/Q8_0 all use 32-element blocks; dequant (to_float) and the dot
+        // kernel (vec_dot via Q8_0/Q8_1 activation) are the pinned ggml references,
+        // so no hand-written quantization is introduced for Q4_1.
         require(type == GGML_TYPE_F32 || columns % 32 == 0, "invalid streamed quantized block geometry");
         // Keep packed row bytes consistent with the pinned ggml dot/type traits.
         size_t rb = static_cast<size_t>(ggml_row_size(type, columns));

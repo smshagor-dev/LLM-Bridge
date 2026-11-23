@@ -674,6 +674,37 @@ mod tests {
     }
 
     #[test]
+    fn q4_1_tensor_geometry_is_indexed_exactly() {
+        // Q4_1 (ggml type 3) uses 32-element blocks of 20 bytes, exactly like the
+        // already-supported Q4_0/Q8_0 block cadence. A [32, 2] tensor is 2 blocks =
+        // 40 bytes. This pins the indexer side of the Q4_1 streamed-decoder support.
+        let path = write(&fixture(3, 0, 96));
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let weight = index.tensor("layers.0.weight").unwrap();
+        assert_eq!(
+            (
+                weight.dimensions.as_slice(),
+                weight.ggml_type,
+                weight.byte_len
+            ),
+            (&[32, 2][..], 3, 40)
+        );
+        assert_eq!(weight.file_offset % 32, 0);
+        let mut reader = BoundedLocalReader::open(&path, 16, 32).unwrap();
+        let mut output = Vec::new();
+        index
+            .stream_tensor(&mut reader, &weight.name, |chunk| {
+                assert!(chunk.len() <= 16);
+                output.extend_from_slice(chunk);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(output, vec![0xA5; 40]);
+        assert_eq!(reader.disk_bytes_read(), 40);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn indexed_tensor_slice_reads_exact_range() {
         let path = write(&fixture(8, 0, 96));
         let index = GgufTensorIndex::inspect(&path).unwrap();
