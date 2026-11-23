@@ -86,3 +86,7 @@ required-features = ["native"]
 [[example]]
 name = "queued_deadline_contract"
 required-features = ["native"]
+
+[[example]]
+name = "lookahead_parity"
+required-features = ["native"]
