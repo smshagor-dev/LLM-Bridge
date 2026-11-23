@@ -7,7 +7,9 @@ use llmbridge_core::{
         generate_streamed, generate_streamed_controlled, generate_streamed_verified, CacheControl,
         StreamedConfig, StreamedControl,
     },
-    streamed_plan::{inspect_streamed_shape, inspect_streamed_shape_verified},
+    streamed_plan::{
+        inspect_streamed_shape, inspect_streamed_shape_controlled, inspect_streamed_shape_verified,
+    },
 };
 use std::{path::Path, sync::atomic::AtomicBool};
 fn rejected<T: std::fmt::Debug>(result: Result<T, String>) {
@@ -79,6 +81,13 @@ fn main() {
         &cancelled,
         &digest,
         8 * 1024 * 1024,
+    ));
+    rejected(inspect_streamed_shape_controlled(
+        model,
+        65536,
+        &cancelled,
+        Some(std::time::Instant::now() + std::time::Duration::from_secs(30)),
+        Some((&digest, 8 * 1024 * 1024)),
     ));
     let control = CacheControl::default();
     control.request_release();
@@ -214,5 +223,5 @@ fn main() {
     drop(file);
     std::fs::remove_file(path).unwrap();
     println!("LLMBRIDGE_CPU_GUARD {}", cpu.to_json());
-    println!("nineteen Rust native execution/probe paths rejected before FFI: PASS");
+    println!("twenty Rust native execution/probe paths rejected before FFI: PASS");
 }
