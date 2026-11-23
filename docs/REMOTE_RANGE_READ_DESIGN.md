@@ -56,3 +56,30 @@ The existing `authenticate_model` (whole-file SHA-256 + sealed per-block manifes
 ## Explicitly out of scope for Phase 5
 
 Remote compute, tensor sharding, GPU/accelerator offload, and any design that relaxes local-source mutation detection. These are separate capabilities and must not be implied by shipping remote storage.
+
+## Measured I/O workload and remote feasibility (2026-11-23)
+
+Measured on the streamed backend, ctx 128, 2 threads, 8 generated tokens, cache off unless noted (WSL2 ext4; see `benchmarks/evidence/secure_weight_access_io_2026-11-23.json`).
+
+| Model | File size | Source bytes (8 tok) | Disk read calls | Approx amplification |
+|---|---:|---:|---:|---:|
+| Stories110M Q6_K | 110.8 MB | 999 MB | 144,869 | ~9x |
+| Qwen2.5-0.5B Q8_0 | 531 MB | 5.35 GB | 846,160 | ~10x |
+| Qwen2.5-1.5B Q4_K_M | 986 MB | 10.21 GB | — | ~10x |
+| Llama-3.2-1B Q4_K_M | 808 MB | 8.74 GB | — | ~11x |
+
+**Cost categories.** The dominant cost is repeated per-token weight streaming: each forward pass re-reads the entire weight set (no persistent weight residency), so source bytes ~= (prefill + generated) x model payload. Authentication is a one-time whole-file SHA-256 pass (amortized). Mutation-detection re-reads and the consume read of the same range are intra-pass and local.
+
+**Bounded cache (<=32 MB, existing `CachedLocalReader`).** A 32 MB cache cut disk read *calls* ~9.5x (Stories110M 144,869 -> 15,268; Qwen0.5B 846,160 -> 81,688) at ~99.97% block-hit ratio, by absorbing immediate intra-pass re-requests of the same range. It did **not** reduce total source *bytes* (999 MB -> 1000 MB; 5.35 GB -> 5.35 GB): the per-token working set is the whole model, which exceeds any bounded cache, so blocks are evicted before the next token re-reads them. **Fewer read calls is not fewer physical bytes.** A cache large enough to cut bytes would have to hold the whole model, contradicting the out-of-core bounded-memory design.
+
+**Remote bandwidth lower bounds (transfer only, per generated token = one model payload).**
+
+| Model/token | 10 Mbps | 100 Mbps | 1 Gbps |
+|---|---:|---:|---:|
+| 531 MB (Qwen0.5B) | ~7.1 min | ~42 s | ~4.2 s |
+| 808 MB (Llama-3.2-1B) | ~10.8 min | ~65 s | ~6.5 s |
+| 986 MB (Qwen1.5B) | ~13.1 min | ~79 s | ~7.9 s |
+
+These are bandwidth floors; add latency. At ~846k range operations for a 531 MB / 8-token run, even a 1 ms RTT serialized would add ~846 s; requests therefore must be coalesced (few large ranges per tensor, not per row) and pipelined up to `max_outstanding`.
+
+**Conclusion.** Under the current re-stream-every-token access pattern, remote range-read is bandwidth-bound at model_size x tokens and latency-bound at range_count x RTT. It is impractical over 10/100 Mbps for interactive decoding and marginal at 1 Gbps. Viability requires one of: (a) an immutable, version-bound whole-model snapshot staged to fast local storage (disk, not RAM) with the bounded RAM cache on top — keeping out-of-core RAM bounds while paying the download once; (b) coalesced, pipelined large-range transport with a per-model-version integrity proof; or (c) accepting multi-second per-token latency. The in-RAM bounded cache addresses syscalls, not transfer volume, and must not be presented as a remote-bandwidth optimization.
