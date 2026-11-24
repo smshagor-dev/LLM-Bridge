@@ -19,7 +19,7 @@ fn main() {
     }
 }
 fn usage() -> &'static str {
-    "Usage:\n  llmbridge batch <model.gguf> --input prompts.txt --output-dir new-results [--workers 2] [--wait-timeout-ms 30000] [--deadline-ms milliseconds] [--sha256 digest]\n  llmbridge doctor [--json]\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge plan <path.gguf> [--ctx 128] [--workspace-mb 8] [--max-ram-mb 64] [--auto-context] [--auto-cache] [--json]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--cache-pressure-mb floor] [--sha256 trusted-digest] [--verification-mb 8] [--address-space-mb 24] [--auto-context] [--auto-cache] [--max-ram-mb 64] [--logits path.f32] [--deadline-ms milliseconds]\n  llmbridge logit-diff <path.gguf> --prompt <text> [--ctx 128] [--threads 1] [--top-k 10] [--workspace-mb 8] [--max-tokens 1] [--teacher-forced] [--dump-dir path]\n  Planning max-ram-mb is an incremental estimate budget; address-space-mb enforces a separate Linux process limit."
+    "Usage:\n  llmbridge batch <model.gguf> --input prompts.txt --output-dir new-results [--workers 2] [--wait-timeout-ms 30000] [--deadline-ms milliseconds] [--sha256 digest]\n  llmbridge doctor [--json]\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge plan <path.gguf> [--ctx 128] [--workspace-mb 8] [--max-ram-mb 64] [--auto-context] [--auto-cache] [--json]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--cache-pressure-mb floor] [--sha256 trusted-digest] [--verification-mb 8] [--snapshot-reuse] [--address-space-mb 24] [--auto-context] [--auto-cache] [--max-ram-mb 64] [--logits path.f32] [--deadline-ms milliseconds]\n  llmbridge logit-diff <path.gguf> --prompt <text> [--ctx 128] [--threads 1] [--top-k 10] [--workspace-mb 8] [--max-tokens 1] [--teacher-forced] [--dump-dir path]\n  Planning max-ram-mb is an incremental estimate budget; address-space-mb enforces a separate Linux process limit."
 }
 fn json_number(value: Option<u64>) -> String {
     value.map_or_else(|| "null".to_string(), |x| x.to_string())
@@ -368,6 +368,7 @@ fn chat(args: &[String]) -> Result<(), String> {
     let mut address_space_mb: Option<u64> = None;
     let mut logits_path: Option<String> = None;
     let mut deadline_ms: Option<u64> = None;
+    let mut snapshot_reuse = false;
     let mut pos = 1usize;
     while pos < args.len() {
         if args[pos] == "--auto-context" {
@@ -382,6 +383,11 @@ fn chat(args: &[String]) -> Result<(), String> {
         }
         if args[pos] == "--metrics" {
             show_metrics = true;
+            pos += 1;
+            continue;
+        }
+        if args[pos] == "--snapshot-reuse" {
+            snapshot_reuse = true;
             pos += 1;
             continue;
         }
@@ -463,6 +469,12 @@ fn chat(args: &[String]) -> Result<(), String> {
     }
     if cache_mb > 32 || (backend == "resident" && cache_mb != 0) {
         return Err("cache-mb requires streamed backend and must be 0..32".into());
+    }
+    if snapshot_reuse && (backend != "streamed" || expected_hash.is_none() || cache_mb == 0) {
+        return Err(
+            "--snapshot-reuse requires the streamed backend, --sha256 authentication, and --cache-mb > 0"
+                .into(),
+        );
     }
     if cache_pressure_mb.is_some() && backend != "streamed" {
         return Err("cache pressure monitoring requires streamed backend".into());
@@ -600,6 +612,7 @@ fn chat(args: &[String]) -> Result<(), String> {
             max_tokens,
             collect_performance: show_metrics,
             cache_bytes,
+            snapshot_reuse,
             authentication_budget_bytes: verification_mb * 1024 * 1024,
             workspace_bytes: workspace_mb
                 .checked_mul(1024 * 1024)

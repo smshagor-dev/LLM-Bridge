@@ -106,6 +106,11 @@ pub struct StreamedConfig {
     pub authentication_budget_bytes: usize,
     /// Adds constant-space wall-clock observations; disabled by default.
     pub collect_performance: bool,
+    /// Opt into Mode B authenticated-snapshot range reuse (content-addressed
+    /// manifest verification through the bounded cache). Off by default, so the
+    /// decoder keeps the mutable-source, mutation-detecting read path. Has effect
+    /// only on an authenticated source with a nonzero `cache_bytes` budget.
+    pub snapshot_reuse: bool,
 }
 impl Default for StreamedConfig {
     fn default() -> Self {
@@ -117,6 +122,7 @@ impl Default for StreamedConfig {
             cache_bytes: 0,
             authentication_budget_bytes: 8 * 1024 * 1024,
             collect_performance: false,
+            snapshot_reuse: false,
         }
     }
 }
@@ -337,11 +343,12 @@ extern "C" fn read<F, L>(
                         return Ok::<usize, std::io::Error>(0);
                     }
                     let verification_started = Instant::now();
-                    let verification = state.reader.verify_staged_range_cancellable(
-                        offset,
-                        staged.bytes(),
-                        || interrupted(flag, deadline),
-                    );
+                    let verification =
+                        state
+                            .reader
+                            .verify_staged_cancellable(offset, staged.bytes(), || {
+                                interrupted(flag, deadline)
+                            });
                     state.lookahead_revalidation_ns =
                         state.lookahead_revalidation_ns.saturating_add(
                             verification_started
@@ -741,12 +748,20 @@ fn generate_streamed_internal<F: FnMut(&[u8]) -> bool, L: FnMut(&[f32]) -> bool>
     if unsafe { llmbridge_abi_version() } != 1 {
         return Err("streamed native ABI mismatch".into());
     }
+    let mut cached_reader =
+        CachedLocalReader::new(reader, config.cache_bytes).map_err(|e| e.to_string())?;
+    if config.snapshot_reuse {
+        // Opt-in Mode B: authenticated range reads reuse manifest-verified bytes
+        // through the bounded cache. No effect on an unauthenticated source or a
+        // zero cache budget. The default path is untouched.
+        cached_reader.set_read_policy(crate::read_cache::ReadPolicy::AuthenticatedSnapshot);
+    }
     let mut state = State {
         ranges: RangeReads::default(),
         sealed: sealed.as_ref(),
         weight_offset: data_offset,
         max_chunk: config.chunk_bytes,
-        reader: CachedLocalReader::new(reader, config.cache_bytes).map_err(|e| e.to_string())?,
+        reader: cached_reader,
         cancelled,
         deadline,
         cache_control: control.cache,
