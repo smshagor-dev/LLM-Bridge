@@ -7,6 +7,10 @@ license.workspace = true
 [features]
 default = []
 native = []
+# Vendor-neutral remote model storage (HTTP/1.1 Range transport + secure local
+# staging). Dependency-free (std only); off by default so default/native builds
+# and the no-default-features build are unaffected.
+remote = []
 [dependencies]
 sha2 = "=0.10.9"
 
