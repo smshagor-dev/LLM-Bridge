@@ -11,6 +11,9 @@ sha2 = "=0.10.9"
 [features]
 default = ["native"]
 native = ["llmbridge-core/native"]
+# Opt-in vendor-neutral remote model staging (`llmbridge stage`). Forwards to the
+# core `remote` feature; dependency-free (std only).
+remote = ["llmbridge-core/remote"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "=0.2.191"

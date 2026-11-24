@@ -18,8 +18,122 @@ fn main() {
         std::process::exit(1);
     }
 }
+#[cfg(not(feature = "remote"))]
+fn stage_run(_args: &[String]) -> Result<(), String> {
+    Err("this build has no remote support; rebuild the CLI with --features remote".into())
+}
+
+/// `llmbridge stage <http-url> --sha256 <hex> --size <bytes> --output <path>
+/// [--chunk-mb N] [--allow-private] [--staging-dir DIR]`
+///
+/// Stages a remote model to local disk through the vendor-neutral HTTP Range
+/// adapter, verifies the whole-file SHA-256, and atomically publishes it. The
+/// published file can then be run with `chat --snapshot-reuse` (Mode B).
+/// An optional authorization header is read from `LLMBRIDGE_REMOTE_AUTH` (never
+/// taken on the command line, never logged).
+#[cfg(feature = "remote")]
+fn stage_run(args: &[String]) -> Result<(), String> {
+    use llmbridge_core::remote::{stage_to_file, HttpRangeConfig, HttpRangeSource, StagingConfig};
+    use std::path::PathBuf;
+    let usage = "usage: llmbridge stage <http-url> --sha256 <hex> --size <bytes> --output <path> [--chunk-mb 8] [--allow-private] [--staging-dir DIR]";
+    let url = args
+        .get(1)
+        .filter(|a| !a.starts_with("--"))
+        .ok_or(usage)?
+        .clone();
+    let mut sha: Option<String> = None;
+    let mut size: Option<u64> = None;
+    let mut output: Option<String> = None;
+    let mut chunk_mb: usize = 8;
+    let mut allow_private = false;
+    let mut staging_dir: Option<String> = None;
+    let mut i = 2;
+    while i < args.len() {
+        if args[i] == "--allow-private" {
+            allow_private = true;
+            i += 1;
+            continue;
+        }
+        let flag = args[i].as_str();
+        let value = args
+            .get(i + 1)
+            .ok_or_else(|| format!("missing value for {flag}"))?;
+        match flag {
+            "--sha256" => sha = Some(value.clone()),
+            "--size" => size = Some(value.parse().map_err(|_| "invalid --size")?),
+            "--output" => output = Some(value.clone()),
+            "--chunk-mb" => chunk_mb = value.parse().map_err(|_| "invalid --chunk-mb")?,
+            "--staging-dir" => staging_dir = Some(value.clone()),
+            _ => return Err(format!("unknown flag {flag}")),
+        }
+        i += 2;
+    }
+    let sha = sha.ok_or("--sha256 is required")?;
+    if sha.len() != 64 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("--sha256 must be 64 hex digits".into());
+    }
+    let size = size.ok_or("--size is required")?;
+    let output = output.ok_or("--output is required")?;
+    if chunk_mb == 0 || chunk_mb > 64 {
+        return Err("--chunk-mb must be in 1..=64".into());
+    }
+    let out_path = PathBuf::from(&output);
+    let staging = staging_dir
+        .map(PathBuf::from)
+        .or_else(|| {
+            out_path
+                .parent()
+                .map(PathBuf::from)
+                .filter(|p| !p.as_os_str().is_empty())
+        })
+        .unwrap_or_else(|| PathBuf::from("."));
+    let cfg = HttpRangeConfig {
+        allow_private_endpoints: allow_private,
+        authorization: std::env::var("LLMBRIDGE_REMOTE_AUTH")
+            .ok()
+            .filter(|v| !v.is_empty()),
+        ..Default::default()
+    };
+    let mut source = HttpRangeSource::connect(&url, Some(size), cfg).map_err(|e| e.to_string())?;
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let stop = Arc::clone(&cancelled);
+    ctrlc::set_handler(move || stop.store(true, Ordering::SeqCst)).ok();
+    let scfg = StagingConfig {
+        expected_size: size,
+        expected_sha256: sha,
+        chunk_bytes: chunk_mb * 1024 * 1024,
+        staging_dir: staging,
+    };
+    let started = std::time::Instant::now();
+    let flag_source = Arc::clone(&cancelled);
+    let mut flag = move || flag_source.load(Ordering::Acquire);
+    let published =
+        stage_to_file(&mut source, &out_path, &scfg, &mut flag, None).map_err(|e| e.to_string())?;
+    let elapsed = started.elapsed().as_secs_f64();
+    let etag = published
+        .identity
+        .validator
+        .etag
+        .as_deref()
+        .map(|e| format!("\"{}\"", e.replace('\\', "\\\\").replace('"', "\\\"")))
+        .unwrap_or_else(|| "null".to_string());
+    println!(
+        "LLMBRIDGE_STAGE {{\"published\":\"{}\",\"size\":{},\"sha256\":\"{}\",\"bytes_transferred\":{},\"chunks_transferred\":{},\"chunks_resumed\":{},\"elapsed_s\":{:.3},\"uri\":\"{}\",\"etag\":{}}}",
+        published.path.display(),
+        published.size,
+        published.sha256,
+        published.bytes_transferred,
+        published.chunks_transferred,
+        published.chunks_resumed,
+        elapsed,
+        published.identity.uri,
+        etag
+    );
+    Ok(())
+}
+
 fn usage() -> &'static str {
-    "Usage:\n  llmbridge batch <model.gguf> --input prompts.txt --output-dir new-results [--workers 2] [--wait-timeout-ms 30000] [--deadline-ms milliseconds] [--sha256 digest]\n  llmbridge doctor [--json]\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge plan <path.gguf> [--ctx 128] [--workspace-mb 8] [--max-ram-mb 64] [--auto-context] [--auto-cache] [--json]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--cache-pressure-mb floor] [--sha256 trusted-digest] [--verification-mb 8] [--snapshot-reuse] [--address-space-mb 24] [--auto-context] [--auto-cache] [--max-ram-mb 64] [--logits path.f32] [--deadline-ms milliseconds]\n  llmbridge logit-diff <path.gguf> --prompt <text> [--ctx 128] [--threads 1] [--top-k 10] [--workspace-mb 8] [--max-tokens 1] [--teacher-forced] [--dump-dir path]\n  Planning max-ram-mb is an incremental estimate budget; address-space-mb enforces a separate Linux process limit."
+    "Usage:\n  llmbridge batch <model.gguf> --input prompts.txt --output-dir new-results [--workers 2] [--wait-timeout-ms 30000] [--deadline-ms milliseconds] [--sha256 digest]\n  llmbridge doctor [--json]\n  llmbridge hardware --json\n  llmbridge models inspect <path.gguf>\n  llmbridge models verify <path.gguf> <sha256hex>\n  llmbridge models tensor-index <path.gguf>\n  llmbridge models tensor-matvec <path.gguf> <q8-0-tensor-name> [expected-sha256]\n  llmbridge models native-index-probe <path.gguf>\n  llmbridge models tensor-sha256 <path.gguf> <tensor-name> [expected-sha256]\n  llmbridge plan <path.gguf> [--ctx 128] [--workspace-mb 8] [--max-ram-mb 64] [--auto-context] [--auto-cache] [--json]\n  llmbridge chat <path.gguf> --prompt <text> [--max-tokens 16] [--ctx 128] [--threads 2] [--stream] [--metrics] [--backend resident|streamed] [--workspace-mb 8] [--cache-mb 0] [--cache-pressure-mb floor] [--sha256 trusted-digest] [--verification-mb 8] [--snapshot-reuse] [--address-space-mb 24] [--auto-context] [--auto-cache] [--max-ram-mb 64] [--logits path.f32] [--deadline-ms milliseconds]\n  llmbridge stage <http-url> --sha256 <hex> --size <bytes> --output <path> [--chunk-mb 8] [--allow-private] [--staging-dir DIR] (requires build --features remote)\n  llmbridge logit-diff <path.gguf> --prompt <text> [--ctx 128] [--threads 1] [--top-k 10] [--workspace-mb 8] [--max-tokens 1] [--teacher-forced] [--dump-dir path]\n  Planning max-ram-mb is an incremental estimate budget; address-space-mb enforces a separate Linux process limit."
 }
 fn json_number(value: Option<u64>) -> String {
     value.map_or_else(|| "null".to_string(), |x| x.to_string())
@@ -53,6 +167,8 @@ fn run(args: Vec<String>) -> Result<(), String> {
             );
             Ok(())
         }
+
+        Some("stage") => stage_run(&args),
 
         #[cfg(feature = "native")]
         Some("models") if args.len() == 3 && args[1] == "native-index-probe" => {

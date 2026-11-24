@@ -98,3 +98,7 @@ required-features = ["native"]
 [[example]]
 name = "lookahead_parity"
 required-features = ["native"]
+
+[[example]]
+name = "range_server"
+required-features = ["remote"]
