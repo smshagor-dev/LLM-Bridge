@@ -1,6 +1,6 @@
 # Vendor-neutral bounded range-read storage — design requirements
 
-Status: **HTTP Range transport + secure local staging implemented and validated (opt-in `remote` feature); S3 and public TLS/HTTPS deferred.** Prepared 2026-11-23 against commit `c942b74`; updated 2026-11-24 with the implemented pipeline (see "Implemented remote staging pipeline" below).
+Status: **HTTP/HTTPS Range transport + secure resumable staging implemented and validated (opt-in `remote`/`https` features); genuine public-HTTPS 7B acquisition demonstrated. S3-compatible source implemented but AWS interoperability unverified.** Prepared 2026-11-23 against commit `c942b74`; updated 2026-11-24 (see "Implemented remote staging pipeline" and "HTTPS and S3-compatible transport" below).
 
 ## Purpose and scope
 
@@ -42,7 +42,58 @@ The `remote` cargo feature (std only, dependency-free, off by default) implement
 
 **Genuine 7B end-to-end (`benchmarks/evidence/authenticated_remote_staging_7b_2026-11-24.json`).** Serving the real `Qwen2.5-7B-Instruct-Q4_K_M.gguf` over a localhost HTTP Range server, `llmbridge stage` transferred all 4,683,074,240 bytes in 559 × 8 MiB chunks in 18.55 s, the published SHA-256 matched the trusted digest, the staged file was byte-identical to the original, and no `.part`/`.state` remained. Mode B inference on the staged model produced output **bit-identical** to direct-local Mode B (" Paris. It is located in the northern"; staged TTFT 24.47 s / 0.266 tok/s vs direct 24.44 s / 0.269 tok/s), confirming §14's expectation: staging does not speed up local decode; its benefit is paying transfer **once** rather than per inference pass.
 
-**Deferred (documented, not implemented).** Public TLS/HTTPS is not implemented — the adapter accepts only the `http` scheme (so the deterministic local-server tests and the localhost 7B experiment exercise the full contract without adding a TLS stack to this minimal, audited crate); a TLS-terminating proxy or a future feature is required for public HTTPS endpoints. The S3-compatible adapter is deferred: the `RemoteSource` trait is provider-neutral so an S3 adapter slots in, but it is not implemented or validated here (it needs a maintained SDK and credentials/endpoint that cannot be deterministically tested), and must not be claimed as production-ready on the basis of generic HTTP support.
+## HTTPS and S3-compatible transport (2026-11-24)
+
+**Production HTTPS (rustls).** The transport now supports `https` behind an opt-in
+`https` cargo feature (rustls 0.23 with the ring provider + the Mozilla root store
+via webpki-roots). TLS is layered over the same `std::net::TcpStream`, so the strict
+HTTP Range validation and the SSRF policy are reused unchanged on both schemes. The
+certificate is verified for full chain **and** hostname by the rustls default
+verifier (no insecure bypass); an optional extra trusted root CA supports
+private/custom endpoints without weakening the public store. The default and native
+inference builds pull in no network/TLS dependencies.
+
+- **Scheme policy.** Public plaintext `http` is refused by default; it is permitted
+  only under the explicit trusted-endpoint opt-in (`allow_private_endpoints`, for
+  controlled local/private infrastructure). `https` to a public host is the normal
+  path.
+- **Destination-pinned SSRF.** The host is resolved to all A/AAAA addresses; if any
+  resolved address is private/loopback/link-local the whole host is rejected unless
+  opted in, and the connection is made only to one of those validated addresses
+  (IPv4 first, so an unroutable AAAA does not strand an IPv4-only host). There is no
+  re-resolution between the policy check and connect, so a DNS-rebinding answer
+  cannot move the socket destination. For TLS the certificate is still matched
+  against the hostname.
+- **Credentials.** An optional `Authorization` header (from `LLMBRIDGE_REMOTE_AUTH`)
+  is held in memory only, dropped on a cross-host redirect, and never logged,
+  persisted, written to evidence, or passed to native FFI.
+
+**Genuine public-HTTPS acquisition.** `llmbridge stage` fetched the pinned
+Qwen2.5-7B (4,683,074,240 bytes) from `huggingface.co` over real TLS, following the
+HF→CDN 302 redirect, in 140 × 32 MiB range requests; the published SHA-256 matched
+the trusted digest, the staged file was byte-identical to the local original, and
+Mode B inference on it produced output bit-identical to direct-local Mode B
+(`benchmarks/evidence/public_https_s3_staging_7b_2026-11-24.json`). The CDN's ETag
+(`"8a45e4e9…"`) is **not** the file SHA-256 and is treated only as a version token —
+the trusted whole-file digest remains the sole publication authority.
+
+**S3-compatible source (implemented; AWS interop unverified).** `S3Source`/`S3Config`
+address an object by `{endpoint, region, bucket, key, versionId, path/virtual-hosted}`
+and reuse the HTTP(S) adapter on the vendor-neutral `RemoteSource` contract — one
+staging/verification/publication pipeline, not a fork. It adds **no** AWS SigV4
+signing and **no** cloud SDK: private buckets are reached with a presigned URL (use
+`HttpRangeSource` directly) or a caller-supplied `Authorization` header, and the
+provider `VersionId` is bound where the endpoint reports `x-amz-version-id`. This is
+deliberate — adding the async `aws-sdk-s3` tree to this minimal, audited, sync crate
+is unjustified when interoperability cannot be validated here. S3 behaviour is
+covered by deterministic tests (path-style GetObject, VersionId binding + drift,
+missing-object, access-denied), but **real AWS/S3 interoperability is unverified**
+(no endpoint/credentials) and is not claimed as production-ready.
+
+**Remaining transport work.** A local-CA TLS cert matrix (expired/wrong-hostname/
+unknown-CA via a rustls+rcgen test server), connection reuse / coalesced-pipelined
+ranges for WAN throughput (one TLS handshake per range made the 4.68 GB WAN transfer
+take ~26 min), a real S3/MinIO interoperability run, and the Windows MSVC native lane.
 
 ## Required properties
 
