@@ -155,23 +155,30 @@ fn check_active(
 
 // ----------------------------- URL + endpoint policy -----------------------------
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Scheme {
+    Http,
+    Https,
+}
+
 #[derive(Clone, Debug)]
 struct Url {
+    scheme: Scheme,
     host: String,
     port: u16,
     path: String,
 }
 
-fn parse_http_url(raw: &str) -> Result<Url, RemoteError> {
-    let rest = raw.strip_prefix("http://").ok_or_else(|| {
-        if raw.starts_with("https://") {
-            RemoteError::UnsupportedScheme(
-                "https/TLS is deferred; use the http scheme or a TLS-terminating proxy".into(),
-            )
-        } else {
-            RemoteError::InvalidUrl(format!("only http:// is supported: {raw}"))
-        }
-    })?;
+fn parse_url(raw: &str) -> Result<Url, RemoteError> {
+    let (scheme, rest, default_port) = if let Some(r) = raw.strip_prefix("https://") {
+        (Scheme::Https, r, 443u16)
+    } else if let Some(r) = raw.strip_prefix("http://") {
+        (Scheme::Http, r, 80u16)
+    } else {
+        return Err(RemoteError::InvalidUrl(format!(
+            "only http:// or https:// are supported: {raw}"
+        )));
+    };
     if rest.is_empty() {
         return Err(RemoteError::InvalidUrl("empty authority".into()));
     }
@@ -190,7 +197,7 @@ fn parse_http_url(raw: &str) -> Result<Url, RemoteError> {
             p.parse::<u16>()
                 .map_err(|_| RemoteError::InvalidUrl("bad port".into()))?,
         ),
-        None => (authority.to_string(), 80u16),
+        None => (authority.to_string(), default_port),
     };
     if host.is_empty() {
         return Err(RemoteError::InvalidUrl("empty host".into()));
@@ -202,6 +209,7 @@ fn parse_http_url(raw: &str) -> Result<Url, RemoteError> {
         return Err(RemoteError::InvalidUrl("control character in url".into()));
     }
     Ok(Url {
+        scheme,
         host,
         port,
         path: path.to_string(),
@@ -229,25 +237,37 @@ fn ip_is_private_or_local(ip: &IpAddr) -> bool {
     }
 }
 
-/// Resolve the authority and enforce the SSRF endpoint policy, returning the
-/// permitted socket address. Private/loopback/link-local targets are rejected
-/// unless `allow_private_endpoints` explicitly opts into a trusted-endpoint policy
-/// (e.g. localhost tests or an S3-compatible service on a private network).
-fn resolve_allowed(url: &Url, allow_private_endpoints: bool) -> Result<SocketAddr, RemoteError> {
-    let addrs = (url.host.as_str(), url.port)
+/// Resolve the authority and enforce the SSRF endpoint policy, returning every
+/// permitted socket address (IPv4 first, so an unroutable IPv6 AAAA does not strand
+/// an IPv4-only host). If ANY resolved address is private/loopback/link-local the
+/// whole host is rejected unless `allow_private_endpoints` opts into a trusted
+/// endpoint — so a DNS answer cannot smuggle in a private destination. The caller
+/// connects only to one of these returned addresses (destination pinning).
+fn resolve_allowed(
+    url: &Url,
+    allow_private_endpoints: bool,
+) -> Result<Vec<SocketAddr>, RemoteError> {
+    let addrs: Vec<SocketAddr> = (url.host.as_str(), url.port)
         .to_socket_addrs()
-        .map_err(|e| RemoteError::DisallowedEndpoint(format!("resolve failed: {e}")))?;
-    let mut last: Option<SocketAddr> = None;
-    for addr in addrs {
+        .map_err(|e| RemoteError::DisallowedEndpoint(format!("resolve failed: {e}")))?
+        .collect();
+    if addrs.is_empty() {
+        return Err(RemoteError::DisallowedEndpoint(
+            "no address for host".into(),
+        ));
+    }
+    for addr in &addrs {
         if ip_is_private_or_local(&addr.ip()) && !allow_private_endpoints {
             return Err(RemoteError::DisallowedEndpoint(format!(
                 "{} resolves to a private/loopback address; set allow_private_endpoints for a trusted endpoint",
                 url.host
             )));
         }
-        last = Some(addr);
     }
-    last.ok_or_else(|| RemoteError::DisallowedEndpoint("no address for host".into()))
+    // Prefer IPv4 first (stable), keeping relative order otherwise.
+    let mut ordered = addrs.clone();
+    ordered.sort_by_key(|a| if a.is_ipv4() { 0 } else { 1 });
+    Ok(ordered)
 }
 
 // ----------------------------- HTTP Range adapter -----------------------------
@@ -264,6 +284,11 @@ pub struct HttpRangeConfig {
     /// Optional authorization header value. Sent only to the origin host and
     /// dropped on cross-host redirects. Never logged or persisted.
     pub authorization: Option<String>,
+    /// Optional additional trusted root CA (DER) for HTTPS, added to the Mozilla
+    /// root store. For a private/controlled endpoint or S3-compatible service with
+    /// its own CA; also used by the deterministic TLS tests. The public trust store
+    /// is never weakened or bypassed.
+    pub extra_root_ca_der: Option<Vec<u8>>,
 }
 impl Default for HttpRangeConfig {
     fn default() -> Self {
@@ -276,6 +301,7 @@ impl Default for HttpRangeConfig {
             backoff_base: Duration::from_millis(200),
             allow_private_endpoints: false,
             authorization: None,
+            extra_root_ca_der: None,
         }
     }
 }
@@ -303,7 +329,7 @@ impl HttpRangeSource {
         expected_size: Option<u64>,
         cfg: HttpRangeConfig,
     ) -> Result<Self, RemoteError> {
-        let url = parse_http_url(raw_url)?;
+        let url = parse_url(raw_url)?;
         resolve_allowed(&url, cfg.allow_private_endpoints)?;
         let mut probe = [0u8; 1];
         let mut never = || false;
@@ -379,6 +405,117 @@ impl RemoteSource for HttpRangeSource {
     }
 }
 
+/// A connected byte stream: plaintext TCP or a rustls TLS session over TCP. The
+/// HTTP framing/validation above is identical on both; only the connection differs.
+enum Transport {
+    Plain(TcpStream),
+    #[cfg(feature = "https")]
+    Tls(Box<rustls::StreamOwned<rustls::ClientConnection, TcpStream>>),
+}
+impl Read for Transport {
+    fn read(&mut self, b: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Transport::Plain(s) => s.read(b),
+            #[cfg(feature = "https")]
+            Transport::Tls(s) => s.read(b),
+        }
+    }
+}
+impl Write for Transport {
+    fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+        match self {
+            Transport::Plain(s) => s.write(b),
+            #[cfg(feature = "https")]
+            Transport::Tls(s) => s.write(b),
+        }
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Transport::Plain(s) => s.flush(),
+            #[cfg(feature = "https")]
+            Transport::Tls(s) => s.flush(),
+        }
+    }
+}
+
+/// Connect to `url` under the endpoint policy. Plaintext `http` is refused unless
+/// `allow_private_endpoints` is set (a trusted/dev endpoint); public plaintext HTTP
+/// is rejected by default. SSRF: the socket is pinned to the policy-validated
+/// resolved address, so no re-resolution can move the destination (DNS rebinding),
+/// and for TLS the certificate is verified against the hostname.
+fn connect_transport(url: &Url, cfg: &HttpRangeConfig) -> Result<Transport, RemoteError> {
+    if url.scheme == Scheme::Http && !cfg.allow_private_endpoints {
+        return Err(RemoteError::DisallowedEndpoint(
+            "plaintext http is refused by default; use https or set allow_private_endpoints for a trusted endpoint".into(),
+        ));
+    }
+    // Reject https before any DNS resolution when TLS is not compiled in.
+    #[cfg(not(feature = "https"))]
+    if url.scheme == Scheme::Https {
+        return Err(RemoteError::UnsupportedScheme(
+            "https requires building with the `https` feature".into(),
+        ));
+    }
+    let addrs = resolve_allowed(url, cfg.allow_private_endpoints)?;
+    let mut last_err = RemoteError::Transient("no resolved address connected".into());
+    let mut connected = None;
+    for addr in addrs {
+        match TcpStream::connect_timeout(&addr, cfg.connect_timeout) {
+            Ok(tcp) => {
+                connected = Some(tcp);
+                break;
+            }
+            Err(e) => last_err = RemoteError::Transient(format!("connect {addr}: {e}")),
+        }
+    }
+    let tcp = connected.ok_or(last_err)?;
+    tcp.set_read_timeout(Some(cfg.io_timeout)).ok();
+    tcp.set_write_timeout(Some(cfg.io_timeout)).ok();
+    tcp.set_nodelay(true).ok();
+    match url.scheme {
+        Scheme::Http => Ok(Transport::Plain(tcp)),
+        Scheme::Https => connect_tls(tcp, &url.host, cfg),
+    }
+}
+
+#[cfg(feature = "https")]
+fn connect_tls(
+    tcp: TcpStream,
+    host: &str,
+    cfg: &HttpRangeConfig,
+) -> Result<Transport, RemoteError> {
+    use std::sync::Arc;
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    if let Some(der) = &cfg.extra_root_ca_der {
+        roots
+            .add(rustls_pki_types::CertificateDer::from(der.clone()))
+            .map_err(|e| RemoteError::Io(format!("add trusted CA: {e}")))?;
+    }
+    // Default verifier: full certificate-chain AND hostname verification, no bypass.
+    let config = rustls::ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    let server_name = rustls_pki_types::ServerName::try_from(host.to_string())
+        .map_err(|_| RemoteError::InvalidUrl("invalid TLS server name".into()))?;
+    let conn = rustls::ClientConnection::new(Arc::new(config), server_name)
+        .map_err(|e| RemoteError::Io(format!("tls setup: {e}")))?;
+    Ok(Transport::Tls(Box::new(rustls::StreamOwned::new(
+        conn, tcp,
+    ))))
+}
+
+#[cfg(not(feature = "https"))]
+fn connect_tls(
+    _tcp: TcpStream,
+    _host: &str,
+    _cfg: &HttpRangeConfig,
+) -> Result<Transport, RemoteError> {
+    Err(RemoteError::UnsupportedScheme(
+        "https requires building with the `https` feature".into(),
+    ))
+}
+
 fn fetch_range_with_retry(
     url: &Url,
     cfg: &HttpRangeConfig,
@@ -435,12 +572,7 @@ fn fetch_range_once(
 
     for _redirect in 0..=cfg.max_redirects {
         check_active(cancelled, deadline)?;
-        let addr = resolve_allowed(&url, cfg.allow_private_endpoints)?;
-        let mut stream = TcpStream::connect_timeout(&addr, cfg.connect_timeout)
-            .map_err(|e| RemoteError::Transient(format!("connect: {e}")))?;
-        stream.set_read_timeout(Some(cfg.io_timeout)).ok();
-        stream.set_write_timeout(Some(cfg.io_timeout)).ok();
-        stream.set_nodelay(true).ok();
+        let mut stream = connect_transport(&url, cfg)?;
 
         let mut req = String::new();
         req.push_str(&format!("GET {} HTTP/1.1\r\n", url.path));
@@ -458,6 +590,9 @@ fn fetch_range_once(
         stream
             .write_all(req.as_bytes())
             .map_err(|e| RemoteError::Transient(format!("write: {e}")))?;
+        stream
+            .flush()
+            .map_err(|e| RemoteError::Transient(format!("flush: {e}")))?;
 
         let mut reader = BufReader::new(stream);
         let (status, headers) = read_status_and_headers(&mut reader, cfg.max_header_bytes)?;
@@ -518,7 +653,7 @@ fn fetch_range_once(
                 let loc = headers
                     .get("location")
                     .ok_or_else(|| RemoteError::Protocol("redirect without location".into()))?;
-                let next = parse_http_url(loc)?;
+                let next = parse_url(loc)?;
                 if !host_eq(&url, &next) {
                     carry_auth = false;
                 }
@@ -933,6 +1068,120 @@ pub fn stage_to_file(
     })
 }
 
+// ----------------------------- S3-compatible source -----------------------------
+
+/// Addressing for an S3 / S3-compatible object. Builds a GetObject URL and reuses
+/// the HTTP(S) Range adapter; it does NOT implement SigV4 request signing. Private
+/// buckets must therefore be reached via a presigned URL (use `HttpRangeSource`
+/// directly) or an endpoint that accepts a caller-supplied Authorization header
+/// (`HttpRangeConfig.authorization`). AWS SigV4-authenticated access is deferred,
+/// so this adapter is interoperability-unverified against real AWS S3.
+#[derive(Clone, Debug)]
+pub struct S3Config {
+    /// Custom endpoint for an S3-compatible provider, e.g.
+    /// "https://minio.example:9000" or (dev/tests) "http://127.0.0.1:PORT". `None`
+    /// targets AWS virtual-hosted-style `https://{bucket}.s3.{region}.amazonaws.com`.
+    pub endpoint: Option<String>,
+    pub region: String,
+    pub bucket: String,
+    pub key: String,
+    /// Pinned provider object version (S3 VersionId); bound at connect if the
+    /// endpoint echoes `x-amz-version-id`.
+    pub version_id: Option<String>,
+    /// Path-style (`/{bucket}/{key}`) vs virtual-hosted (`{bucket}.host/{key}`).
+    pub path_style: bool,
+}
+
+impl S3Config {
+    fn object_url(&self) -> Result<String, RemoteError> {
+        if self.bucket.is_empty() || self.key.is_empty() {
+            return Err(RemoteError::InvalidUrl(
+                "s3 bucket and key are required".into(),
+            ));
+        }
+        if self
+            .bucket
+            .bytes()
+            .any(|b| b == b'/' || b == b'\r' || b == b'\n' || b == 0)
+        {
+            return Err(RemoteError::InvalidUrl("invalid s3 bucket".into()));
+        }
+        let key = self.key.trim_start_matches('/');
+        let mut url = match &self.endpoint {
+            Some(ep) => {
+                let ep = ep.trim_end_matches('/');
+                let (scheme, host) = ep
+                    .split_once("://")
+                    .ok_or_else(|| RemoteError::InvalidUrl("s3 endpoint needs a scheme".into()))?;
+                if self.path_style {
+                    format!("{scheme}://{host}/{}/{key}", self.bucket)
+                } else {
+                    format!("{scheme}://{}.{host}/{key}", self.bucket)
+                }
+            }
+            None => format!(
+                "https://{}.s3.{}.amazonaws.com/{key}",
+                self.bucket, self.region
+            ),
+        };
+        if let Some(v) = &self.version_id {
+            if v.bytes()
+                .any(|b| b == b'\r' || b == b'\n' || b == b' ' || b == b'&' || b == 0)
+            {
+                return Err(RemoteError::InvalidUrl("invalid versionId".into()));
+            }
+            url.push_str("?versionId=");
+            url.push_str(v);
+        }
+        Ok(url)
+    }
+}
+
+/// An S3 / S3-compatible object source: a thin wrapper over `HttpRangeSource` on the
+/// vendor-neutral `RemoteSource` contract (same staging/verification/publication).
+#[derive(Debug)]
+pub struct S3Source {
+    inner: HttpRangeSource,
+}
+impl S3Source {
+    pub fn connect(
+        s3: &S3Config,
+        http: HttpRangeConfig,
+        expected_size: Option<u64>,
+    ) -> Result<Self, RemoteError> {
+        let url = s3.object_url()?;
+        let inner = HttpRangeSource::connect(&url, expected_size, http)?;
+        // Bind the pinned provider version where the endpoint reports one; a drift
+        // is rejected. A trusted whole-file SHA-256 remains the final authority.
+        if let Some(want) = &s3.version_id {
+            if let Some(got) = inner.identity().validator.version_id.as_deref() {
+                if got != want {
+                    return Err(RemoteError::ObjectChanged);
+                }
+            }
+        }
+        Ok(Self { inner })
+    }
+}
+impl RemoteSource for S3Source {
+    fn len(&self) -> u64 {
+        self.inner.len()
+    }
+    fn identity(&self) -> &ObjectIdentity {
+        self.inner.identity()
+    }
+    fn read_range(
+        &mut self,
+        offset: u64,
+        len: usize,
+        buf: &mut [u8],
+        cancelled: &mut dyn FnMut() -> bool,
+        deadline: Option<Instant>,
+    ) -> Result<(), RemoteError> {
+        self.inner.read_range(offset, len, buf, cancelled, deadline)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1224,7 +1473,8 @@ mod tests {
     }
 
     #[test]
-    fn https_scheme_is_unsupported() {
+    #[cfg(not(feature = "https"))]
+    fn https_scheme_is_unsupported_without_feature() {
         let err = HttpRangeSource::connect(
             "https://example.com/model",
             None,
@@ -1232,6 +1482,37 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, RemoteError::UnsupportedScheme(_)), "{err}");
+    }
+
+    #[test]
+    fn plaintext_http_refused_without_trusted_opt_in() {
+        // Public plaintext http is rejected by default (no DNS/connection made).
+        let err =
+            HttpRangeSource::connect("http://example.com/model", None, HttpRangeConfig::default())
+                .unwrap_err();
+        assert!(matches!(err, RemoteError::DisallowedEndpoint(_)), "{err}");
+    }
+
+    #[cfg(feature = "https")]
+    #[test]
+    fn https_against_non_tls_server_fails_closed() {
+        // Pointing the TLS client at a plaintext HTTP server must fail the TLS
+        // handshake and never silently fall back to an insecure connection.
+        let content = fixture(64);
+        let c2 = content.clone();
+        let server = TestServer::spawn(move |_, head| serve_206(&c2, head));
+        let url = format!("https://127.0.0.1:{}/model", server.addr.port());
+        let cfg = HttpRangeConfig {
+            allow_private_endpoints: true,
+            max_retries: 1,
+            backoff_base: Duration::from_millis(1),
+            ..Default::default()
+        };
+        let err = HttpRangeSource::connect(&url, None, cfg).unwrap_err();
+        assert!(
+            !matches!(err, RemoteError::UnsupportedScheme(_)),
+            "expected a TLS failure, got {err}"
+        );
     }
 
     #[test]
@@ -1507,5 +1788,132 @@ mod tests {
         let err = stage_to_file(&mut src, &link, &cfg, &mut || false, None).unwrap_err();
         assert!(matches!(err, RemoteError::Staging(_)), "{err}");
         fs::remove_dir_all(&dir).ok();
+    }
+
+    // ------------------------------- S3-compatible -------------------------------
+
+    fn serve_206_s3(content: &[u8], head: &str, version: &str) -> Action {
+        let (a, b) = parse_req_range(head).unwrap();
+        let (a, b) = (a as usize, b as usize);
+        let body = &content[a..=b.min(content.len() - 1)];
+        let mut resp = format!(
+            "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {}-{}/{}\r\nContent-Length: {}\r\nETag: \"etag-xyz\"\r\nx-amz-version-id: {}\r\nAccept-Ranges: bytes\r\nConnection: close\r\n\r\n",
+            a,
+            a + body.len() - 1,
+            content.len(),
+            body.len(),
+            version
+        )
+        .into_bytes();
+        resp.extend_from_slice(body);
+        Action::Respond(resp)
+    }
+
+    fn s3_http_cfg() -> HttpRangeConfig {
+        HttpRangeConfig {
+            allow_private_endpoints: true,
+            max_retries: 2,
+            backoff_base: Duration::from_millis(1),
+            ..Default::default()
+        }
+    }
+
+    fn s3_cfg(server: &TestServer, bucket: &str, key: &str, version: Option<&str>) -> S3Config {
+        S3Config {
+            endpoint: Some(format!("http://127.0.0.1:{}", server.addr.port())),
+            region: "r".into(),
+            bucket: bucket.into(),
+            key: key.into(),
+            version_id: version.map(|v| v.to_string()),
+            path_style: true,
+        }
+    }
+
+    #[test]
+    fn s3_object_url_building() {
+        let aws = S3Config {
+            endpoint: None,
+            region: "us-east-1".into(),
+            bucket: "b".into(),
+            key: "k/model.gguf".into(),
+            version_id: None,
+            path_style: false,
+        };
+        assert_eq!(
+            aws.object_url().unwrap(),
+            "https://b.s3.us-east-1.amazonaws.com/k/model.gguf"
+        );
+        let path = S3Config {
+            endpoint: Some("https://minio.example:9000".into()),
+            region: "r".into(),
+            bucket: "b".into(),
+            key: "model.gguf".into(),
+            version_id: Some("v9".into()),
+            path_style: true,
+        };
+        assert_eq!(
+            path.object_url().unwrap(),
+            "https://minio.example:9000/b/model.gguf?versionId=v9"
+        );
+        let bad = S3Config {
+            endpoint: None,
+            region: "r".into(),
+            bucket: String::new(),
+            key: "k".into(),
+            version_id: None,
+            path_style: false,
+        };
+        assert!(bad.object_url().is_err());
+    }
+
+    #[test]
+    fn s3_pathstyle_roundtrip_and_version_binding() {
+        let content = fixture(1000);
+        let c2 = content.clone();
+        let server = TestServer::spawn(move |_, head| serve_206_s3(&c2, head, "v1"));
+        let s3 = s3_cfg(&server, "bucket", "model", Some("v1"));
+        let mut src = S3Source::connect(&s3, s3_http_cfg(), Some(1000)).unwrap();
+        assert_eq!(src.len(), 1000);
+        assert_eq!(src.identity().validator.version_id.as_deref(), Some("v1"));
+        let mut buf = vec![0u8; 128];
+        src.read_range(10, 100, &mut buf, &mut || false, None)
+            .unwrap();
+        assert_eq!(&buf[..100], &content[10..110]);
+    }
+
+    #[test]
+    fn s3_version_id_mismatch_rejected() {
+        let content = fixture(500);
+        let c2 = content.clone();
+        let server = TestServer::spawn(move |_, head| serve_206_s3(&c2, head, "v2"));
+        let s3 = s3_cfg(&server, "bucket", "model", Some("v1"));
+        let err = S3Source::connect(&s3, s3_http_cfg(), None).unwrap_err();
+        assert!(matches!(err, RemoteError::ObjectChanged), "{err}");
+    }
+
+    #[test]
+    fn s3_missing_object_not_found() {
+        let server = TestServer::spawn(|_, _| {
+            Action::Respond(
+                b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    .to_vec(),
+            )
+        });
+        let s3 = s3_cfg(&server, "bucket", "missing", None);
+        let err = S3Source::connect(&s3, s3_http_cfg(), None).unwrap_err();
+        assert!(matches!(err, RemoteError::NotFound), "{err}");
+    }
+
+    #[test]
+    fn s3_access_denied_is_permission_denied() {
+        let server = TestServer::spawn(|_, _| {
+            Action::Respond(
+                b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    .to_vec(),
+            )
+        });
+        let s3 = s3_cfg(&server, "bucket", "k", None);
+        let err = S3Source::connect(&s3, s3_http_cfg(), None).unwrap_err();
+        assert!(matches!(err, RemoteError::PermissionDenied), "{err}");
     }
 }

@@ -11,8 +11,16 @@ native = []
 # staging). Dependency-free (std only); off by default so default/native builds
 # and the no-default-features build are unaffected.
 remote = []
+# Production HTTPS for the remote transport: rustls (ring provider) + the Mozilla
+# root store, layered over the std TcpStream so SSRF destination-pinning and the
+# strict HTTP Range validation are preserved. Off by default; the default
+# inference build stays free of network/TLS dependencies.
+https = ["remote", "dep:rustls", "dep:webpki-roots", "dep:rustls-pki-types"]
 [dependencies]
 sha2 = "=0.10.9"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"], optional = true }
+rustls-pki-types = { version = "1", optional = true }
+webpki-roots = { version = "0.26", optional = true }
 
 [build-dependencies]
 cmake = "0.1.54"
