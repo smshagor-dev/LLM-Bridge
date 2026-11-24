@@ -26,6 +26,8 @@ trait RangeSource {
 
 The existing `authenticate_model` (whole-file SHA-256 + sealed per-block manifest) and `verify_staged_range_cancellable` (mutation detection) operate on top of this trait unchanged.
 
+**Implemented building block (2026-11-24).** Per-range integrity against the sealed manifest can now be checked *without a second read* via `BoundedLocalReader::verify_block_bytes_against_manifest` / `CachedLocalReader::verify_staged_block_snapshot_cancellable` (content-addressed, fail-closed, opt-in). This is the local realization of properties 3–4 below: a fetched range is authenticated by hashing the delivered bytes against the trusted manifest block, so a remote reader never needs to re-fetch a range to verify it. Trust boundary, attacker model, and the reason the primary per-token re-stream cost cannot be removed under the bounded-memory + untrusted-writer constraints are documented in `AUTHENTICATED_SNAPSHOT_INTEGRITY.md`.
+
 ## Required properties
 
 1. **Bounded async range requests.** Each request is `[offset, offset+len)` with `len <= reader chunk` (64 KiB today). At most `max_outstanding` in flight; a bounded reservation (see Admission) gates issuance. No request may allocate model-sized buffers.
