@@ -127,6 +127,55 @@ impl CachedLocalReader {
         Ok(())
     }
 
+    /// Opt-in immutable-snapshot verification of already-staged lookahead bytes.
+    ///
+    /// When the source is authenticated and `staged` is exactly one full,
+    /// block-aligned manifest block, the bytes are authenticated directly
+    /// against the trusted per-block manifest with NO second source read, then
+    /// published. Otherwise this falls back to
+    /// [`Self::verify_staged_range_cancellable`], preserving its default
+    /// mutable-source, mutation-detecting semantics.
+    ///
+    /// Trust model: on the fast path the manifest (anchored to the verified
+    /// whole-file digest) is the authority for the model bytes, so source
+    /// mutation after prefetch is intentionally NOT detected — the staged bytes
+    /// are accepted iff they are cryptographically authentic. Callers must only
+    /// opt into this where that is the intended contract. The fast path performs
+    /// no source I/O and does not increment `source_read_calls`.
+    pub fn verify_staged_block_snapshot_cancellable(
+        &mut self,
+        offset: u64,
+        staged: &[u8],
+        mut cancelled: impl FnMut() -> bool,
+    ) -> io::Result<()> {
+        if staged.is_empty() || staged.len() > self.source.allocated_chunk_bytes() {
+            return Err(invalid("staged range exceeds source/chunk bounds"));
+        }
+        if self.source.is_authenticated() {
+            if cancelled() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "staged snapshot verification cancelled",
+                ));
+            }
+            if self
+                .source
+                .verify_block_bytes_against_manifest(offset, staged)?
+            {
+                if cancelled() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Interrupted,
+                        "staged snapshot verification cancelled",
+                    ));
+                }
+                return Ok(());
+            }
+        }
+        // Not a full aligned manifest block (or unauthenticated): fall back to
+        // the default re-read verification, which still detects source mutation.
+        self.verify_staged_range_cancellable(offset, staged, cancelled)
+    }
+
     /// Drop optional cache-owned allocations without allocating replacements.
     /// Source buffer/authentication stay live. Allocator page retention means
     /// this is not an assertion that process RSS immediately decreases.
@@ -516,5 +565,98 @@ mod tests {
                 .kind(),
             io::ErrorKind::InvalidData
         );
+    }
+
+    #[test]
+    fn staged_block_snapshot_without_auth_uses_default_verification() {
+        let file = Fixture::new();
+        let mut reader = file.reader(0);
+        reader
+            .verify_staged_block_snapshot_cancellable(0, b"ab", || false)
+            .unwrap();
+        std::fs::write(&file.0, b"changed-size-and-bytes").unwrap();
+        assert!(reader
+            .verify_staged_block_snapshot_cancellable(0, b"ab", || false)
+            .is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn staged_block_snapshot_verifies_without_reread_and_fails_closed() {
+        use sha2::{Digest, Sha256};
+        use std::io::{Seek, SeekFrom, Write};
+        let fixture = Fixture::new();
+        let expected = format!("{:x}", Sha256::digest(std::fs::read(&fixture.0).unwrap()));
+        let modified = std::fs::metadata(&fixture.0).unwrap().modified().unwrap();
+        let mut source = BoundedLocalReader::open(&fixture.0, 8, 16).unwrap();
+        source
+            .authenticate_model(&expected, 8, 128 * 1024, || false)
+            .unwrap();
+        let mut cached = CachedLocalReader::new(source, 0).unwrap();
+
+        // Full aligned authentic block (bytes 8..16 = "ijklmnop") verifies with
+        // no source read: this is the re-read elimination the fast path exists for.
+        let before = cached.source_bytes_read();
+        cached
+            .verify_staged_block_snapshot_cancellable(8, b"ijklmnop", || false)
+            .unwrap();
+        assert_eq!(cached.source_bytes_read(), before);
+
+        // A tampered full block fails closed, still touching no source byte.
+        assert_eq!(
+            cached
+                .verify_staged_block_snapshot_cancellable(8, b"XXXXXXXX", || false)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(cached.source_bytes_read(), before);
+
+        // Rewrite block 1 in place, preserving size and identity timestamp.
+        let mut writer = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&fixture.0)
+            .unwrap();
+        writer.seek(SeekFrom::Start(8)).unwrap();
+        writer.write_all(b"XXXXXXXX").unwrap();
+        writer
+            .set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+
+        // Immutable-snapshot semantics: the authentic staged bytes still verify
+        // against the manifest after in-place mutation, with no source read.
+        cached
+            .verify_staged_block_snapshot_cancellable(8, b"ijklmnop", || false)
+            .unwrap();
+        assert_eq!(cached.source_bytes_read(), before);
+
+        // The default mutable-source verification still rejects the mutation.
+        assert_eq!(
+            cached
+                .verify_staged_range_cancellable(8, b"ijklmnop", || false)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn staged_block_snapshot_falls_back_and_reads_for_partial_ranges() {
+        use sha2::{Digest, Sha256};
+        let fixture = Fixture::new();
+        let expected = format!("{:x}", Sha256::digest(std::fs::read(&fixture.0).unwrap()));
+        let mut source = BoundedLocalReader::open(&fixture.0, 8, 16).unwrap();
+        source
+            .authenticate_model(&expected, 8, 128 * 1024, || false)
+            .unwrap();
+        let mut cached = CachedLocalReader::new(source, 0).unwrap();
+        let before = cached.source_bytes_read();
+        // A partial (sub-block) staged range cannot be a single manifest block,
+        // so it routes through the default re-read path, which does touch disk.
+        cached
+            .verify_staged_block_snapshot_cancellable(8, b"ijkl", || false)
+            .unwrap();
+        assert!(cached.source_bytes_read() > before);
     }
 }

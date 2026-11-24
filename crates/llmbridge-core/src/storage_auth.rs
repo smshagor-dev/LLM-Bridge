@@ -293,6 +293,65 @@ impl BoundedLocalReader {
         self.validate_source()?;
         Ok(&self.buffer[..count])
     }
+
+    /// Authenticate caller-supplied bytes for ONE full, block-aligned manifest
+    /// block directly against the trusted per-block hash list, performing no
+    /// source I/O. The manifest is anchored to the verified whole-file digest,
+    /// so a hash match proves the bytes are the authentic model bytes for that
+    /// block regardless of the current on-disk source state.
+    ///
+    /// This is immutable-snapshot (content-addressed) semantics, deliberately
+    /// distinct from `read_authenticated_range`/`validate_source`, which bind a
+    /// read to the *current* mutable source. It is therefore additive and must
+    /// only be used where a caller has opted into trusting the manifest as the
+    /// authority (e.g. verifying already-staged lookahead bytes without a second
+    /// disk read). It does not detect source mutation, because it never consults
+    /// the source.
+    ///
+    /// Returns `Ok(true)` when `bytes` is exactly one full block at a
+    /// block-aligned `offset` and its digest matches the manifest, `Ok(false)`
+    /// when the range is not a single full aligned block (the caller must fall
+    /// back to the mutable-source re-read path), and `Err` when the range is a
+    /// full aligned block whose bytes do NOT match the manifest (fail closed).
+    pub(crate) fn verify_block_bytes_against_manifest(
+        &mut self,
+        offset: u64,
+        bytes: &[u8],
+    ) -> io::Result<bool> {
+        let chunk = self.buffer.len() as u64;
+        let auth = self
+            .auth
+            .as_mut()
+            .ok_or_else(|| fail("manifest verification requires an authenticated reader"))?;
+        if chunk == 0 || offset % chunk != 0 {
+            return Ok(false);
+        }
+        let block = usize::try_from(offset / chunk).map_err(|_| fail("manifest block overflow"))?;
+        // Exactly the bytes this block covers (the final block may be short).
+        let available = match self.file_len.checked_sub(offset) {
+            Some(remaining) => remaining.min(chunk),
+            None => return Ok(false),
+        };
+        if available == 0 || bytes.len() as u64 != available {
+            return Ok(false);
+        }
+        let expected = match auth.hashes.get(block) {
+            Some(expected) => expected,
+            None => return Ok(false),
+        };
+        let digest: [u8; 32] = Sha256::digest(bytes).into();
+        if &digest != expected {
+            return Err(fail(
+                "staged block does not match authenticated manifest; reject bytes",
+            ));
+        }
+        auth.metrics.blocks_verified = auth
+            .metrics
+            .blocks_verified
+            .checked_add(1)
+            .ok_or_else(|| fail("verified block counter overflow"))?;
+        Ok(true)
+    }
 }
 
 #[cfg(all(test, target_os = "linux"))]
@@ -441,5 +500,123 @@ mod tests {
             .unwrap();
         assert_eq!(error.kind(), io::ErrorKind::Interrupted);
         assert!(reader.authentication_metrics().is_none());
+    }
+
+    #[test]
+    fn manifest_block_verification_authenticates_without_source_io() {
+        let file = Fixture::new();
+        let mut reader = file.reader();
+        let _sealed = reader
+            .authenticate_model(&file.digest(), 10, 128 * 1024, || false)
+            .unwrap();
+        // Source: "abcdefghijklmnopqrstuvwxyz", chunk 8 => blocks 0:[0,8) 1:[8,16)
+        // 2:[16,24) 3:[24,26) (short tail of 2 bytes).
+        let before = reader.disk_bytes_read();
+        let base_blocks = reader.authentication_metrics().unwrap().blocks_verified;
+        assert!(reader
+            .verify_block_bytes_against_manifest(0, b"abcdefgh")
+            .unwrap());
+        assert!(reader
+            .verify_block_bytes_against_manifest(8, b"ijklmnop")
+            .unwrap());
+        // The short final block is a full block for its own range.
+        assert!(reader
+            .verify_block_bytes_against_manifest(24, b"yz")
+            .unwrap());
+        // No source byte was read: this is the whole point of the fast path.
+        assert_eq!(reader.disk_bytes_read(), before);
+        assert_eq!(
+            reader.authentication_metrics().unwrap().blocks_verified,
+            base_blocks + 3
+        );
+    }
+
+    #[test]
+    fn manifest_block_verification_fails_closed_on_tampered_full_block() {
+        let file = Fixture::new();
+        let mut reader = file.reader();
+        let _sealed = reader
+            .authenticate_model(&file.digest(), 10, 128 * 1024, || false)
+            .unwrap();
+        let base_blocks = reader.authentication_metrics().unwrap().blocks_verified;
+        let error = reader
+            .verify_block_bytes_against_manifest(8, b"XXXXXXXX")
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("manifest"));
+        // A rejected block must not advance the verified counter.
+        assert_eq!(
+            reader.authentication_metrics().unwrap().blocks_verified,
+            base_blocks
+        );
+    }
+
+    #[test]
+    fn manifest_block_verification_signals_fallback_for_partial_or_unaligned_ranges() {
+        let file = Fixture::new();
+        let mut reader = file.reader();
+        let _sealed = reader
+            .authenticate_model(&file.digest(), 10, 128 * 1024, || false)
+            .unwrap();
+        // Unaligned offset (4 is not a multiple of chunk 8).
+        assert!(!reader
+            .verify_block_bytes_against_manifest(4, b"efgh")
+            .unwrap());
+        // Aligned offset but a partial (sub-block) length.
+        assert!(!reader
+            .verify_block_bytes_against_manifest(8, b"ijkl")
+            .unwrap());
+        // Aligned offset but a length longer than the covered block.
+        assert!(!reader
+            .verify_block_bytes_against_manifest(24, b"yzz")
+            .unwrap());
+        // Offset at or beyond EOF.
+        assert!(!reader.verify_block_bytes_against_manifest(26, b"").unwrap());
+    }
+
+    #[test]
+    fn manifest_block_verification_trusts_bytes_despite_in_place_source_mutation() {
+        use std::io::{Seek, SeekFrom, Write};
+        let file = Fixture::new();
+        let mut reader = file.reader();
+        let _sealed = reader
+            .authenticate_model(&file.digest(), 10, 128 * 1024, || false)
+            .unwrap();
+        // Rewrite block 1 in place, preserving size and identity timestamp.
+        let modified = std::fs::metadata(&file.0).unwrap().modified().unwrap();
+        let mut writable = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&file.0)
+            .unwrap();
+        writable.seek(SeekFrom::Start(8)).unwrap();
+        writable.write_all(b"XXXXXXXX").unwrap();
+        writable
+            .set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        let before = reader.disk_bytes_read();
+        // Immutable-snapshot semantics: the AUTHENTIC bytes still verify against
+        // the manifest even though the live source now holds attacker bytes, and
+        // no source read occurs. (The mutable-source path below would reject.)
+        assert!(reader
+            .verify_block_bytes_against_manifest(8, b"ijklmnop")
+            .unwrap());
+        assert_eq!(reader.disk_bytes_read(), before);
+        // The default mutable-source read path still detects the mutation.
+        assert!(reader
+            .read_range(8, 2)
+            .unwrap_err()
+            .to_string()
+            .contains("block changed"));
+    }
+
+    #[test]
+    fn manifest_block_verification_requires_authentication() {
+        let file = Fixture::new();
+        let mut reader = file.reader();
+        let error = reader
+            .verify_block_bytes_against_manifest(0, b"abcdefgh")
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("authenticated reader"));
     }
 }
