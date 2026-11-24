@@ -1,0 +1,148 @@
+{
+  "artifact": "public_https_s3_staging_7b",
+  "utc": "2026-11-24T15:50:04Z",
+  "branch": "local/streamed-metadata-admission",
+  "git": {
+    "feat_https_s3_commit": "2ceb644",
+    "parent_pushed_checkpoint": "d2e6e9a",
+    "note": "CLI built from the working tree that became 2ceb644 (rustls https + S3). The run log recorded the pre-commit parent d2e6e9a; the binary is byte-for-byte that working tree."
+  },
+  "scope": "Production HTTPS (rustls) for the remote transport, destination-pinned SSRF, an S3-compatible source, a genuine public-HTTPS acquisition of the pinned Qwen2.5-7B from Hugging Face over real TLS, atomic publication, staged Mode B inference with bit-identical parity to direct-local, and the adversarial TLS/S3/staging test suite. S3 is implemented but AWS interoperability is unverified (no real endpoint/credentials).",
+  "environment": {
+    "host": "WSL2 (not bare metal)",
+    "kernel": "6.18.33.1-microsoft-standard-WSL2",
+    "logical_cpus": 12,
+    "mem_total_mib": 6834,
+    "filesystem": "model + staging on ext4 (/home); repo on /mnt/e (NTFS via WSL)",
+    "rustc": "1.85.1",
+    "cargo": "1.85.1",
+    "tls_stack": "rustls 0.23.46 (ring provider) + rustls-webpki 0.103.17 + webpki-roots 0.26.11 (Mozilla root store)",
+    "s3_sdk": "none (S3Source delegates to the HTTP/HTTPS adapter; no aws-sdk; no custom SigV4)"
+  },
+  "https_architecture": {
+    "transport": "rustls TLS layered over std::net::TcpStream; one HTTP/1.1 framing + strict Range validation path for both http and https",
+    "certificate_validation": "full chain + hostname verification via the rustls default verifier against the Mozilla root store; no insecure bypass; optional extra trusted root CA for private/custom endpoints",
+    "scheme_policy": "public plaintext http refused by default; http allowed only under the explicit trusted-endpoint opt-in (allow_private_endpoints); https gated behind the `https` cargo feature",
+    "ssrf": "resolve all A/AAAA; reject the host if ANY resolved address is private/loopback/link-local unless opted in; connect only to a validated resolved address (destination-pinned, IPv4 first); no re-resolution between check and connect (DNS-rebinding safe)",
+    "credentials": "optional Authorization from LLMBRIDGE_REMOTE_AUTH, held in memory only, dropped on cross-host redirect, never logged/persisted/echoed to evidence or native FFI"
+  },
+  "model": {
+    "repo": "bartowski/Qwen2.5-7B-Instruct-GGUF",
+    "revision": "8911e8a47f92bac19d6f5c64a2e2095bd2f7d031",
+    "file": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+    "trusted_size_bytes": 4683074240,
+    "trusted_sha256": "65b8fcd92af6b4fefa935c625d1ac27ea29dcb6ee14589c55a8f115ceaaa1423",
+    "committed_as_binary": false
+  },
+  "public_https_acquisition": {
+    "command": "taskset -c 0,1 llmbridge stage https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/8911e8a47f92bac19d6f5c64a2e2095bd2f7d031/Qwen2.5-7B-Instruct-Q4_K_M.gguf --sha256 <sha> --size 4683074240 --output /home/smshagor/hf-staged-qwen.gguf --chunk-mb 32 --staging-dir /home/smshagor",
+    "scheme": "https (TLS to huggingface.co, followed the HF->CDN redirect to the object store)",
+    "stage_exit": 0,
+    "chunk_bytes": 33554432,
+    "range_requests_chunks": 140,
+    "redirects": "HF resolve endpoint 302 -> CDN object URL (cross-host; Authorization not carried, none used)",
+    "bytes_transferred": 4683074240,
+    "elapsed_s": 1573.5,
+    "wall_clock_total_including_redirect_roundtrips": "26:14 (per /usr/bin/time; WAN, fresh TLS handshake per chunk)",
+    "stage_process_peak_rss_kib": 73520,
+    "retries": "none required",
+    "returned_etag": "\"8a45e4e923f03f4106bcc375cb83fc383c2c570529acb2085c6468df10b50ad5\"",
+    "etag_is_not_sha256": true,
+    "etag_note": "HF's ETag differs from the file SHA-256; treated strictly as a version token, never as the content digest.",
+    "published_sha256": "65b8fcd92af6b4fefa935c625d1ac27ea29dcb6ee14589c55a8f115ceaaa1423",
+    "published_size_bytes": 4683074240,
+    "published_equals_local_bytewise": true,
+    "leftover_part_or_state": 0,
+    "original_untouched": true
+  },
+  "inference": {
+    "common": "taskset -c 0,1 llmbridge chat <model> --prompt 'The capital of France is' --max-tokens 8 --ctx 128 --threads 2 --backend streamed --metrics --sha256 <sha> --address-space-mb 2048 --workspace-mb 48 --cache-mb 32 --snapshot-reuse",
+    "https_staged_mode_b": {
+      "model": "/home/smshagor/hf-staged-qwen.gguf (public-HTTPS-acquired, published)",
+      "exit": 0,
+      "output": " Paris. It is located in the northern",
+      "ttft_first_logits_s": 28.696865804,
+      "decode_tokens_per_second": 0.27778487572148974,
+      "total_s": 53.907740891,
+      "peak_rss_bytes": 113168384,
+      "integrity_verified": 1,
+      "blocks_verified": 774336,
+      "sha256_match": true
+    },
+    "direct_local_mode_b": {
+      "model": "/home/smshagor/Qwen2.5-7B-Instruct-Q4_K_M.gguf (original)",
+      "exit": 0,
+      "output": " Paris. It is located in the northern"
+    },
+    "output_parity": "identical (bit-for-bit)",
+    "interpretation": "Download once over HTTPS, verify once, stage locally, infer locally; decode performance equals direct-local Mode B. HTTPS is not streamed per token."
+  },
+  "security_tests": {
+    "transport_and_tls": [
+      "valid_range_download_roundtrip_and_identity",
+      "unexpected_200_is_rejected",
+      "wrong_content_range_total_is_object_changed",
+      "content_length_mismatch_rejected",
+      "gzip_encoding_rejected",
+      "redirect_loop_exhausts",
+      "transient_500_then_success_retries",
+      "persistent_503_exhausts_retries",
+      "truncated_body_is_short_read_then_retry_exhausted",
+      "range_overflow_rejected",
+      "cancellation_during_fetch_is_reported",
+      "credentials_are_dropped_on_cross_host_redirect",
+      "plaintext_http_refused_without_trusted_opt_in",
+      "https_scheme_is_unsupported_without_feature (remote-only build)",
+      "https_against_non_tls_server_fails_closed (https build)",
+      "private_endpoint_rejected_without_opt_in"
+    ],
+    "s3": [
+      "s3_object_url_building",
+      "s3_pathstyle_roundtrip_and_version_binding",
+      "s3_version_id_mismatch_rejected",
+      "s3_missing_object_not_found",
+      "s3_access_denied_is_permission_denied"
+    ],
+    "staging": [
+      "full_download_verifies_and_publishes_atomically",
+      "wrong_sha_fails_closed_and_does_not_publish",
+      "wrong_expected_size_is_object_changed",
+      "resume_completes_after_interruption",
+      "corrupted_resume_state_is_caught_by_whole_file_hash",
+      "output_path_traversal_rejected",
+      "existing_output_is_not_overwritten",
+      "symlink_output_rejected"
+    ],
+    "result": "28 remote tests passed under both `remote` and `https` feature sets; 0 failed",
+    "real_tls_accept_path": "the genuine HF acquisition validated the valid-certificate + hostname + chain path against a real public CA and CDN"
+  },
+  "regressions": {
+    "fmt_check_exit": 0,
+    "clippy_default_all_targets_D_exit": 0,
+    "clippy_native_all_targets_D_exit": 0,
+    "clippy_https_all_targets_D_exit": 0,
+    "no_default_features_core_build_exit": 0,
+    "native_lib_tests": "277 passed; 0 failed",
+    "remote_lib_tests": "28 passed; 0 failed",
+    "cli_default_build_exit": 0,
+    "default_build_free_of_tls_deps": true,
+    "windows_msvc_native": "not exercised this session"
+  },
+  "resource_limits": {
+    "max_chunk_bytes": 33554432,
+    "stage_process_peak_rss_kib": 73520,
+    "inference_peak_rss_bytes": 113168384,
+    "address_space_mb": 2048,
+    "bounded_response_buffer": "one chunk buffer; bounded header budget 64 KiB; no model-sized or unbounded allocation",
+    "connection_model": "one TCP/TLS connection per range request (Connection: close); bounded retries with backoff"
+  },
+  "limitations": [
+    "S3 adapter is implemented on the RemoteSource contract but AWS/real-S3 interoperability is UNVERIFIED: no AWS SigV4 signing and no cloud SDK are included, and no real S3/MinIO endpoint or credentials were exercised. S3 tests are deterministic against a local HTTP server emulating path-style GetObject + x-amz-version-id. Not claimed as demonstrated interoperability.",
+    "TLS adversarial matrix is partial: the real-CA accept path is validated by the HF acquisition and an https-against-a-non-TLS-server fail-closed test is included, but a local-CA cert matrix (expired/wrong-hostname/unknown-CA via a rustls+rcgen test server) is not yet implemented.",
+    "One TLS handshake per range request (Connection: close) makes a many-chunk WAN transfer slow (26 min for 4.68 GB here); connection reuse / coalesced-pipelined ranges are future throughput work.",
+    "WSL2, not bare metal; no IPv6 route (IPv4-first connect was required).",
+    "Windows MSVC native path not exercised this session.",
+    "Staging requires the whole model to fit on the staging filesystem; no remote computation and not unbounded model-size support."
+  ],
+  "classification": "COMPLETE (evidence-backed) for: rustls HTTPS transport with chain+hostname verification, destination-pinned SSRF, default-reject of public plaintext HTTP, credential isolation, strict HTTP Range validation preserved, GENUINE public HTTPS acquisition of the pinned 7B with exact size+SHA-256 match and atomic publication, staged Mode B inference with bit-identical parity, resumable fail-closed staging, adversarial transport/TLS/S3/staging tests, and regressions. PARTIALLY COMPLETE / DEFERRED: real AWS S3 interoperability (implemented, interop-unverified) and the local-CA TLS cert matrix; Windows native untested."
+}
