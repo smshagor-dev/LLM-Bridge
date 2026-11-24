@@ -115,7 +115,82 @@ The fast path's contract is *immutable-snapshot (content-addressed)*: staged byt
 
 ### Measured effect and scope
 
-The win is the elimination of the **consumption-time duplicate read** of staged ranges on the authenticated lookahead path: a full aligned staged block is verified with **0** source bytes instead of one covering-block re-read (proven by the `disk_bytes_read` assertions above). It does **not** change the primary re-stream-every-token cost (Part II), and it is not wired into the default decoder, so it produces no end-to-end 7B wall-clock change by itself — by design. Wiring it into a production immutable-snapshot decode mode (and the matching before/after 7B benchmark across readers) is the remaining work, gated on an explicit opt-in that does not regress the default mutation-detection guarantee.
+The win is the elimination of the **consumption-time duplicate read** of staged ranges on the authenticated lookahead path: a full aligned staged block is verified with **0** source bytes instead of one covering-block re-read (proven by the `disk_bytes_read` assertions above). The same manifest trust root is now also exploited by a production decode mode — **Part IV** — which reuses already-authenticated blocks through the bounded cache and yields a measured end-to-end 7B improvement while preserving integrity and the memory bound.
+
+---
+
+## Part IV — Production integration: two explicit read modes (2026-11-24)
+
+The manifest trust root is now wired into the real streamed decode path as an
+**opt-in** read policy on `CachedLocalReader`, selected by `StreamedConfig.snapshot_reuse`
+and the CLI flag `--snapshot-reuse` (which requires the streamed backend, `--sha256`
+authentication, and `--cache-mb > 0`).
+
+### Mode A — Mutable Source (default, unchanged)
+
+`ReadPolicy::MutableVerified`. Authenticated sources bypass the LRU and re-read
+**and** re-hash every covered block on every range call, so any in-place source
+mutation between calls is detected and rejected. This is the behaviour described
+in Part I and is the default; its mutation-detection tests are untouched.
+
+### Mode B — Authenticated Snapshot (opt-in)
+
+`ReadPolicy::AuthenticatedSnapshot`. Authenticated range reads are served through
+the bounded LRU. Every block entering the cache is authenticated against the
+trusted per-block manifest on the miss path (the authenticated source read fails
+closed on any mismatch), and cache hits reuse those already-authenticated retained
+bytes with **no second source read and no re-hash**. This is the content-addressed
+semantics of Part III applied per range: **content authenticity, not
+mutation-event detection**. A source mutation after a block is cached is
+intentionally not detected on a hit (the retained bytes are already proven to be
+the authentic model bytes); a newly fetched changed block still fails closed on a
+miss. Because this guarantee differs from Mode A's, it is additive and opt-in; the
+default path and its tests are unchanged (`read_cache.rs`:
+`default_policy_authenticated_still_bypasses_cache_and_rereads`).
+
+### Why it is safe
+
+Only manifest-verified bytes ever enter the cache (the miss path routes through
+`read_authenticated_range`, which hashes and compares to `hashes[i]`). A cache hit
+serves those retained bytes after the ordinary identity check, never re-publishing
+unverified data. Cancellation and deadline checks are honoured on hits
+(`snapshot_policy_cache_hit_still_honors_cancellation`). The bounded cache is the
+existing `CachedLocalReader` budget (≤ 32 MiB), so no new unbounded allocation is
+introduced and the memory bound is preserved.
+
+### Measured effect (genuine Qwen2.5-7B, matched 8-token greedy workload)
+
+`benchmarks/evidence/authenticated_snapshot_decode_comparison_2026-11-24.json`.
+Both runs: identical prompt, context, tokens, threads, CPU affinity, workspace and
+2048 MiB address-space cap; Mode B adds only `--cache-mb 32 --snapshot-reuse`.
+
+| Metric | Mode A (default) | Mode B (snapshot) | Δ |
+|---|---:|---:|---:|
+| Generated text | " Paris. It is located in the northern" | *bit-identical* | **parity** |
+| Logical demand (`range_bytes_requested`) | 50.66 GB | 50.66 GB | unchanged |
+| Physical source bytes read | 107.31 GB | 55.43 GB | **−48.3%** |
+| Blocks SHA-256 verified (hashed) | 1,566,020 | 774,336 | **−50.6%** |
+| TTFT | 30.07 s | 22.61 s | **−24.8%** |
+| Decode throughput | 0.188 tok/s | 0.265 tok/s | **+41%** |
+| Total wall | 67.27 s | 49.00 s | **−27.2%** |
+| Peak RSS | 79.3 MB | 112.9 MB | +32 MiB (= cache) |
+
+The bounded cache absorbs the ~2× intra-forward-pass re-reads/re-hashes of
+already-authenticated 64 KiB blocks (hit ratio ≈ 50.5%), roughly halving physical
+I/O **and** SHA-256 hashing, which is where Mode A spends most of its callback time
+(`range_callback_ns` 59.7 s → 41.4 s). This is a genuine end-to-end win, not a
+read-call artefact: logical demand and output are unchanged and every served byte
+is still manifest-authentic.
+
+**What it does not do.** It does not make I/O model-size-independent: 55.4 GB for 8
+tokens still scales with `model_size × tokens`, because the per-token working set is
+the whole model and exceeds any bounded cache (evictions ≈ misses). The honest
+negative result of Part II stands — the *base* per-token re-stream cost is
+intrinsic; Mode B only removes the *redundant* re-read/re-hash of the same block
+within a pass. Bounded memory is preserved: Mode B runs under 256/512/2048 MiB
+address-space caps with peak RSS 112 MB (the +32 MiB is exactly the opt-in cache).
+
+Mode B is retained as opt-in; the default is unchanged.
 
 ---
 
