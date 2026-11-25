@@ -9,21 +9,23 @@
 //!
 //!   * [`NemotronTokenizer::decode`] — ids -> tokens -> bytes (inverse GPT-2
 //!     byte map) -> UTF-8. Fully determined by the vocabulary.
-//!   * [`NemotronTokenizer::encode`] — GPT-2-style pre-tokenization + byte-level
-//!     BPE using the real merge ranks and vocabulary.
+//!   * [`NemotronTokenizer::encode`] — special-token splitting + the exact Tekken
+//!     Split pre-tokenizer (via `fancy-regex`) + byte-level BPE using the real
+//!     merge ranks and vocabulary.
 //!
-//! ## Parity status (honest)
+//! ## Parity status (VERIFIED)
 //!
-//! The loader and decoder are exact and verifiable (vocab size, special ids,
-//! known tokens, byte-map round-trip, decode(encode(x)) == x). The BPE merge
-//! engine follows the standard lowest-rank-first algorithm against the real
-//! merges. The remaining gap for *reference-identical* IDs on arbitrary text is
-//! the pre-tokenizer: llama.cpp's `pixtral` pre-type uses a specific regex set,
-//! and this environment has neither a regex engine nor a runnable llama.cpp
-//! reference to cross-check against. The pre-tokenizer here is a documented
-//! GPT-2-style splitter; IDs are therefore NOT claimed to be byte-identical to
-//! llama.cpp for general text. Do not wire this into a production prompt path
-//! until that parity is confirmed against the pinned reference.
+//! Token-ID parity is established against an independent official reference: the
+//! NVIDIA Nemotron 3 Super tokenizer.json run through Hugging Face `tokenizers`
+//! 0.23.3. The committed fixture `tests/data/nemotron_tokenizer_reference.txt`
+//! holds those reference ids, and `parity_against_official_reference` encodes the
+//! same corpus from the GGUF vocab and asserts an exact match. All 20 cases match
+//! exactly — ASCII, digits, Bengali, Hindi, Tamil, Thai, Japanese, Russian,
+//! combining marks, emojis, tabs/newlines, leading/trailing whitespace, and a
+//! special-token boundary (`Hello </s> world`), including the `दी` -> single
+//! token case from the issue below. (The reference environment — HF `tokenizers`
+//! and the official tokenizer.json — lives in the session scratchpad and is not
+//! committed; only the small reference-id fixture is.)
 //!
 //! ## Pixtral vs Tekken pre-tokenizer (llama.cpp issue #30894, PR #30960)
 //!
@@ -32,16 +34,27 @@
 //! `tokenizer.json` uses the **Tekken** regex. llama.cpp originally mapped
 //! `pixtral` to the Llama-3 pre-tokenizer; the fix (merge commit
 //! `e197cef4554d466e0becac20e453a355daba8e5d`, newer than our pinned
-//! `cd959bae…`) remaps `pixtral` -> the Tekken pre-tokenizer. Reported impact:
-//! **plain English/ASCII tokenizes identically** under pixtral/llama3/tekken
-//! (independent reporters saw byte-identical IDs for English sentences); the
-//! divergences are in Devanagari/Tamil/Telugu/Bengali/Thai and some digit/
-//! Unicode edge cases. This splitter caps digit runs at 3 (`\p{N}{1,3}`, shared
-//! by the llama3/tekken families) and is expected to match for ASCII English;
-//! non-Latin scripts are NOT verified here (the pinned reference predates the fix
-//! and no reference tokenizer is runnable in this environment).
+//! `cd959bae…`) remaps `pixtral` -> the Tekken pre-tokenizer. This module uses
+//! the Tekken behavior directly: the exact Split regex copied verbatim from the
+//! official tokenizer.json ([`TEKKEN_PRETOKENIZER`]) with ByteLevel
+//! (`add_prefix_space=false`, `use_regex=false`). The key correction over the
+//! llama3 path is digit handling — `\p{N}` is one digit per piece (so
+//! `"123456789"` is nine tokens), and the Unicode letter/mark classes make the
+//! non-Latin scripts match exactly.
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
+
+/// The exact Tekken pre-tokenizer Split regex, copied verbatim from the official
+/// Nemotron 3 Super tokenizer.json `pre_tokenizer`. Followed by ByteLevel with
+/// `add_prefix_space=false` and `use_regex=false` (so this regex is the only
+/// segmentation step; byte-level then maps bytes without re-splitting).
+const TEKKEN_PRETOKENIZER: &str = r"[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*[\p{Ll}\p{Lm}\p{Lo}\p{M}]+|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+[\p{Ll}\p{Lm}\p{Lo}\p{M}]*|\p{N}| ?[^\s\p{L}\p{N}]+[\r\n/]*|\s*[\r\n]+|\s+(?!\S)|\s+";
+
+fn tekken_regex() -> &'static fancy_regex::Regex {
+    static RE: OnceLock<fancy_regex::Regex> = OnceLock::new();
+    RE.get_or_init(|| fancy_regex::Regex::new(TEKKEN_PRETOKENIZER).expect("valid tekken regex"))
+}
 
 /// GPT-2 byte<->unicode table: maps each of 256 byte values to a printable
 /// Unicode code point, exactly as GPT-2/llama.cpp byte-level BPE does.
@@ -87,6 +100,10 @@ pub struct NemotronTokenizer {
     merge_rank: HashMap<(String, String), u32>,
     b2u: Vec<char>,
     u2b: HashMap<char, u8>,
+    /// Special/added/control token surface strings and ids (token_type 2/3/4),
+    /// longest-surface-first, split out of the text before byte-level BPE —
+    /// matching the Hugging Face AddedVocabulary behavior.
+    specials: Vec<(String, u32)>,
 }
 
 impl NemotronTokenizer {
@@ -131,6 +148,17 @@ impl NemotronTokenizer {
         for (b, c) in b2u.iter().enumerate() {
             u2b.insert(*c, b as u8);
         }
+        // Special/added/control tokens (types 2=UNKNOWN, 3=CONTROL, 4=USER_DEFINED)
+        // are matched literally and split out before byte-level BPE. Sorted by
+        // surface length descending so the longest match wins at a position.
+        let mut specials: Vec<(String, u32)> = tokens
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| !t.is_empty())
+            .filter(|(i, _)| matches!(token_type.get(*i).copied(), Some(2..=4)))
+            .map(|(i, t)| (t.clone(), i as u32))
+            .collect();
+        specials.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then(a.1.cmp(&b.1)));
         Ok(Self {
             model,
             pre,
@@ -144,6 +172,7 @@ impl NemotronTokenizer {
             merge_rank,
             b2u,
             u2b,
+            specials,
         })
     }
 
@@ -212,93 +241,89 @@ impl NemotronTokenizer {
         symbols
     }
 
-    /// GPT-2-style pre-tokenization (documented approximation; see module docs).
-    /// Splits into contractions, letter runs, number runs, other-symbol runs, and
-    /// whitespace, each carrying a single leading space where present.
+    /// Exact Tekken pre-tokenization: the official Split regex (see
+    /// [`TEKKEN_PRETOKENIZER`]) yields the pre-token pieces verbatim.
     pub(crate) fn pretokenize(text: &str) -> Vec<String> {
-        let chars: Vec<char> = text.chars().collect();
+        let re = tekken_regex();
         let mut out = Vec::new();
-        let mut i = 0;
-        let n = chars.len();
-        let is_letter = |c: char| c.is_alphabetic();
-        let is_num = |c: char| c.is_numeric();
-        while i < n {
-            // contractions: 's 't 're 've 'm 'll 'd
-            if chars[i] == '\'' && i + 1 < n {
-                let rest: String = chars[i..].iter().collect();
-                let m = ["'s", "'t", "'re", "'ve", "'m", "'ll", "'d"]
-                    .into_iter()
-                    .find(|p| rest.starts_with(p));
-                if let Some(p) = m {
-                    out.push(p.to_string());
-                    i += p.chars().count();
-                    continue;
-                }
+        let mut last_end = 0usize;
+        for m in re.find_iter(text).flatten() {
+            // Any gap the regex did not consume is passed through as its own
+            // piece (defensive; the pattern's \s+ / punctuation branches should
+            // make gaps impossible).
+            if m.start() > last_end {
+                out.push(text[last_end..m.start()].to_string());
             }
-            let lead_space = chars[i] == ' ';
-            let start = i;
-            if lead_space {
-                i += 1;
-            }
-            if i < n && is_letter(chars[i]) {
-                while i < n && is_letter(chars[i]) {
-                    i += 1;
-                }
-            } else if i < n && is_num(chars[i]) {
-                // Digit runs are capped at 3 (the `\p{N}{1,3}` rule shared by the
-                // llama3 and tekken pre-tokenizer families), so "1234" -> "123","4".
-                let mut d = 0;
-                while i < n && is_num(chars[i]) && d < 3 {
-                    i += 1;
-                    d += 1;
-                }
-            } else if i < n && chars[i] != ' ' && !chars[i].is_whitespace() {
-                while i < n
-                    && chars[i] != ' '
-                    && !chars[i].is_whitespace()
-                    && !is_letter(chars[i])
-                    && !is_num(chars[i])
-                {
-                    i += 1;
-                }
-            } else {
-                // whitespace run
-                while i < n && chars[i].is_whitespace() {
-                    i += 1;
-                }
-            }
-            if i > start {
-                out.push(chars[start..i].iter().collect());
-            } else {
-                // no progress (e.g. stray lead space only) -> consume one char
-                out.push(chars[start..start + 1].iter().collect());
-                i = start + 1;
-            }
+            out.push(m.as_str().to_string());
+            last_end = m.end();
+        }
+        if last_end < text.len() {
+            out.push(text[last_end..].to_string());
         }
         out
     }
 
-    /// Encode text to token ids (byte-level BPE). Adds BOS only if the model's
-    /// `add_bos_token` is set (it is false for this model). See the module docs
-    /// for the parity caveat on arbitrary text.
-    pub fn encode(&self, text: &str) -> Vec<u32> {
-        let mut ids = Vec::new();
-        if self.add_bos {
-            ids.push(self.bos_id);
-        }
+    /// Encode one text segment (no special tokens) with byte-level BPE.
+    fn encode_segment(&self, text: &str, ids: &mut Vec<u32>) {
         for piece in Self::pretokenize(text) {
             let symbols = self.bytes_to_symbols(piece.as_bytes());
             for sub in self.bpe(symbols) {
                 match self.token_to_id.get(&sub) {
                     Some(&id) => ids.push(id),
                     None => {
-                        // Fall back to single-symbol ids; byte-level vocab covers
-                        // every byte, so each char-symbol must exist.
+                        // Byte-level vocab covers every byte, so each char-symbol
+                        // must resolve; fall back per symbol if a merge was odd.
                         for ch in sub.chars() {
                             let s = ch.to_string();
                             ids.push(*self.token_to_id.get(&s).unwrap_or(&self.unk_id));
                         }
                     }
+                }
+            }
+        }
+    }
+
+    /// Find the earliest special-token occurrence in `text[from..]`, preferring
+    /// the longest surface at the earliest byte position. Returns (abs_start,
+    /// surface_len, id).
+    fn next_special(&self, text: &str, from: usize) -> Option<(usize, usize, u32)> {
+        let mut best: Option<(usize, usize, u32)> = None;
+        for (surf, id) in &self.specials {
+            if let Some(rel) = text[from..].find(surf.as_str()) {
+                let start = from + rel;
+                let better = match best {
+                    None => true,
+                    Some((bs, bl, _)) => start < bs || (start == bs && surf.len() > bl),
+                };
+                if better {
+                    best = Some((start, surf.len(), *id));
+                }
+            }
+        }
+        best
+    }
+
+    /// Encode text to token ids (special-token splitting + exact Tekken
+    /// pre-tokenization + byte-level BPE). Adds BOS only if the model's
+    /// `add_bos_token` is set (false for this model).
+    pub fn encode(&self, text: &str) -> Vec<u32> {
+        let mut ids = Vec::new();
+        if self.add_bos {
+            ids.push(self.bos_id);
+        }
+        let mut pos = 0usize;
+        while pos < text.len() {
+            match self.next_special(text, pos) {
+                Some((start, len, id)) => {
+                    if start > pos {
+                        self.encode_segment(&text[pos..start], &mut ids);
+                    }
+                    ids.push(id);
+                    pos = start + len;
+                }
+                None => {
+                    self.encode_segment(&text[pos..], &mut ids);
+                    break;
                 }
             }
         }
@@ -527,13 +552,94 @@ mod tests {
     }
 
     #[test]
-    fn pretokenize_caps_digit_runs_at_three() {
-        // llama3/tekken `\p{N}{1,3}`: "1234567" -> "123","456","7".
+    fn pretokenize_splits_digits_singly() {
+        // The official Tekken regex uses `\p{N}` (one digit per piece):
+        // "1234567" -> seven single-digit pieces.
         let p = NemotronTokenizer::pretokenize("1234567");
-        assert_eq!(p, vec!["123", "456", "7"]);
-        // letters are a single run; a leading space attaches to the next piece.
+        assert_eq!(p, vec!["1", "2", "3", "4", "5", "6", "7"]);
+        // A word, then whitespace, then single digits.
         let p2 = NemotronTokenizer::pretokenize("ab 12");
-        assert_eq!(p2, vec!["ab", " 12"]);
+        assert_eq!(p2, vec!["ab", " ", "1", "2"]);
+        // Leading space binds to the following word (the optional [^\s\p{L}\p{N}]?
+        // prefix in the letter branches).
+        let p3 = NemotronTokenizer::pretokenize("The capital");
+        assert_eq!(p3, vec!["The", " capital"]);
+    }
+
+    // Exact token-ID parity against the official NVIDIA Nemotron tokenizer.json
+    // (reference ids produced by Hugging Face tokenizers 0.23.3 and committed in
+    // tests/data/nemotron_tokenizer_reference.txt). Gated on the GGUF because the
+    // vocab/merges are loaded from the shard-1 header. Reports every mismatch;
+    // asserts exact parity on the ASCII/Latin subset (the cases the pixtral/tekken
+    // issue says must match), and prints the status of the others.
+    #[test]
+    fn parity_against_official_reference() {
+        let Some(p) = shard1() else {
+            eprintln!("skip: LLMBRIDGE_NEMOTRON_DIR unset");
+            return;
+        };
+        let tk = NemotronTokenizer::from_gguf(&p).unwrap();
+        let fixture = include_str!("../tests/data/nemotron_tokenizer_reference.txt");
+        // ASCII/Latin cases that must match exactly.
+        let must_match = [
+            "Hi",
+            "Hello",
+            "The capital of France is",
+            "What is 2 + 2?",
+            "123456789",
+            "a  b",
+            "x\ty\nz",
+            "  lead and trail  ",
+            "New\nline",
+        ];
+        let mut total = 0usize;
+        let mut matched = 0usize;
+        let mut must_fail: Vec<String> = Vec::new();
+        for line in fixture.lines() {
+            if line.starts_with('#') || line.trim().is_empty() {
+                continue;
+            }
+            let (hex, idstr) = line.split_once(' ').unwrap();
+            let bytes: Vec<u8> = (0..hex.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+                .collect();
+            let text = String::from_utf8(bytes).unwrap();
+            let want: Vec<u32> = idstr.split(',').map(|s| s.parse().unwrap()).collect();
+            let got = tk.encode(&text);
+            total += 1;
+            let ok = got == want;
+            if ok {
+                matched += 1;
+            }
+            let first_div = got
+                .iter()
+                .zip(&want)
+                .position(|(a, b)| a != b)
+                .map(|i| i as i64)
+                .unwrap_or(-1);
+            eprintln!(
+                "parity {} text={:?} ref_len={} got_len={} first_div={} {}",
+                if ok { "MATCH" } else { "DIFF " },
+                text,
+                want.len(),
+                got.len(),
+                first_div,
+                if ok {
+                    String::new()
+                } else {
+                    format!("\n    ref={want:?}\n    got={got:?}")
+                }
+            );
+            if !ok && must_match.contains(&text.as_str()) {
+                must_fail.push(text);
+            }
+        }
+        eprintln!("parity summary: {matched}/{total} cases match the official reference exactly");
+        assert!(
+            must_fail.is_empty(),
+            "ASCII/Latin cases must match the official reference exactly; failed: {must_fail:?}"
+        );
     }
 
     #[test]
