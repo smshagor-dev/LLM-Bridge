@@ -1,0 +1,88 @@
+{
+  "artifact": "gpt_oss_120b_compatibility_gate_2026-11-25",
+  "utc_timestamp": "2026-11-25T00:00:00Z",
+  "summary": "Pre-download compatibility gate for OpenAI GPT-OSS 120B (MXFP4 MoE GGUF) against the LLM Bridge custom out-of-core streamed CPU decoder. Git checkpoint (2ceb644, cf4d4dd, ff70168) fast-forwarded to origin as authorized. G: drive and host hardware were inspected. The target model's real provenance was obtained from the Hugging Face API (metadata only, NO weight download): the MXFP4_MOE quant is a TWO-SHARD split totalling 63.39 GB, not the single file assumed in the task brief. The streamed decoder is a dense llama/qwen2 path with NO Mixture-of-Experts router/dispatch/aggregation and NO MXFP4 (ggml type 39) tensor decoding. Three model-specific negative contracts were added and executed natively, proving GPT-OSS is refused on three independent axes BEFORE any 63 GB download. No weights were downloaded; no 120B inference was attempted; no inference measurements are reported.",
+  "classification": "BLOCKED (unsupported architecture) for GPT-OSS 120B native streamed inference. The block is enforced in code and behaviourally verified, not asserted in prose. Honest status: genuine 120B inference is NOT achieved and was correctly not faked.",
+  "git": {
+    "branch": "local/streamed-metadata-admission",
+    "checkpoint_push": "fast-forward d2e6e9a..ff70168 pushed to origin (approved commits 2ceb644, cf4d4dd, ff70168); verified origin tip == ff70168",
+    "head_commit_at_gate": "ff70168",
+    "working_tree": "untracked .vscode/ preserved; this session's change is confined to the rejection-contract example + this evidence file, committed locally and NOT pushed",
+    "push_policy": "new 120B-related commits remain local per task directive"
+  },
+  "storage_G": {
+    "drive": "G:",
+    "filesystem": "NTFS",
+    "label": "AI Model",
+    "total_bytes": 123981524992,
+    "free_bytes": 71206637568,
+    "total_gib": 115.5,
+    "free_gib": 66.3,
+    "assessment": "The 63.39 GB two-shard model would fit in 66.3 GB free with <3 GB slack and NO room for a second full-size copy or shard reassembly. Tight and risky even if the architecture were supported; not exercised because the model is architecturally unsupported.",
+    "fallback_to_C": "NOT used"
+  },
+  "hardware": {
+    "cpu": "12th Gen Intel Core i5-12400F",
+    "cores_physical": 6,
+    "cores_logical": 12,
+    "ram_total_gib": 13.81,
+    "ram_free_at_probe_mib": 2391,
+    "note": "117B-parameter model (5.1B active per token under top-4 MoE). Resident load is impossible on 14 GB RAM; out-of-core streaming of a MoE from NTFS would be the only path and remains unimplemented and unvalidated."
+  },
+  "target_model_provenance": {
+    "source": "Hugging Face API (metadata only; NO file content downloaded)",
+    "repo": "bartowski/openai_gpt-oss-120b-GGUF",
+    "revision": "main (content pinned by per-shard LFS sha256 below)",
+    "official_base": "openai/gpt-oss-120b",
+    "quant": "MXFP4_MOE",
+    "architecture_family": "Mixture-of-Experts (MXFP4 microscaling 4-bit weights)",
+    "shards": [
+      {
+        "path": "openai_gpt-oss-120b-MXFP4_MOE/openai_gpt-oss-120b-MXFP4_MOE-00001-of-00002.gguf",
+        "size_bytes": 39820000000,
+        "size_gb": 39.82,
+        "lfs_sha256": "06a0fcd109049b9d48fa9db9cf0cabc2f923cd3cfe4b7733874ef519ea6a44df"
+      },
+      {
+        "path": "openai_gpt-oss-120b-MXFP4_MOE/openai_gpt-oss-120b-MXFP4_MOE-00002-of-00002.gguf",
+        "size_bytes": 23570000000,
+        "size_gb": 23.57,
+        "lfs_sha256": "b7bf9fba295115d0e32951ce54911b3020dd92459b88a3908ad58479be6f7676"
+      }
+    ],
+    "total_size_gb": 63.39,
+    "brief_discrepancy": "Task brief assumed a single file 'gpt-oss-120b-MXFP4_MOE.gguf'. The actual published artifact is a 2-shard split under a subdirectory. Values were obtained from the API and NOT assumed, per directive.",
+    "sizes_note": "size_bytes rounded from API GB display; LFS sha256 oids are the authoritative content identities."
+  },
+  "compatibility_gate": {
+    "decoder_identity": "Experimental complete Llama decoder; admits F32, F16, BF16, 32-element quants Q4_0/Q4_1/Q5_0/Q5_1/Q8_0/Q8_1, and K-quant superblocks Q2_K..Q8_K (ggml types 0,1,2,3,6,7,8,9,10,11,12,13,14,15,30).",
+    "axis_1_architecture": "UNSUPPORTED. Native plan error: 'streamed backend supports llama and qwen2 architectures only'. GPT-OSS architecture id is refused.",
+    "axis_2_moe_router": "UNSUPPORTED. No router / expert-dispatch / expert-aggregation code exists (zero matches for moe|expert|router). MoE metadata (expert_count) is refused: 'unsupported architecture metadata option in streamed backend'.",
+    "axis_3_mxfp4_quant": "UNSUPPORTED. ggml type 39 (MXFP4) is absent from tensor_layout()'s admitted set; the GGUF index rejects every MXFP4 tensor: 'GGUF tensor type not supported for indexed range reads'.",
+    "evidence_source": "crates/llmbridge-core/src/gguf_index.rs tensor_layout() (lines 209-226); crates/llmbridge-core/examples/streamed_rejection_contract.rs"
+  },
+  "negative_tests_executed": {
+    "command": "cargo run --example streamed_rejection_contract --features native",
+    "result": "ALL REJECTION CONTRACTS PASSED",
+    "new_gpt_oss_cases": [
+      {"tag": "gpt-oss-arch", "observed_error": "streamed backend supports llama and qwen2 architectures only"},
+      {"tag": "moe-expert-count", "observed_error": "unsupported architecture metadata option in streamed backend"},
+      {"tag": "mxfp4-type", "observed_error": "GGUF tensor type not supported for indexed range reads"}
+    ],
+    "pre_existing_cases_still_pass": true
+  },
+  "download_performed": false,
+  "inference_performed": false,
+  "fabricated_measurements": "none; no TTFT, throughput, peak RSS, or token IDs are reported because no 120B inference ran",
+  "decision": "Do NOT download the 63.39 GB artifact. The mandatory pre-download compatibility gate fails on three independent, provable axes. Downloading would consume ~96% of G: free space for a model the decoder cannot execute. Per directive, the precise unsupported-architecture error is retained and the real blocker is reported.",
+  "limitations_and_next_steps": {
+    "to_support_gpt_oss_natively": [
+      "Implement MXFP4 (ggml type 39) block dequant with pinned ggml primitives (E8M0 shared scale + E2M1 4-bit elements, 32-element blocks).",
+      "Implement genuine MoE: router linear + softmax top-k selection, per-expert SwiGLU FFN, and weighted aggregation, preserving full selection mathematics.",
+      "Implement GPT-OSS attention specifics (attention sinks, sliding-window pattern) and the Harmony chat template / tokenizer.",
+      "Add out-of-core expert streaming so only the top-k activated experts are read per token; prove the reduced read volume with real source-byte counters (do not assume active-parameter reduction)."
+    ],
+    "host_feasibility_caveat": "Even with full implementation, resident 120B load is impossible on 14 GB RAM, and an independent llama.cpp reference cannot be run resident on this host for parity. Any future attempt must treat 120B memory feasibility as an independent out-of-core experiment and cannot reuse the 7B/256 MiB result as proof.",
+    "regression_safety": "No production source code changed. The only edit is additive negative tests in an example binary."
+  }
+}
