@@ -813,6 +813,41 @@ mod tests {
     }
 
     #[test]
+    fn persistent_state_split_calls_equal_single_call() {
+        // Autoregressive persistence: advancing one session across several forward
+        // calls ([1,2] then [3] then [4]) must equal one call over [1,2,3,4] in
+        // both the final logits and the recurrent/KV state — the guarantee multi-
+        // token decoding relies on.
+        let (model, _raw) = build();
+        let toks = [1u32, 2, 3, 4];
+        let mut split = model.new_state().unwrap();
+        let _ = model.forward(&mut split, &toks[0..2]).unwrap();
+        let _ = model.forward(&mut split, &toks[2..3]).unwrap();
+        let out_split = model.forward(&mut split, &toks[3..4]).unwrap();
+
+        let mut whole = model.new_state().unwrap();
+        let out_whole = model.forward(&mut whole, &toks).unwrap();
+        // last-position logits from the final call must match the whole-sequence
+        // last-position logits.
+        assert_eq!(
+            out_split.len(),
+            NV,
+            "split final call returns last-position logits"
+        );
+        let whole_last = &out_whole[out_whole.len() - NV..];
+        let max_abs = out_split
+            .iter()
+            .zip(whole_last)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(
+            max_abs < 1e-5,
+            "split-call vs single-call logits differ: {max_abs}"
+        );
+        assert_eq!(split.position(), whole.position(), "positions must match");
+    }
+
+    #[test]
     fn different_single_tokens_produce_different_logits() {
         // Structural input-sensitivity proof (reference-free): two different input
         // tokens must yield different embeddings AND different final logits. This
