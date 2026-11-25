@@ -13,6 +13,7 @@ pub mod models;
 #[cfg(feature = "native")]
 pub mod native_dequant;
 pub mod nemotron_attention;
+pub mod nemotron_hybrid;
 
 pub mod admission_queue;
 pub mod f32_chain;
