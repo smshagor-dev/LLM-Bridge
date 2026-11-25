@@ -843,6 +843,65 @@ pub fn run_full_forward(
     Ok(logits)
 }
 
+/// Result of one prompt-conditioned generation step.
+#[derive(Debug, Clone)]
+pub struct GenerationResult {
+    pub prompt: String,
+    pub token_ids: Vec<u32>,
+    pub n_prefill: usize,
+    pub next_token_id: usize,
+    pub next_token_text: String,
+    pub top5: Vec<(usize, f32)>,
+    pub prefill_seconds: f64,
+}
+
+/// Encode `prompt` with the Nemotron tokenizer, run the full streamed 88-layer
+/// prefill over the resulting token ids (shared recurrent/KV state advanced one
+/// token at a time), and greedily pick the next token from the final-position
+/// logits. This is the genuine prompt-conditioned path; it reuses
+/// [`run_full_forward`] and performs no weight residency.
+///
+/// Honest caveat: the tokenizer's non-Latin / edge-case ID parity is unverified
+/// in this environment (see [`crate::nemotron_tokenizer`]), so for non-ASCII
+/// prompts the token ids may differ from a corrected llama.cpp reference.
+pub fn generate_next_token(
+    index: &SplitGgufIndex,
+    cfg: &NemotronConfig,
+    plan: &ModelPlan,
+    tokenizer: &crate::nemotron_tokenizer::NemotronTokenizer,
+    prompt: &str,
+    stop: &AtomicBool,
+) -> Result<GenerationResult, String> {
+    let token_ids = tokenizer.encode(prompt);
+    if token_ids.is_empty() {
+        return Err("prompt encoded to zero tokens".into());
+    }
+    if let Some(&bad) = token_ids.iter().find(|&&id| id as usize >= cfg.n_vocab) {
+        return Err(format!("encoded token id {bad} out of vocab range"));
+    }
+    let mut session = FullSession::new(cfg, plan)?;
+    let t0 = std::time::Instant::now();
+    let logits = run_full_forward(index, cfg, plan, &mut session, &token_ids, stop)?;
+    let prefill_seconds = t0.elapsed().as_secs_f64();
+    let next_token_id = greedy_token(&logits).ok_or("no greedy token")?;
+    // top-5 by descending logit (small bounded partial selection)
+    let mut idx: Vec<usize> = (0..logits.len()).collect();
+    idx.sort_by(|&a, &b| logits[b].partial_cmp(&logits[a]).unwrap().then(a.cmp(&b)));
+    let top5: Vec<(usize, f32)> = idx.iter().take(5).map(|&i| (i, logits[i])).collect();
+    let next_token_text = tokenizer
+        .decode(&[next_token_id as u32])
+        .unwrap_or_default();
+    Ok(GenerationResult {
+        prompt: prompt.to_string(),
+        token_ids,
+        n_prefill: session.position(),
+        next_token_id,
+        next_token_text,
+        top5,
+        prefill_seconds,
+    })
+}
+
 /// Greedy argmax token id over a logit vector.
 pub fn greedy_token(logits: &[f32]) -> Option<usize> {
     logits
@@ -995,6 +1054,36 @@ mod tests {
         eprintln!(
             "FULL 88-layer forward ok in {secs:.1}s: finite logits[{}], greedy token id = {tok}",
             logits.len()
+        );
+    }
+
+    // Genuine prompt-conditioned generation: encode a text prompt, run the full
+    // 88-layer streamed prefill, and emit one real next token. Heavy (each prompt
+    // token is a full streamed pass over the slow G: drive), so gated on
+    // LLMBRIDGE_NEMOTRON_DIR + LLMBRIDGE_NEMOTRON_FULL.
+    #[test]
+    fn prompt_conditioned_generation_emits_one_real_token() {
+        let Some(sh) = shards() else {
+            eprintln!("skip: LLMBRIDGE_NEMOTRON_DIR unset");
+            return;
+        };
+        if std::env::var("LLMBRIDGE_NEMOTRON_FULL").is_err() {
+            eprintln!("skip: LLMBRIDGE_NEMOTRON_FULL unset (heavy prompt-generation test)");
+            return;
+        }
+        let index = SplitGgufIndex::inspect(&sh).unwrap();
+        let cfg = NemotronConfig::NEMOTRON_3_SUPER_120B;
+        let plan = ModelPlan::build(&index, cfg).unwrap();
+        let shard1 = std::path::PathBuf::from(&sh[0]);
+        let tk = crate::nemotron_tokenizer::NemotronTokenizer::from_gguf(&shard1).unwrap();
+        let stop = AtomicBool::new(false);
+        let prompt = std::env::var("LLMBRIDGE_NEMOTRON_PROMPT").unwrap_or_else(|_| "Hi".into());
+        let r = generate_next_token(&index, &cfg, &plan, &tk, &prompt, &stop).unwrap();
+        assert!(r.next_token_id < cfg.n_vocab);
+        assert_eq!(r.n_prefill, r.token_ids.len());
+        eprintln!(
+            "PROMPT GEN ok: prompt={:?} ids={:?} n_prefill={} next_id={} next_text={:?} top5={:?} prefill={:.1}s",
+            r.prompt, r.token_ids, r.n_prefill, r.next_token_id, r.next_token_text, r.top5, r.prefill_seconds
         );
     }
 }
