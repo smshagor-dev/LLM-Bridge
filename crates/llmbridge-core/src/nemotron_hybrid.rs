@@ -813,6 +813,36 @@ mod tests {
     }
 
     #[test]
+    fn different_single_tokens_produce_different_logits() {
+        // Structural input-sensitivity proof (reference-free): two different input
+        // tokens must yield different embeddings AND different final logits. This
+        // shows the full hybrid pipeline (embed -> Mamba -> attention -> MoE ->
+        // norm -> output) propagates the input, so an identical top-1 token for
+        // different inputs on the real model is not, by itself, a wiring defect.
+        let (model, raw) = build();
+        let (mut sa, mut sb) = (model.new_state().unwrap(), model.new_state().unwrap());
+        let la = model.forward(&mut sa, &[3u32]).unwrap();
+        let lb = model.forward(&mut sb, &[9u32]).unwrap();
+        // embeddings differ
+        let emb_diff: f32 = (0..NE)
+            .map(|i| (raw.tok_embd[3 * NE + i] - raw.tok_embd[9 * NE + i]).abs())
+            .sum();
+        assert!(
+            emb_diff > 0.0,
+            "distinct tokens must have distinct embeddings"
+        );
+        // final logits differ
+        assert_ne!(la, lb, "distinct inputs must yield distinct logits");
+        let l2: f64 = la
+            .iter()
+            .zip(&lb)
+            .map(|(a, b)| ((a - b) as f64).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        assert!(l2 > 1e-4, "logit L2 distance must be nonzero (got {l2})");
+    }
+
+    #[test]
     fn reset_then_repeat_is_deterministic() {
         let (model, _raw) = build();
         let tokens: Vec<u32> = vec![1, 2, 3, 4];

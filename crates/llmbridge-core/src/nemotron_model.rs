@@ -902,6 +902,38 @@ pub fn generate_next_token(
     })
 }
 
+/// Deterministic activation summary for diagnostics (no state, no math change):
+/// (L2 norm, mean, population std, max abs, count of non-finite entries).
+pub fn activation_stats(v: &[f32]) -> (f64, f64, f64, f64, usize) {
+    let n = v.len().max(1) as f64;
+    let mut sum = 0.0f64;
+    let mut sumsq = 0.0f64;
+    let mut maxabs = 0.0f64;
+    let mut nonfinite = 0usize;
+    for &x in v {
+        if !x.is_finite() {
+            nonfinite += 1;
+            continue;
+        }
+        let xd = x as f64;
+        sum += xd;
+        sumsq += xd * xd;
+        maxabs = maxabs.max(xd.abs());
+    }
+    let mean = sum / n;
+    let var = (sumsq / n) - mean * mean;
+    (sumsq.sqrt(), mean, var.max(0.0).sqrt(), maxabs, nonfinite)
+}
+
+/// L2 distance between two equal-length vectors (diagnostics).
+pub fn l2_distance(a: &[f32], b: &[f32]) -> f64 {
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| ((*x - *y) as f64).powi(2))
+        .sum::<f64>()
+        .sqrt()
+}
+
 /// Greedy argmax token id over a logit vector.
 pub fn greedy_token(logits: &[f32]) -> Option<usize> {
     logits
@@ -1054,6 +1086,59 @@ mod tests {
         eprintln!(
             "FULL 88-layer forward ok in {secs:.1}s: finite logits[{}], greedy token id = {tok}",
             logits.len()
+        );
+    }
+
+    // Input-sensitivity diagnostic for the repeated-token-1044 investigation:
+    // confirm two different input token ids yield different embeddings AND
+    // different real layer-0 (Mamba) outputs on the actual model. Reads only two
+    // embedding rows + two single Mamba layers (bounded), so it is far lighter
+    // than a full forward but still touches G:; gated on LLMBRIDGE_NEMOTRON_DIR.
+    #[test]
+    fn real_input_sensitivity_embed_and_layer0() {
+        let Some(sh) = shards() else {
+            eprintln!("skip: LLMBRIDGE_NEMOTRON_DIR unset");
+            return;
+        };
+        let index = SplitGgufIndex::inspect(&sh).unwrap();
+        let cfg = NemotronConfig::NEMOTRON_3_SUPER_120B;
+        let plan = ModelPlan::build(&index, cfg).unwrap();
+        let stop = AtomicBool::new(false);
+        let rec = plan
+            .layers
+            .iter()
+            .find(|l| l.kind == LayerType::Recurrent)
+            .unwrap()
+            .index;
+
+        // BOS (1) vs "Hi" (37133) — the two inputs that both produced token 1044.
+        let e_bos = embed_token(&index, &cfg, 1, &stop).unwrap();
+        let e_hi = embed_token(&index, &cfg, 37133, &stop).unwrap();
+        let emb_dist = l2_distance(&e_bos, &e_hi);
+        assert!(
+            emb_dist > 0.0,
+            "different tokens must have different embeddings"
+        );
+
+        let run_l0 = |emb: &[f32]| {
+            let mut conv = ConvState::zeros(cfg.conv_channels(), cfg.d_conv).unwrap();
+            let mut ssm = SsmState::zeros(cfg.ssm_config()).unwrap();
+            run_mamba_layer(&index, &cfg, rec, &mut conv, &mut ssm, emb, &stop).unwrap()
+        };
+        let o_bos = run_l0(&e_bos);
+        let o_hi = run_l0(&e_hi);
+        let l0_dist = l2_distance(&o_bos, &o_hi);
+        assert!(
+            l0_dist > 0.0,
+            "different inputs must produce different layer-0 outputs"
+        );
+        eprintln!(
+            "input-sensitivity: embed L2(bos,hi)={emb_dist:.4} (stats bos={:?} hi={:?}); \
+             layer0 L2={l0_dist:.4} (stats bos={:?} hi={:?})",
+            activation_stats(&e_bos),
+            activation_stats(&e_hi),
+            activation_stats(&o_bos),
+            activation_stats(&o_hi)
         );
     }
 
