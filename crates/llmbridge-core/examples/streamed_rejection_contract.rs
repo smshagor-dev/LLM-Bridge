@@ -308,5 +308,30 @@ fn main() {
         "missing/invalid streamed model integer metadata",
     );
 
+    // ---- GPT-OSS 120B (MoE / MXFP4) explicit unsupported-architecture gate ----
+    // The streamed decoder is a dense llama/qwen2 path. GPT-OSS is a Mixture-of-
+    // Experts model with MXFP4 (ggml type 39) weights. These cases pin the three
+    // independent reasons GPT-OSS is refused BEFORE any 63 GB download, so the
+    // "unsupported" contract is enforced rather than asserted in prose.
+
+    println!("negative: GPT-OSS architecture identifier is refused");
+    let mut m = valid_llama();
+    set_kv(&mut m, "general.architecture", Val::Str("gpt-oss".into()));
+    expect_reject(&m, "gpt-oss-arch", "llama and qwen2 architectures only");
+
+    println!("negative: MoE expert_count metadata is refused (no router path)");
+    let mut m = valid_llama();
+    set_kv(&mut m, "llama.expert_count", Val::U32(128));
+    expect_reject(
+        &m,
+        "moe-expert-count",
+        "unsupported architecture metadata option",
+    );
+
+    println!("negative: MXFP4 tensor type (ggml type 39) is refused at index");
+    let mut m = valid_llama();
+    m.tensors[3].ggml_type = 39; // MXFP4: absent from tensor_layout's admitted set
+    expect_reject(&m, "mxfp4-type", "not supported for indexed range reads");
+
     println!("ALL REJECTION CONTRACTS PASSED");
 }
