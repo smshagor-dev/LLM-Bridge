@@ -753,9 +753,7 @@ impl FullSession {
                     Box::new(ConvState::zeros(cfg.conv_channels(), cfg.d_conv)?),
                     Box::new(SsmState::zeros(cfg.ssm_config())?),
                 ),
-                LayerType::Attention => {
-                    FullLayerState::Attention(Box::<StreamKvCache>::default())
-                }
+                LayerType::Attention => FullLayerState::Attention(Box::<StreamKvCache>::default()),
                 LayerType::Moe => FullLayerState::Moe,
             });
         }
