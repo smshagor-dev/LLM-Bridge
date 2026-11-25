@@ -3,7 +3,7 @@
 
 use crate::storage::{BoundedLocalReader, SourceIdentity};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -123,6 +123,31 @@ impl<F: Fn() -> bool> MetadataReader<F> {
         Ok(u64::from_le_bytes(self.read_exact()?))
     }
 
+    /// Read a GGUF integer scalar of the given value type as u64. Split metadata
+    /// keys (split.no/count are uint16, split.tensors.count is int32 as written by
+    /// gguf-split) must be genuine non-negative integers; anything else is rejected
+    /// rather than coerced.
+    fn scalar_u64(&mut self, value_type: u32) -> io::Result<u64> {
+        match value_type {
+            2 => Ok(u64::from(u16::from_le_bytes(self.read_exact()?))),
+            3 => {
+                let v = i16::from_le_bytes(self.read_exact()?);
+                u64::try_from(v).map_err(|_| invalid("negative GGUF split metadata value"))
+            }
+            4 => Ok(u64::from(self.u32()?)),
+            5 => {
+                let v = i32::from_le_bytes(self.read_exact()?);
+                u64::try_from(v).map_err(|_| invalid("negative GGUF split metadata value"))
+            }
+            10 => self.u64(),
+            11 => {
+                let v = i64::from_le_bytes(self.read_exact()?);
+                u64::try_from(v).map_err(|_| invalid("negative GGUF split metadata value"))
+            }
+            _ => Err(invalid("GGUF split metadata value is not an integer")),
+        }
+    }
+
     fn skip(&mut self, amount: u64) -> io::Result<()> {
         self.advance(amount)?;
         // The bounded metadata size fits in i64. Keep buffered bytes when the
@@ -222,7 +247,12 @@ fn tensor_layout(ggml_type: u32) -> Option<(u64, u64)> {
         13 => Some((256, 176)), // Q5_K
         14 => Some((256, 210)), // Q6_K
         15 => Some((256, 292)), // Q8_K
-        30 => Some((1, 2)),     // BF16
+        // i-quant block geometries (indexing/range-read only; NOT a dequant kernel).
+        // Byte sizes are the pinned ggml type_size constants: a value that is a
+        // verifiable layout fact, independent of any decode implementation.
+        16 => Some((256, 66)), // IQ2_XXS: {half d; u16 qs[QK_K/8]} = 2 + 32*2
+        20 => Some((32, 18)),  // IQ4_NL:  {half d; u8 qs[QK4_NL/2]} = 2 + 16
+        30 => Some((1, 2)),    // BF16
         _ => None,
     }
 }
@@ -553,6 +583,218 @@ impl GgufTensorIndex {
             io::Error::new(io::ErrorKind::NotFound, "tensor not found in indexed GGUF")
         })?;
         self.stream_tensor_slice_cancellable(reader, name, 0, tensor.byte_len, cancelled, consume)
+    }
+}
+
+/// Split ("sharded") GGUF metadata read from one shard: the self-describing
+/// `split.*` keys plus the shard's own tensor count. Values come from metadata,
+/// never from the filename, so a renamed or reordered shard cannot masquerade as
+/// a different member.
+#[derive(Debug, Clone)]
+struct SplitKeys {
+    tensor_count: u64,
+    split_no: Option<u64>,
+    split_count: Option<u64>,
+    split_tensors_count: Option<u64>,
+}
+
+/// Parse only the GGUF header and metadata key/value block of a shard, capturing
+/// the `split.*` keys. Unlike `GgufTensorIndex::inspect`, this permits a
+/// zero-tensor header shard (the metadata-only split member) and does not parse
+/// the tensor table. Bounded exactly like the full indexer.
+fn read_split_keys(path: &Path, interrupted: impl Fn() -> bool) -> io::Result<SplitKeys> {
+    let mut reader = MetadataReader::open(path, interrupted)?;
+    if reader.read_exact::<4>()? != *b"GGUF" {
+        return Err(invalid("not a GGUF file"));
+    }
+    let version = reader.u32()?;
+    if version != 2 && version != 3 {
+        return Err(invalid("only GGUF v2/v3 split indexing supported"));
+    }
+    let tensor_count = reader.u64()?;
+    let kv_count = reader.u64()?;
+    if tensor_count > MAX_TENSORS || kv_count > MAX_KV {
+        return Err(invalid(
+            "GGUF tensor or metadata count exceeds split admission",
+        ));
+    }
+    let (mut split_no, mut split_count, mut split_tensors_count) = (None, None, None);
+    let mut seen_keys = HashSet::new();
+    for _ in 0..kv_count {
+        let key = reader.string(256)?;
+        if !seen_keys.insert(key.clone()) {
+            return Err(invalid("duplicate GGUF metadata key"));
+        }
+        let value_type = reader.u32()?;
+        match key.as_str() {
+            "split.no" => split_no = Some(reader.scalar_u64(value_type)?),
+            "split.count" => split_count = Some(reader.scalar_u64(value_type)?),
+            "split.tensors.count" => split_tensors_count = Some(reader.scalar_u64(value_type)?),
+            _ => reader.skip_value(value_type)?,
+        }
+    }
+    Ok(SplitKeys {
+        tensor_count,
+        split_no,
+        split_count,
+        split_tensors_count,
+    })
+}
+
+/// One member of a multi-shard (split) GGUF model.
+#[derive(Debug)]
+pub struct SplitMember {
+    pub path: PathBuf,
+    /// 0-based position declared by this shard's `split.no` metadata.
+    pub split_no: u64,
+    /// Tensor count from this shard's own GGUF header.
+    pub tensor_count: u64,
+    /// Full validated tensor index for a data shard; `None` for a zero-tensor
+    /// metadata header shard.
+    pub index: Option<GgufTensorIndex>,
+}
+
+/// A logical index over a set of split GGUF shards. Tensor identity, partitioning
+/// and split completeness are validated from `split.*` metadata and each shard's
+/// own tensor table — the shards are never concatenated, and each retains an
+/// independent source identity and byte range for bounded, per-shard range reads.
+#[derive(Debug)]
+pub struct SplitGgufIndex {
+    pub split_count: u64,
+    pub total_tensors: u64,
+    /// Members sorted ascending by `split_no`.
+    pub members: Vec<SplitMember>,
+    tensor_owner: HashMap<String, usize>,
+}
+
+impl SplitGgufIndex {
+    /// Validate and index a complete set of split shards. The set is admitted only
+    /// when every shard agrees on `split.count` and `split.tensors.count`, the
+    /// `split.no` values are exactly `0..split_count` with no gaps or duplicates,
+    /// the number of shards equals `split.count`, no tensor name appears in more
+    /// than one shard, and the aggregate indexed tensor count equals
+    /// `split.tensors.count`. No tensor payload is read.
+    pub fn inspect<P: AsRef<Path>>(paths: &[P]) -> io::Result<Self> {
+        Self::inspect_cancellable(paths, || false)
+    }
+
+    pub fn inspect_cancellable<P: AsRef<Path>>(
+        paths: &[P],
+        interrupted: impl Fn() -> bool,
+    ) -> io::Result<Self> {
+        if paths.is_empty() {
+            return Err(invalid("split GGUF model requires at least one shard"));
+        }
+        if paths.len() > MAX_TENSORS as usize {
+            return Err(invalid("split GGUF shard count exceeds admission"));
+        }
+        let mut members = Vec::with_capacity(paths.len());
+        let mut split_count_global: Option<u64> = None;
+        let mut total_global: Option<u64> = None;
+        for path in paths {
+            let path = path.as_ref();
+            let keys = read_split_keys(path, &interrupted)?;
+            let split_no = keys
+                .split_no
+                .ok_or_else(|| invalid("shard missing split.no metadata"))?;
+            let split_count = keys
+                .split_count
+                .ok_or_else(|| invalid("shard missing split.count metadata"))?;
+            let total = keys
+                .split_tensors_count
+                .ok_or_else(|| invalid("shard missing split.tensors.count metadata"))?;
+            if split_count == 0 {
+                return Err(invalid("split.count must be non-zero"));
+            }
+            match split_count_global {
+                None => split_count_global = Some(split_count),
+                Some(prior) if prior != split_count => {
+                    return Err(invalid("inconsistent split.count across shards"));
+                }
+                _ => {}
+            }
+            match total_global {
+                None => total_global = Some(total),
+                Some(prior) if prior != total => {
+                    return Err(invalid("inconsistent split.tensors.count across shards"));
+                }
+                _ => {}
+            }
+            // A data shard is fully indexed (and its tensor geometry validated) by
+            // the audited single-file indexer; a zero-tensor header shard is not.
+            let index = if keys.tensor_count == 0 {
+                None
+            } else {
+                Some(GgufTensorIndex::inspect_cancellable(path, &interrupted)?)
+            };
+            members.push(SplitMember {
+                path: path.to_path_buf(),
+                split_no,
+                tensor_count: keys.tensor_count,
+                index,
+            });
+        }
+        let split_count = split_count_global.expect("non-empty shard set");
+        let total_tensors = total_global.expect("non-empty shard set");
+        if split_count != paths.len() as u64 {
+            return Err(invalid(
+                "split.count does not match the number of shards provided",
+            ));
+        }
+        members.sort_by_key(|member| member.split_no);
+        for (expected, member) in members.iter().enumerate() {
+            if member.split_no != expected as u64 {
+                return Err(invalid("split.no sequence has a gap or duplicate"));
+            }
+        }
+        let mut tensor_owner = HashMap::new();
+        let mut aggregate = 0u64;
+        for (member_index, member) in members.iter().enumerate() {
+            if let Some(index) = &member.index {
+                if index.tensors.len() as u64 != member.tensor_count {
+                    return Err(invalid(
+                        "indexed tensor count disagrees with shard header count",
+                    ));
+                }
+                for tensor in &index.tensors {
+                    if tensor_owner
+                        .insert(tensor.name.clone(), member_index)
+                        .is_some()
+                    {
+                        return Err(invalid("duplicate tensor name across split shards"));
+                    }
+                }
+                aggregate = aggregate
+                    .checked_add(index.tensors.len() as u64)
+                    .ok_or_else(|| invalid("aggregate tensor count overflow"))?;
+            }
+        }
+        if aggregate != total_tensors {
+            return Err(invalid(
+                "aggregate indexed tensor count disagrees with split.tensors.count",
+            ));
+        }
+        Ok(Self {
+            split_count,
+            total_tensors,
+            members,
+            tensor_owner,
+        })
+    }
+
+    /// Number of tensors indexed across every shard (equals `total_tensors`).
+    pub fn indexed_tensor_count(&self) -> usize {
+        self.tensor_owner.len()
+    }
+
+    /// Resolve a tensor name to the owning shard member and its byte region,
+    /// mapping the logical model tensor to the correct shard and file offset
+    /// without combining shards.
+    pub fn tensor(&self, name: &str) -> Option<(&SplitMember, &TensorRegion)> {
+        let member_index = *self.tensor_owner.get(name)?;
+        let member = &self.members[member_index];
+        let region = member.index.as_ref()?.tensor(name)?;
+        Some((member, region))
     }
 }
 
@@ -953,5 +1195,181 @@ mod tests {
     fn data_offset_and_alignment_are_enforced() {
         assert_eq!(align_up(65, 32).unwrap(), 96);
         assert!(align_up(u64::MAX, 32).is_err());
+    }
+
+    #[test]
+    fn iquant_block_geometry_is_exact() {
+        // Pinned ggml type_size constants for the i-quants present in the Nemotron
+        // UD-IQ2_XXS shards. Indexing/range-read geometry only; not a dequantizer.
+        assert_eq!(tensor_layout(16), Some((256, 66))); // IQ2_XXS
+        assert_eq!(tensor_layout(20), Some((32, 18))); // IQ4_NL
+        let (b16, bytes16) = tensor_layout(16).unwrap();
+        // The real expert up-projection is [1024, 2688, 512]; the leading (block)
+        // dimension 1024 is a whole number of IQ2_XXS 256-element superblocks.
+        assert_eq!(1024 % b16, 0);
+        assert_eq!((1024 / b16) * bytes16, 264); // one 1024-wide IQ2_XXS row
+        let (b20, bytes20) = tensor_layout(20).unwrap();
+        assert_eq!(4096 % b20, 0);
+        assert_eq!((4096 / b20) * bytes20, 2304); // one 4096-wide IQ4_NL row
+    }
+
+    // ---- split (multi-shard) GGUF fixtures -------------------------------------
+
+    fn split_kv(bytes: &mut Vec<u8>, no: u16, count: u16, tensors: i32) {
+        str_field(bytes, "split.no");
+        bytes.extend_from_slice(&2u32.to_le_bytes()); // GGUF_TYPE_UINT16
+        bytes.extend_from_slice(&no.to_le_bytes());
+        str_field(bytes, "split.count");
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        bytes.extend_from_slice(&count.to_le_bytes());
+        str_field(bytes, "split.tensors.count");
+        bytes.extend_from_slice(&5u32.to_le_bytes()); // GGUF_TYPE_INT32
+        bytes.extend_from_slice(&tensors.to_le_bytes());
+    }
+
+    /// A zero-tensor metadata header shard carrying only the split keys.
+    fn header_shard(no: u16, count: u16, tensors: i32) -> Vec<u8> {
+        let mut b = b"GGUF".to_vec();
+        b.extend_from_slice(&3u32.to_le_bytes());
+        b.extend_from_slice(&0u64.to_le_bytes()); // tensor_count = 0
+        b.extend_from_slice(&3u64.to_le_bytes()); // kv_count = 3 (split.*)
+        split_kv(&mut b, no, count, tensors);
+        b
+    }
+
+    /// A data shard with F32 tensors and the split keys, laid out exactly as the
+    /// single-file indexer expects (aligned cumulative offsets + payload).
+    fn data_shard(no: u16, count: u16, tensors_total: i32, tensors: &[(&str, &[u64])]) -> Vec<u8> {
+        let mut b = b"GGUF".to_vec();
+        b.extend_from_slice(&3u32.to_le_bytes());
+        b.extend_from_slice(&(tensors.len() as u64).to_le_bytes());
+        b.extend_from_slice(&4u64.to_le_bytes()); // general.alignment + 3 split keys
+        str_field(&mut b, "general.alignment");
+        b.extend_from_slice(&4u32.to_le_bytes());
+        b.extend_from_slice(&32u32.to_le_bytes());
+        split_kv(&mut b, no, count, tensors_total);
+        let mut rel = 0u64;
+        let mut offsets = Vec::new();
+        for (_, dims) in tensors {
+            offsets.push(rel);
+            let elems: u64 = dims.iter().product();
+            rel += (elems * 4).div_ceil(32) * 32; // F32 payload, 32-aligned
+        }
+        let total_data = rel;
+        for ((name, dims), off) in tensors.iter().zip(&offsets) {
+            str_field(&mut b, name);
+            b.extend_from_slice(&(dims.len() as u32).to_le_bytes());
+            for d in *dims {
+                b.extend_from_slice(&d.to_le_bytes());
+            }
+            b.extend_from_slice(&0u32.to_le_bytes()); // F32
+            b.extend_from_slice(&off.to_le_bytes());
+        }
+        while b.len() % 32 != 0 {
+            b.push(0);
+        }
+        b.extend_from_slice(&vec![0u8; total_data as usize]);
+        b
+    }
+
+    #[test]
+    fn split_index_accepts_consistent_shards_regardless_of_argument_order() {
+        let h = write(&header_shard(0, 3, 3));
+        let d1 = write(&data_shard(
+            1,
+            3,
+            3,
+            &[
+                ("token_embd.weight", &[32, 4]),
+                ("output_norm.weight", &[32]),
+            ],
+        ));
+        let d2 = write(&data_shard(2, 3, 3, &[("blk.0.attn_norm.weight", &[32])]));
+        // Deliberately out of order: ordering must come from split.no, not args.
+        let idx = SplitGgufIndex::inspect(&[d2.clone(), h.clone(), d1.clone()]).unwrap();
+        assert_eq!(idx.split_count, 3);
+        assert_eq!(idx.total_tensors, 3);
+        assert_eq!(idx.indexed_tensor_count(), 3);
+        assert_eq!(
+            idx.members.iter().map(|m| m.split_no).collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+        assert!(idx.members[0].index.is_none()); // header shard
+        let (member, region) = idx.tensor("blk.0.attn_norm.weight").unwrap();
+        assert_eq!(member.split_no, 2);
+        assert_eq!(region.dimensions, vec![32]);
+        assert!(idx.tensor("does.not.exist").is_none());
+        for p in [h, d1, d2] {
+            std::fs::remove_file(p).unwrap();
+        }
+    }
+
+    #[test]
+    fn split_index_rejects_missing_split_metadata() {
+        // A plain single-file GGUF has no split.* keys.
+        let plain = write(&fixture(8, 0, 96));
+        let err = SplitGgufIndex::inspect(&[plain.clone()]).unwrap_err();
+        assert!(err.to_string().contains("split.no"));
+        std::fs::remove_file(plain).unwrap();
+    }
+
+    #[test]
+    fn split_index_rejects_inconsistent_and_incomplete_sets() {
+        // Inconsistent split.count between shards.
+        let h = write(&header_shard(0, 3, 3));
+        let bad = write(&data_shard(1, 2, 3, &[("a.weight", &[32])]));
+        assert!(SplitGgufIndex::inspect(&[h.clone(), bad.clone()])
+            .unwrap_err()
+            .to_string()
+            .contains("inconsistent split.count"));
+        std::fs::remove_file(&bad).unwrap();
+
+        // split.count disagrees with the number of shards provided.
+        assert!(SplitGgufIndex::inspect(&[h.clone()])
+            .unwrap_err()
+            .to_string()
+            .contains("does not match the number of shards"));
+        std::fs::remove_file(h).unwrap();
+
+        // Duplicate split.no (gap in the 0..count sequence).
+        let a = write(&data_shard(0, 2, 2, &[("a.weight", &[32])]));
+        let b = write(&data_shard(0, 2, 2, &[("b.weight", &[32])]));
+        assert!(SplitGgufIndex::inspect(&[a.clone(), b.clone()])
+            .unwrap_err()
+            .to_string()
+            .contains("gap or duplicate"));
+        for p in [a, b] {
+            std::fs::remove_file(p).unwrap();
+        }
+    }
+
+    #[test]
+    fn split_index_rejects_duplicate_tensor_and_count_mismatch() {
+        // Same tensor name present in two shards.
+        let a = write(&data_shard(0, 2, 2, &[("shared.weight", &[32])]));
+        let b = write(&data_shard(1, 2, 2, &[("shared.weight", &[32])]));
+        assert!(SplitGgufIndex::inspect(&[a.clone(), b.clone()])
+            .unwrap_err()
+            .to_string()
+            .contains("duplicate tensor name"));
+        for p in [a, b] {
+            std::fs::remove_file(p).unwrap();
+        }
+
+        // Aggregate indexed tensors disagree with split.tensors.count.
+        let h = write(&header_shard(0, 2, 5));
+        let d = write(&data_shard(
+            1,
+            2,
+            5,
+            &[("x.weight", &[32]), ("y.weight", &[32])],
+        ));
+        assert!(SplitGgufIndex::inspect(&[h.clone(), d.clone()])
+            .unwrap_err()
+            .to_string()
+            .contains("disagrees with split.tensors.count"));
+        for p in [h, d] {
+            std::fs::remove_file(p).unwrap();
+        }
     }
 }

@@ -36,6 +36,7 @@ fn row_layout(ggml_type: u32) -> (u64, u64) {
         8 => (32, 34),   // Q8_0
         9 => (32, 40),   // Q8_1
         10 => (256, 84), // Q2_K
+        20 => (32, 18),  // IQ4_NL (indexable geometry; not decodable by the backend)
         _ => (1, 4),
     }
 }
@@ -332,6 +333,47 @@ fn main() {
     let mut m = valid_llama();
     m.tensors[3].ggml_type = 39; // MXFP4: absent from tensor_layout's admitted set
     expect_reject(&m, "mxfp4-type", "not supported for indexed range reads");
+
+    // ---- NVIDIA Nemotron 3 Super 120B-A12B (nemotron_h_moe) unsupported gate ----
+    // The real downloaded model (UD-IQ2_XXS, 3 shards) declares architecture
+    // "nemotron_h_moe": a hybrid Mamba-2 state-space + attention + 512-expert latent
+    // MoE design. The streamed backend is a dense llama/qwen2 decoder with none of
+    // that math. These cases pin that it is refused for INFERENCE even though the
+    // index can now describe its i-quant tensor geometry (see below) -- indexing a
+    // tensor's bytes is not the same as being able to decode and run it.
+
+    println!("negative: nemotron_h_moe architecture identifier is refused");
+    let mut m = valid_llama();
+    set_kv(
+        &mut m,
+        "general.architecture",
+        Val::Str("nemotron_h_moe".into()),
+    );
+    expect_reject(&m, "nemotron-arch", "llama and qwen2 architectures only");
+
+    println!("negative: hybrid SSM metadata option under the active arch is refused");
+    let mut m = valid_llama();
+    // A Mamba-2 state-space key the dense decoder does not implement; it must be
+    // rejected, never silently ignored/approximated.
+    set_kv(&mut m, "llama.ssm.state_size", Val::U32(128));
+    expect_reject(
+        &m,
+        "nemotron-ssm-key",
+        "unsupported architecture metadata option",
+    );
+
+    println!("negative: IQ4_NL tensor is indexable but NOT decodable by the backend");
+    let mut m = valid_llama();
+    // IQ4_NL (ggml type 20) now has valid 32-element block geometry in the index,
+    // so it passes range-read admission -- but the streamed decoder's supported
+    // compute types do not include it, so execution is still refused. This is the
+    // honest boundary between "can index/stream bytes" and "can run the kernel".
+    m.tensors[3].ggml_type = 20;
+    expect_reject(
+        &m,
+        "iq4nl-not-decodable",
+        "unsupported streamed tensor type/shape",
+    );
 
     println!("ALL REJECTION CONTRACTS PASSED");
 }
