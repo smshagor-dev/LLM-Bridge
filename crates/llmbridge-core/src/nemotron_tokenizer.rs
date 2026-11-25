@@ -24,6 +24,22 @@
 //! GPT-2-style splitter; IDs are therefore NOT claimed to be byte-identical to
 //! llama.cpp for general text. Do not wire this into a production prompt path
 //! until that parity is confirmed against the pinned reference.
+//!
+//! ## Pixtral vs Tekken pre-tokenizer (llama.cpp issue #30894, PR #30960)
+//!
+//! Nemotron GGUFs are tagged `tokenizer.ggml.pre = "pixtral"` because their
+//! tokenizer hash collides with Pixtral-12B's, but Nemotron's own
+//! `tokenizer.json` uses the **Tekken** regex. llama.cpp originally mapped
+//! `pixtral` to the Llama-3 pre-tokenizer; the fix (merge commit
+//! `e197cef4554d466e0becac20e453a355daba8e5d`, newer than our pinned
+//! `cd959bae…`) remaps `pixtral` -> the Tekken pre-tokenizer. Reported impact:
+//! **plain English/ASCII tokenizes identically** under pixtral/llama3/tekken
+//! (independent reporters saw byte-identical IDs for English sentences); the
+//! divergences are in Devanagari/Tamil/Telugu/Bengali/Thai and some digit/
+//! Unicode edge cases. This splitter caps digit runs at 3 (`\p{N}{1,3}`, shared
+//! by the llama3/tekken families) and is expected to match for ASCII English;
+//! non-Latin scripts are NOT verified here (the pinned reference predates the fix
+//! and no reference tokenizer is runnable in this environment).
 
 use std::collections::HashMap;
 
@@ -199,7 +215,7 @@ impl NemotronTokenizer {
     /// GPT-2-style pre-tokenization (documented approximation; see module docs).
     /// Splits into contractions, letter runs, number runs, other-symbol runs, and
     /// whitespace, each carrying a single leading space where present.
-    fn pretokenize(text: &str) -> Vec<String> {
+    pub(crate) fn pretokenize(text: &str) -> Vec<String> {
         let chars: Vec<char> = text.chars().collect();
         let mut out = Vec::new();
         let mut i = 0;
@@ -229,8 +245,12 @@ impl NemotronTokenizer {
                     i += 1;
                 }
             } else if i < n && is_num(chars[i]) {
-                while i < n && is_num(chars[i]) {
+                // Digit runs are capped at 3 (the `\p{N}{1,3}` rule shared by the
+                // llama3 and tekken pre-tokenizer families), so "1234" -> "123","4".
+                let mut d = 0;
+                while i < n && is_num(chars[i]) && d < 3 {
                     i += 1;
+                    d += 1;
                 }
             } else if i < n && chars[i] != ' ' && !chars[i].is_whitespace() {
                 while i < n
@@ -504,6 +524,16 @@ mod tests {
             let back = tk.decode(&ids);
             assert_eq!(back.unwrap(), s, "roundtrip failed for {s:?}");
         }
+    }
+
+    #[test]
+    fn pretokenize_caps_digit_runs_at_three() {
+        // llama3/tekken `\p{N}{1,3}`: "1234567" -> "123","456","7".
+        let p = NemotronTokenizer::pretokenize("1234567");
+        assert_eq!(p, vec!["123", "456", "7"]);
+        // letters are a single run; a leading space attaches to the next piece.
+        let p2 = NemotronTokenizer::pretokenize("ab 12");
+        assert_eq!(p2, vec!["ab", " 12"]);
     }
 
     #[test]
