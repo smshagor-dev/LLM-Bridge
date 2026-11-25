@@ -1,0 +1,93 @@
+{
+  "title": "Nemotron 3 Super 120B-A12B — provenance, pixtral/tekken tokenizer finding, prompt-conditioned 88-layer generation",
+  "date": "2026-11-25",
+  "author": "LLM Bridge",
+  "scope": "Upstream shard provenance verification, the pixtral/tekken pre-tokenizer finding and a documented tokenizer alignment, and a genuine prompt-conditioned token generated through the full 88-layer streamed decoder. Full-model numerical reference parity is NOT established (no resident reference runnable); reference-identical tokenizer parity is NOT verifiable here (no reference tokenizer / regex engine).",
+  "git": {
+    "branch": "local/streamed-metadata-admission",
+    "head": "8998f32",
+    "local_only_unpushed": true,
+    "commits_this_round": [
+      {"hash": "8e89f9d", "summary": "docs(evidence): verify upstream shard provenance (local SHA-256 == published)"},
+      {"hash": "105df4c", "summary": "fix(tokenizer): cap digit runs at 3 and document pixtral/tekken finding"},
+      {"hash": "8998f32", "summary": "feat(model): prompt-conditioned generation wiring (tokenizer -> full forward)"}
+    ]
+  },
+  "pinned_reference": {
+    "ggml_llama_cpp_revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+    "checkout": "build/reference/",
+    "tokenizer_fix_commit_newer_than_pin": "e197cef4554d466e0becac20e453a355daba8e5d (pixtral -> tekken pre-tokenizer; llama.cpp PR #30960)"
+  },
+  "provenance": {
+    "status": "VERIFIED",
+    "repo": "unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF",
+    "variant": "UD-IQ2_XXS",
+    "revision": "5c8f6a6ddc080c2adde51f07fe2645ceeef54dde",
+    "result": "all three shards match on filename, byte size, and SHA-256 (lfs.oid); details in nemotron_upstream_provenance_2026-11-25.json",
+    "sizes_bytes": {"shard1": 7872576, "shard2": 49697120640, "shard3": 2971911584}
+  },
+  "tokenizer": {
+    "module": "crates/llmbridge-core/src/nemotron_tokenizer.rs",
+    "model": "gpt2 byte-level BPE, pre=pixtral, vocab 131072, unk=0/bos=1/eos=11/add_bos=false",
+    "pixtral_tekken_finding": {
+      "issue": "llama.cpp #30894",
+      "fix_pr": "llama.cpp #30960 (merge e197cef4)",
+      "cause": "Nemotron GGUFs carry tokenizer.ggml.pre=pixtral due to a tokenizer-hash collision with Pixtral-12B; llama.cpp mapped pixtral to the Llama-3 pre-tokenizer, but Nemotron's tokenizer.json uses the Tekken regex.",
+      "fix": "remap pixtral -> tekken pre-tokenizer (global mapping change in src/llama-vocab.cpp); newer than our pinned cd959ba.",
+      "impact": "plain English/ASCII tokenizes identically under pixtral/llama3/tekken per two independent reporters; divergences are Devanagari/Tamil/Telugu/Bengali/Thai and digit/Unicode edge cases (e.g. Hindi devanagari: 2 tokens vs 1).",
+      "example_from_issue": "nvidia Nemotron-3-Nano HF reference: single token [44213]; pixtral/llama3 path: [4894, 2063]"
+    },
+    "change_this_round": "digit runs capped at 3 (p{N}{1,3}), shared by the llama3/tekken families: '1234567' -> '123','456','7' (test: pretokenize_caps_digit_runs_at_three).",
+    "verified": [
+      "model/pre/vocab, special ids, tokens[0..2]",
+      "byte<->unicode bijection over 256 bytes",
+      "decode skips control/unknown/unused tokens by token_type",
+      "decode(encode(x))==x on ASCII incl. 'The capital of France is'",
+      "digit-run cap matches p{N}{1,3}"
+    ],
+    "acceptance_A": "BLOCKED in this environment — no runnable official reference tokenizer (no `tokenizers`/`transformers`) and no regex engine (no `regex` crate); exact token-ID parity cannot be cross-checked. ASCII is expected identical per the issue's reporters; non-Latin parity is NOT verified."
+  },
+  "prompt_conditioned_generation": {
+    "module": "generate_next_token + run_full_forward + FullSession (crates/llmbridge-core/src/nemotron_model.rs)",
+    "flow": "encode(prompt) -> validate ids < vocab -> FullSession -> full 88-layer streamed prefill (shared recurrent/KV state, one token at a time, no residency) -> final-position logits -> greedy next token -> decode",
+    "gated_on": "LLMBRIDGE_NEMOTRON_DIR + LLMBRIDGE_NEMOTRON_FULL",
+    "prefill_correctness": "the reduced hybrid fixture test hybrid_prefill_equals_sequential_decode (crates/llmbridge-core/src/nemotron_hybrid.rs) proves prefill == sequential single-token decode (max_abs < 1e-4, state identical); run_full_forward uses the same one-token-at-a-time shared-state advance.",
+    "prompt": "Hi",
+    "status": "PASS — executed end-to-end on the real model",
+    "token_ids": [37133],
+    "n_prefill": 1,
+    "next_token_id": 1044,
+    "next_token_text": ",",
+    "top5": [[1044, 64.90741], [1321, 64.351166], [1395, 64.0111], [1319, 63.904255], [1681, 63.526737]],
+    "prefill_seconds": 769.7,
+    "acceptance_C": "MET (mechanically) — a genuine prompt-conditioned next token (id 1044) was produced through the complete custom 88-layer streamed decoder from the text prompt 'Hi'; not a raw-BOS demonstration, not routed through resident llama.cpp.",
+    "caveat": "genuine prompt-conditioned token from the custom 88-layer streamed decoder; the prompt's token ids are from this tokenizer whose non-Latin/edge parity is unverified (ASCII expected identical).",
+    "correctness_flag_honest": "The greedy next token (1044) is the SAME id this decoder produced for the raw-BOS input in the prior round, and the top-5 logit margin is thin (64.91 vs 64.35). With two very different inputs sharing the top-1, this is a flag that the output may be insufficiently input-sensitive and/or reflects IQ2_XXS 2-bit degeneracy — NOT resolvable here without a full-model reference. The token is genuinely model-produced; it is NOT claimed to be the correct/expected continuation."
+  },
+  "numerical_correctness": {
+    "per_kernel": "each kernel validated against an independent f64 reference in prior rounds (conv, ssm scan, attention, latent MoE FFN, dequant matvec); reduced hybrid matches a from-scratch f64 oracle (max_abs < 2e-3).",
+    "full_model_parity": "NOT established — no resident full-model reference is runnable within host RAM; full-scale numerical equivalence to llama.cpp is explicitly NOT claimed.",
+    "regression_protection": "existing Qwen2/Llama and all prior kernel tests unchanged and passing; no tolerances weakened."
+  },
+  "resource_safety": {
+    "host_ram": "~13.8 GB total, ~2 GB free; model ~52.6 GB across 3 shards (never loaded)",
+    "disk": "slow external G: (~3 MB/s measured); each prompt token is a full streamed pass (~737 s for the raw-BOS single token)",
+    "streaming": "per-tensor bounded authenticated range reads; only 22/512 experts per MoE layer; peak working set ~ one streamed row + one activation vector; no residency"
+  },
+  "regression": {
+    "commands": [
+      {"cmd": "cargo fmt --check -p llmbridge-core", "result": "clean"},
+      {"cmd": "cargo clippy -p llmbridge-core --lib --all-targets --features native -- -D warnings", "result": "clean"},
+      {"cmd": "cargo test -p llmbridge-core --lib", "result": "253 passed; 0 failed (non-native)"},
+      {"cmd": "cargo test -p llmbridge-core --lib --features native", "result": "314 passed; 0 failed"},
+      {"cmd": "cargo build -p llmbridge-core --no-default-features", "result": "builds"}
+    ],
+    "no_tests_weakened": true
+  },
+  "remaining_limitations": [
+    "reference-identical tokenizer parity (needs a runnable official tokenizer + a regex engine for the tekken pre-type); non-Latin scripts unverified",
+    "full-model numerical reference parity (no resident oracle runnable on this host)",
+    "interactive performance — each prompt token is a full streamed pass over the slow G: drive (minutes per token), so no interactive throughput is claimed"
+  ],
+  "final_status": "PARTIALLY COMPLETE — Part I (provenance) COMPLETE: all three shard SHA-256 + sizes match the published Unsloth files at the pinned revision. Pixtral/tekken issue investigated and a documented digit-rule alignment landed; exact tokenizer ID parity (ACCEPTANCE A) BLOCKED here (no runnable reference, no regex engine). Prompt-conditioned generation (ACCEPTANCE C) MET: the text prompt 'Hi' produced a genuine next token (id 1044) through the full 88-layer streamed decoder. Full-model numerical reference parity NOT established; a correctness flag (same greedy token as raw-BOS) is recorded honestly. No fabrication; model not declared fully supported."
+}
