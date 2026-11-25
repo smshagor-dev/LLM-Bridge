@@ -1,0 +1,152 @@
+{
+  "artifact": "nemotron_nano_30b_ssd_inference",
+  "date": "2026-11-25",
+  "status": "PARTIALLY COMPLETE",
+  "summary": "Metadata-verified single-file streamed execution path for the NVIDIA Nemotron 3 Nano 30B-A3B (nemotron_h_moe) GGUF on local SSD. Real per-layer weight decode/execution and a genuine full 52-block single-token forward completed; logits/token are genuine-but-UNVALIDATED (no runnable nemotron_h_moe reference on this host).",
+
+  "model": {
+    "path": "E:\\Model\\nvidia_Nemotron-3-Nano-30B-A3B-Q4_K_S.gguf",
+    "file_bytes": 22385593568,
+    "file_bytes_matches_spec": true,
+    "sha256": "bfd41eff6d0ba0595df3f270fb5c37f6afd1016646103d2e32c07a6aae2270bb",
+    "sha256_tool": "sha256sum (Git Bash coreutils)",
+    "upstream_source": "bartowski/nvidia_Nemotron-3-Nano-30B-A3B-GGUF",
+    "declared_upstream_revision": "1fc64d5b160654ec892df2708aa893b0e96e6491",
+    "declared_upstream_revision_note": "revision value as stated in the task specification; NOT independently re-fetched/verified against the upstream pinned file metadata in this session",
+    "not_modified": true
+  },
+
+  "architecture": {
+    "source": "read from the real GGUF header/metadata (read-only inspector); not hardcoded from the 120B",
+    "general.architecture": "nemotron_h_moe",
+    "general.name": "Nemotron 3 Nano 30B A3B",
+    "general.size_label": "30B-A3B",
+    "general.file_type": 14,
+    "gguf_version": 3,
+    "tensor_count": 401,
+    "metadata_kv_count": 121,
+    "block_count": 52,
+    "embedding_length": 2688,
+    "attention": { "head_count": 32, "head_count_kv_on_attn_layers": 2, "key_length": 128, "value_length": 128, "rms_eps": 9.999999747378752e-06 },
+    "rope": { "dimension_count": 84, "freq_base": 10000.0, "convention_assumed": "GGML-NeoX partial rotary (NOT reference-validated)" },
+    "ssm": { "conv_kernel": 4, "group_count": 8, "inner_size": 4096, "state_size": 128, "time_step_rank_heads": 64, "head_dim": 64 },
+    "moe": {
+      "expert_count": 128,
+      "expert_used_count": 6,
+      "expert_shared_count": 1,
+      "expert_feed_forward_length": 1856,
+      "expert_shared_feed_forward_length": 3712,
+      "expert_weights_norm": true,
+      "expert_weights_scale": 2.5,
+      "structure": "direct (non-latent): up_exps[2688,1856,128] -> relu^2 -> down_exps[1856,2688,128], plus shared expert; differs from the 120B latent MoE"
+    },
+    "vocab_size": 131072,
+    "context_length": 1048576
+  },
+
+  "layer_map": {
+    "recurrent": 23,
+    "moe": 23,
+    "attention": 6,
+    "attention_block_indices": [5, 12, 19, 26, 33, 42]
+  },
+
+  "tensor_type_histogram": { "F32": 237, "Q5_0": 67, "Q5_1": 39, "Q8_0": 29, "Q4_K": 23, "Q5_K": 6 },
+  "quantization_coverage_note": "All ggml-standard types (no i-quants). Decoded via the pinned native ggml to_float kernel (FFI llmbridge_dequantize_rows_v1).",
+
+  "tokenizer": {
+    "ggml.model": "gpt2",
+    "ggml.pre": "pixtral",
+    "bos_token_id": 1,
+    "eos_token_id": 11,
+    "add_bos_token": false,
+    "vocab_size": 131072,
+    "parity_status": "UNVERIFIED — loaded via NemotronTokenizer::from_gguf and used to encode the prompt; NOT compared against an independent reference token-id stream"
+  },
+
+  "real_layer_execution": {
+    "method": "gated test nemotron_nano::tests::real_nano_layers_execute_through_streamed_reader (LLMBRIDGE_NANO_GGUF)",
+    "embedding": "token 42 decoded to 2688 finite values",
+    "mamba2_layer": "one real recurrent block executed to 2688 finite outputs",
+    "attention_layer": "one real attention block (GQA+RoPE) executed to 2688 finite outputs",
+    "moe_layer": "one real direct-MoE block executed to 2688 finite outputs",
+    "reference_comparison": "none available on host; outputs checked finite only"
+  },
+
+  "full_forward_generation": {
+    "method": "gated #[ignore] test nemotron_nano::tests::generate_one_token",
+    "prompt": "Hi",
+    "prompt_token_ids": [37133],
+    "n_prefill_tokens": 1,
+    "next_token_id": 1319,
+    "next_token_text": " (",
+    "top5_logits": [[1319, 18.704353], [2247, 17.220236], [6421, 17.144037], [1321, 16.870695], [6894, 16.688076]],
+    "forward_seconds": 98.67,
+    "validation": "genuine model-backed logits; UNVALIDATED (block composition + assumed RoPE convention not reference-checked). Not a correctness-parity claim."
+  },
+
+  "per_token_source_read_profile_bytes": {
+    "total": 2468495928,
+    "embedding": 1848,
+    "recurrent": 583624448,
+    "attention": 98230272,
+    "moe_non_expert": 444499456,
+    "moe_expert": 967228416,
+    "output_projection": 374341632,
+    "norm": 569856,
+    "note": "computed from the tensor table (no weight payload read); moe_expert counts only expert_used/expert_count of each packed expert tensor"
+  },
+
+  "runtime": {
+    "forward_seconds_per_token": 98.67,
+    "effective_bytes_per_second": 25017187,
+    "enclosing_test_wall_seconds": 1094.57,
+    "enclosing_test_overhead_note": "the ~996 s beyond the forward is one-time tokenizer/metadata construction + index/profile load; it was NOT separately instrumented",
+    "peak_rss_bytes": null,
+    "swap_bytes": null,
+    "resource_instrumentation_note": "process peak RSS and swap were NOT captured for this forward; streamed path keeps weights non-resident by construction but no RSS proof was recorded"
+  },
+
+  "hardware": {
+    "cpu": "12th Gen Intel(R) Core(TM) i5-12400F",
+    "physical_cores": 6,
+    "logical_threads": 12,
+    "os_visible_physical_ram_bytes": 14829105152,
+    "free_physical_ram_bytes_at_sample": 5682937856,
+    "total_virtual_commit_bytes": 46408572928,
+    "gpu": "AMD RX 580 8 GB (NOT used; no CUDA/modern ROCm; no Vulkan kernels wired)",
+    "note": "model file (22.39 GB) exceeds OS-visible physical RAM (13.81 GiB); streamed out-of-core execution is mandatory and was used"
+  },
+
+  "comparison_to_120b_experiment": {
+    "note": "The earlier 120B profile (~7736 MiB/token, ~10 MiB/s, ~705-770 s/token) used a slow external G: drive AND a larger model with top-22 routing. Nano is smaller (2.47 GB/token), top-6, on SSD. The ~25 MB/s effective rate here is CPU/compute-bound (scalar single-token matvec + dequant), NOT an SSD bandwidth measurement; the two experiments differ in BOTH model and storage and must not be attributed to storage alone."
+  },
+
+  "regression": {
+    "platform": "Windows 11, MSVC Build Tools 2022, rustc/cargo 1.85.1",
+    "commands": [
+      { "cmd": "cargo fmt --all -- --check", "exit": 0 },
+      { "cmd": "cargo clippy -p llmbridge-core --all-targets --features native -- -D warnings", "exit": 0 },
+      { "cmd": "cargo test -p llmbridge-core --features native --release", "exit": 0, "result": "328 passed, 1 ignored, 0 failed (+6 +2 integration)" },
+      { "cmd": "cargo test --workspace (non-native)", "exit": 0 },
+      { "cmd": "cargo build --workspace --no-default-features", "exit": 0 }
+    ],
+    "flaky_note": "memory_pressure::tests::hysteresis_unknown_and_manual_pause_keep_gates_independent failed ONCE during a native suite run that overlapped a concurrent 22 GB sha256 read (live available-RAM sampling perturbed) and PASSED on isolated re-run and on a clean full re-run. Not related to the nemotron_nano change (isolated new module)."
+  },
+
+  "git": {
+    "branch": "local/streamed-metadata-admission",
+    "base_head_before_work": "7929d543320637c1945bef33b8ea0b65b432d0b7",
+    "code_commit": "e86951f (feat(model): Nemotron 3 Nano 30B nemotron_h_moe metadata-driven plan + streamed hybrid forward)",
+    "pushed": false
+  },
+
+  "known_limitations": [
+    "Block composition and the assumed GGML-NeoX partial-RoPE convention are NOT validated against a runnable nemotron_h_moe reference; generated logits/token are genuine-but-UNVALIDATED (spec §20).",
+    "Tokenizer ID parity vs an independent reference was not run.",
+    "No CLI `nano` subcommand and no local inference server are wired yet (library + gated tests only).",
+    "Process peak RSS and swap were not instrumented for the full-forward run.",
+    "~25 MB/s effective throughput is CPU/scalar-bound, not an SSD bandwidth measurement; single-token latency ~99 s makes multi-token generation impractically slow without further optimization.",
+    "Declared upstream revision was not independently re-verified by fetching upstream file metadata in this session."
+  ]
+}
