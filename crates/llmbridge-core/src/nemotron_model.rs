@@ -1370,6 +1370,95 @@ mod tests {
         );
     }
 
+    // Additional real-weight numerical parity by quant type: compare the bounded
+    // streamed dequant_matvec against an independent dequantize_rows + f64 dot over
+    // the same real tensor bytes. Complements the existing Q8_0 (latent_up) and
+    // IQ2_XXS (up_exps) real-weight checks with Q5_K (attention) and IQ4_NL
+    // (down-expert). Bounded (small tensors / one expert); gated on the shards.
+    #[test]
+    fn real_weight_numerical_parity_additional_types() {
+        use crate::native_dequant::dequantize_rows;
+        use crate::nemotron_expert_stream::PackedExperts;
+        use std::io::{Read, Seek, SeekFrom};
+        let Some(sh) = shards() else {
+            eprintln!("skip: LLMBRIDGE_NEMOTRON_DIR unset");
+            return;
+        };
+        let index = SplitGgufIndex::inspect(&sh).unwrap();
+        let stop = AtomicBool::new(false);
+
+        // --- Q5_K: a real attention K projection (small: [4096, 256]). ---
+        let att = 7usize; // known attention layer
+        let name = tn(att, "attn_k.weight");
+        let (member, region) = index.tensor(&name).expect("attn_k present");
+        let cols = region.dimensions[0] as usize;
+        let rows = region.dimensions[1] as usize;
+        let x: Vec<f32> = (0..cols).map(|i| ((i % 13) as f32 - 6.0) * 0.01).collect();
+        let mut rd = BoundedLocalReader::open(&member.path, 1 << 16, 1 << 17).unwrap();
+        let got = dequant_matvec(region, &mut rd, &x, &stop, 1 << 22).unwrap();
+        // reference: whole tensor -> dequantize_rows -> f64 dot
+        let gi = member.index.as_ref().unwrap();
+        let mut enc = Vec::with_capacity(region.byte_len as usize);
+        let mut rd2 = BoundedLocalReader::open(&member.path, 1 << 16, 1 << 17).unwrap();
+        gi.stream_tensor_cancellable(&mut rd2, &name, &stop, |c| {
+            enc.extend_from_slice(c);
+            Ok(())
+        })
+        .unwrap();
+        let dec = dequantize_rows(region.ggml_type, cols as u32, rows as u32, &enc).unwrap();
+        let mut max_abs = 0f64;
+        for r in 0..rows {
+            let w: f64 = (0..cols)
+                .map(|c| dec[r * cols + c] as f64 * x[c] as f64)
+                .sum();
+            max_abs = max_abs.max((got[r] as f64 - w).abs());
+        }
+        assert!(max_abs < 1e-2, "Q5_K attn_k real-weight max_abs {max_abs}");
+        eprintln!(
+            "Q5_K attn_k parity ok: type={} [{cols},{rows}] max_abs={max_abs:.3e}",
+            region.ggml_type
+        );
+
+        // --- IQ4_NL: a real down-expert (expert 0) via PackedExperts. ---
+        let moe = 1usize;
+        let dname = tn(moe, "ffn_down_exps.weight");
+        let (dm, dr) = index.tensor(&dname).expect("ffn_down_exps present");
+        let pk = PackedExperts::new(
+            dr.file_offset,
+            dr.ggml_type,
+            dr.dimensions[0],
+            dr.dimensions[1],
+            dr.dimensions[2],
+            dr.byte_len,
+        )
+        .unwrap();
+        let dcols = dr.dimensions[0] as usize;
+        let drows = dr.dimensions[1] as usize;
+        let xin: Vec<f32> = (0..dcols).map(|i| ((i % 7) as f32 - 3.0) * 0.01).collect();
+        let mut rde = BoundedLocalReader::open(&dm.path, 1 << 16, 1 << 17).unwrap();
+        let gotd = pk
+            .project_expert(&mut rde, 0, &xin, &stop, 1 << 22)
+            .unwrap();
+        let per = pk.per_expert_bytes();
+        let mut f = std::fs::File::open(&dm.path).unwrap();
+        f.seek(SeekFrom::Start(dr.file_offset)).unwrap();
+        let mut bytes = vec![0u8; per as usize];
+        f.read_exact(&mut bytes).unwrap();
+        let decd = dequantize_rows(dr.ggml_type, dcols as u32, drows as u32, &bytes).unwrap();
+        let mut md = 0f64;
+        for r in 0..drows {
+            let w: f64 = (0..dcols)
+                .map(|c| decd[r * dcols + c] as f64 * xin[c] as f64)
+                .sum();
+            md = md.max((gotd[r] as f64 - w).abs());
+        }
+        assert!(md < 1e-2, "IQ4_NL down-expert real-weight max_abs {md}");
+        eprintln!(
+            "IQ4_NL down-expert parity ok: type={} [{dcols},{drows}] max_abs={md:.3e}",
+            dr.ggml_type
+        );
+    }
+
     // Cheap: exact per-token source-read volume from the tensor table (no weight
     // payload read). Gated only because it needs the real shards for the index.
     #[test]
