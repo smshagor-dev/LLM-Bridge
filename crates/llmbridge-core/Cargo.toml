@@ -7,8 +7,21 @@ license.workspace = true
 [features]
 default = []
 native = []
+# Vendor-neutral remote model storage (HTTP/1.1 Range transport + secure local
+# staging). Dependency-free (std only); off by default so default/native builds
+# and the no-default-features build are unaffected.
+remote = []
+# Production HTTPS for the remote transport: rustls (ring provider) + the Mozilla
+# root store, layered over the std TcpStream so SSRF destination-pinning and the
+# strict HTTP Range validation are preserved. Off by default; the default
+# inference build stays free of network/TLS dependencies.
+https = ["remote", "dep:rustls", "dep:webpki-roots", "dep:rustls-pki-types"]
 [dependencies]
 sha2 = "=0.10.9"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"], optional = true }
+rustls-pki-types = { version = "1", optional = true }
+webpki-roots = { version = "0.26", optional = true }
+fancy-regex = "0.20.2"
 
 [build-dependencies]
 cmake = "0.1.54"
@@ -52,6 +65,10 @@ name = "streamed_plan_contract"
 required-features = ["native"]
 
 [[example]]
+name = "streamed_rejection_contract"
+required-features = ["native"]
+
+[[example]]
 name = "cpu_guard_contract"
 required-features = ["native"]
 
@@ -86,3 +103,11 @@ required-features = ["native"]
 [[example]]
 name = "queued_deadline_contract"
 required-features = ["native"]
+
+[[example]]
+name = "lookahead_parity"
+required-features = ["native"]
+
+[[example]]
+name = "range_server"
+required-features = ["remote"]

@@ -1,0 +1,139 @@
+{
+  "artifact": "authenticated_snapshot_decode_comparison",
+  "utc": "2026-11-24T10:24:22Z",
+  "branch": "local/streamed-metadata-admission",
+  "git": {
+    "feat_commit": "465ed33",
+    "parent_pushed_checkpoint": "7ca11fb",
+    "note": "Release CLI rebuilt from the working tree at 465ed33 (feat(streamed): opt-in authenticated-snapshot range reuse mode). Mode A reproduces the pre-change default authenticated path."
+  },
+  "scope": "Matched before/after Qwen2.5-7B benchmark of the default mutable-source authenticated reader (Mode A) versus the new opt-in authenticated-snapshot range-reuse reader (Mode B), under identical 8-token greedy workloads, plus a 2-token address-space ladder for bounded-memory verification, output parity, and Rust regressions. The improvement is measured end-to-end, not inferred from read-call counts alone.",
+  "environment": {
+    "host": "WSL2 (not bare metal)",
+    "kernel": "6.18.33.1-microsoft-standard-WSL2",
+    "logical_cpus": 12,
+    "mem_total_mib": 6834,
+    "filesystem": "model on ext4 (/home, /dev/sdc); repo on /mnt/e (NTFS via WSL)",
+    "rustc": "1.85.1",
+    "cargo": "1.85.1",
+    "sha2_crate": "0.10.9",
+    "cpu_sha_ni": true,
+    "hashing_note": "sha2 selects the x86 SHA-NI backend at runtime; re-hash is already hardware-accelerated. The Mode B win is from performing fewer re-hashes of already-authenticated blocks, not from faster hashing."
+  },
+  "model": {
+    "repo": "bartowski/Qwen2.5-7B-Instruct-GGUF",
+    "revision": "8911e8a47f92bac19d6f5c64a2e2095bd2f7d031",
+    "file": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+    "size_bytes": 4683074240,
+    "sha256": "65b8fcd92af6b4fefa935c625d1ac27ea29dcb6ee14589c55a8f115ceaaa1423",
+    "reacquired_this_session": true,
+    "committed_as_binary": false
+  },
+  "implementation": {
+    "read_policy_enum": "crate::read_cache::ReadPolicy { MutableVerified (default), AuthenticatedSnapshot }",
+    "config_flag": "StreamedConfig.snapshot_reuse (default false)",
+    "cli_flag": "--snapshot-reuse (requires streamed backend, --sha256 authentication, and --cache-mb > 0)",
+    "mode_a_semantics": "Authenticated sources bypass the LRU and re-read + re-hash every covered block on every range call (mutation detected between calls). Unchanged default.",
+    "mode_b_semantics": "Authenticated range reads use the bounded LRU. Every block entering the cache is authenticated against the trusted per-block manifest on the miss path (read_authenticated_range fails closed on mismatch). Cache hits reuse already-authenticated retained bytes with no second source read or re-hash (content authenticity, not mutation-event detection). Newly fetched changed bytes fail closed on a miss.",
+    "default_path_changed": false
+  },
+  "inference_config_common": {
+    "command": "taskset -c 0,1 llmbridge chat <model> --prompt 'The capital of France is' --max-tokens 8 --ctx 128 --threads 2 --backend streamed --metrics --sha256 <sha> --address-space-mb 2048 --workspace-mb 48",
+    "mode_b_extra_flags": "--cache-mb 32 --snapshot-reuse",
+    "greedy": true,
+    "cpu_affinity": "0,1"
+  },
+  "mode_a_mutable_8tok": {
+    "exit": 0,
+    "output": " Paris. It is located in the northern",
+    "ttft_first_logits_s": 30.068830154,
+    "decode_tokens_per_second": 0.18822704347402208,
+    "total_s": 67.273677275,
+    "range_callback_ns": 59690222423,
+    "peak_rss_bytes": 79257600,
+    "integrity_verified": 1,
+    "blocks_verified": 1566020,
+    "sha256_match": true,
+    "source_bytes_read": 107313258688,
+    "source_read_calls": 793172,
+    "range_read_calls": 1554556,
+    "range_bytes_requested": 50664356129,
+    "weight_read_calls": 793172,
+    "cache_allocated_bytes": 0,
+    "cache_block_hits": 0,
+    "cache_block_misses": 0,
+    "cache_evictions": 0
+  },
+  "mode_b_snapshot_8tok": {
+    "exit": 0,
+    "output": " Paris. It is located in the northern",
+    "ttft_first_logits_s": 22.612787479,
+    "decode_tokens_per_second": 0.26547744977086635,
+    "total_s": 48.998832508,
+    "range_callback_ns": 41404245982,
+    "peak_rss_bytes": 112852992,
+    "integrity_verified": 1,
+    "blocks_verified": 774336,
+    "sha256_match": true,
+    "source_bytes_read": 55429456064,
+    "source_read_calls": 774336,
+    "range_read_calls": 1554556,
+    "range_bytes_requested": 50664356129,
+    "weight_read_calls": 793172,
+    "cache_allocated_bytes": 33501136,
+    "cache_block_hits": 791684,
+    "cache_block_misses": 774336,
+    "cache_evictions": 773826
+  },
+  "deltas_b_vs_a_8tok": {
+    "output_parity": "identical (bit-for-bit generated text)",
+    "logical_demand_range_bytes_requested": "unchanged (50664356129 both) — same work requested; Mode B is not model-size-independent",
+    "source_bytes_read_reduction_pct": 48.35,
+    "source_bytes_read_ratio_b_over_a": 0.5165,
+    "blocks_verified_reduction_pct": 50.55,
+    "source_read_calls_reduction_pct": 2.37,
+    "ttft_reduction_pct": 24.79,
+    "decode_throughput_increase_pct": 41.04,
+    "total_wall_reduction_pct": 27.17,
+    "peak_rss_delta_bytes": 33595392,
+    "peak_rss_delta_note": "+32.04 MiB == the opt-in 32 MiB reuse cache; still bounded and well under the 256 MiB address-space cap.",
+    "interpretation": "The bounded cache absorbs the ~2x intra-forward-pass re-reads/re-hashes of already-authenticated 64 KiB blocks (hit rate ~50.5%), halving physical source I/O and SHA-256 hashing while leaving logical demand, output, and integrity unchanged. It does NOT reduce the base model_size x tokens demand; 55.4 GB source I/O for 8 tokens still scales with the model, consistent with the out-of-core design."
+  },
+  "address_space_ladder_2tok": {
+    "note": "2-token runs; all exit 0, output ' Paris.', SHA match, integrity verified. Confirms the bounded 32 MiB reuse cache does not break low-memory execution. Mode A blocks_verified=755540, Mode B blocks_verified=373518 at every limit (consistent ~50% hashing reduction).",
+    "mode_a_peak_rss_bytes": {"256": 79151104, "512": 79069184, "2048": 79302656},
+    "mode_b_peak_rss_bytes": {"256": 112439296, "512": 112705536, "2048": 112693248},
+    "mode_b_256mib_exit": 0
+  },
+  "regressions": {
+    "fmt_check_exit": 0,
+    "clippy_default_all_targets_D_warnings_exit": 0,
+    "clippy_native_all_targets_D_warnings_exit": 0,
+    "no_default_features_core_build_exit": 0,
+    "lib_unit_tests": "277 passed; 0 failed",
+    "cpp_native_build": "compiled as part of the release build (build.rs builds pinned llama.cpp/ggml); build_exit=0",
+    "windows_msvc_native": "not exercised this session; validated on WSL2/Linux only"
+  },
+  "security_tests_added": [
+    "read_cache::tests::snapshot_policy_reuses_verified_block_without_second_read",
+    "read_cache::tests::snapshot_policy_serves_retained_authentic_bytes_after_in_place_mutation",
+    "read_cache::tests::snapshot_policy_rejects_newly_fetched_changed_block_on_miss",
+    "read_cache::tests::default_policy_authenticated_still_bypasses_cache_and_rereads",
+    "read_cache::tests::snapshot_policy_on_unauthenticated_source_keeps_lru_and_detects_change",
+    "read_cache::tests::snapshot_policy_cache_hit_still_honors_cancellation"
+  ],
+  "preserved_guarantees": {
+    "mode_a_default_unchanged": "default_policy_authenticated_still_bypasses_cache_and_rereads + the existing mutation-detection tests still pass",
+    "sha256_verification_not_removed": "Mode B still hashes 774336 blocks for 8 tokens; every block entering the cache is manifest-verified; SHA matches and output is bit-identical",
+    "fail_closed": "snapshot_policy_rejects_newly_fetched_changed_block_on_miss (a changed uncached block fails closed with InvalidData)",
+    "cancellation_on_hit": "snapshot_policy_cache_hit_still_honors_cancellation"
+  },
+  "limitations": [
+    "Mode B is opt-in and is NOT the default; the master spec default remains mutable-source mutation detection.",
+    "The win is bounded intra-pass locality; it does not make source I/O model-size-independent (55.4 GB for 8 tokens still scales with model x tokens).",
+    "WSL2, not bare metal; the pre-load host-RAM admission heuristic is conservative and can refuse when measured available RAM is transiently low (e.g. page cache after heavy runs); it is unrelated to the enforced RLIMIT_AS, under which Mode B runs at 256 MiB.",
+    "Windows MSVC native path not exercised this session.",
+    "Resident-backend generated-text parity for 7B remains host-RAM blocked on this 6.7 GiB host; A-vs-B output parity is asserted directly (bit-identical generated text)."
+  ],
+  "classification": "COMPLETE (evidence-backed) for: the opt-in production authenticated-snapshot decode mode, its integration into the real streamed decode path, adversarial tests, genuine 7B inference in snapshot mode, matched-workload before/after performance with bit-identical output, bounded-memory verification at 256/512/2048 MiB, and Rust regressions. Mode B is retained as opt-in (default unchanged)."
+}

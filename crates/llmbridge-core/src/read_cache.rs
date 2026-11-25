@@ -22,6 +22,29 @@ pub struct ReadCacheMetrics {
     pub source_read_calls: u64,
 }
 
+/// Read policy for an authenticated source. The default preserves the historical
+/// mutable-source, mutation-detecting behavior exactly; the opt-in snapshot policy
+/// is content-addressed (see [`CachedLocalReader::read_range_cancellable`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ReadPolicy {
+    /// Mode A (default). Authenticated sources bypass the LRU and re-read plus
+    /// re-hash every covered block on every range call, so an in-place source
+    /// mutation between calls is always detected and rejected.
+    #[default]
+    MutableVerified,
+    /// Mode B (opt-in). Authenticated sources serve range reads through the
+    /// bounded LRU. Every block entering the cache is first authenticated against
+    /// the trusted manifest (via the authenticated source read, which fails closed
+    /// on any mismatch), and cache hits reuse those already-authenticated retained
+    /// bytes without a second source read or re-hash. This reuses already
+    /// authenticated model bytes within the bounded budget: a later source
+    /// mutation is intentionally NOT detected on a hit, because the retained bytes
+    /// are already proven to be the authentic model bytes (content authenticity,
+    /// not mutation-event detection). Newly fetched bytes that do not match the
+    /// manifest still fail closed on the miss path.
+    AuthenticatedSnapshot,
+}
+
 /// Owns the source and cache for one generation. Never shared across model sessions.
 /// The cache budget covers fixed payload, response staging and slot arrays, excluding
 /// allocator headers and the source reader's separately reported buffer.
@@ -32,6 +55,7 @@ pub struct CachedLocalReader {
     slots: Vec<Slot>,
     tick: u64,
     metrics: ReadCacheMetrics,
+    read_policy: ReadPolicy,
 }
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
@@ -84,10 +108,21 @@ impl CachedLocalReader {
                 peak_allocated_bytes: allocated_bytes,
                 ..Default::default()
             },
+            read_policy: ReadPolicy::MutableVerified,
         })
     }
     pub fn metrics(&self) -> ReadCacheMetrics {
         self.metrics
+    }
+    pub fn read_policy(&self) -> ReadPolicy {
+        self.read_policy
+    }
+    /// Select the read policy for an authenticated source. The default
+    /// [`ReadPolicy::MutableVerified`] is unchanged; [`ReadPolicy::AuthenticatedSnapshot`]
+    /// is the opt-in content-addressed reuse mode. This only affects authenticated
+    /// sources with a nonzero cache budget; unauthenticated reads are unaffected.
+    pub fn set_read_policy(&mut self, policy: ReadPolicy) {
+        self.read_policy = policy;
     }
     pub fn authentication_metrics(&self) -> Option<crate::storage::AuthenticationMetrics> {
         self.source.authentication_metrics()
@@ -127,6 +162,79 @@ impl CachedLocalReader {
         Ok(())
     }
 
+    /// Opt-in immutable-snapshot verification of already-staged lookahead bytes.
+    ///
+    /// When the source is authenticated and `staged` is exactly one full,
+    /// block-aligned manifest block, the bytes are authenticated directly
+    /// against the trusted per-block manifest with NO second source read, then
+    /// published. Otherwise this falls back to
+    /// [`Self::verify_staged_range_cancellable`], preserving its default
+    /// mutable-source, mutation-detecting semantics.
+    ///
+    /// Trust model: on the fast path the manifest (anchored to the verified
+    /// whole-file digest) is the authority for the model bytes, so source
+    /// mutation after prefetch is intentionally NOT detected — the staged bytes
+    /// are accepted iff they are cryptographically authentic. Callers must only
+    /// opt into this where that is the intended contract. The fast path performs
+    /// no source I/O and does not increment `source_read_calls`.
+    pub fn verify_staged_block_snapshot_cancellable(
+        &mut self,
+        offset: u64,
+        staged: &[u8],
+        mut cancelled: impl FnMut() -> bool,
+    ) -> io::Result<()> {
+        if staged.is_empty() || staged.len() > self.source.allocated_chunk_bytes() {
+            return Err(invalid("staged range exceeds source/chunk bounds"));
+        }
+        if self.source.is_authenticated() {
+            if cancelled() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "staged snapshot verification cancelled",
+                ));
+            }
+            if self
+                .source
+                .verify_block_bytes_against_manifest(offset, staged)?
+            {
+                if cancelled() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Interrupted,
+                        "staged snapshot verification cancelled",
+                    ));
+                }
+                return Ok(());
+            }
+        }
+        // Not a full aligned manifest block (or unauthenticated): fall back to
+        // the default re-read verification, which still detects source mutation.
+        self.verify_staged_range_cancellable(offset, staged, cancelled)
+    }
+
+    /// Policy-aware staged lookahead verification used by the decode path.
+    ///
+    /// Under [`ReadPolicy::AuthenticatedSnapshot`] this uses the content-addressed
+    /// manifest fast path ([`Self::verify_staged_block_snapshot_cancellable`]),
+    /// which authenticates a full aligned staged block with no second source read;
+    /// otherwise (the default) it uses the mutable-source re-read verification
+    /// ([`Self::verify_staged_range_cancellable`]), which still detects source
+    /// mutation after prefetch. Both reject bytes that fail verification.
+    pub fn verify_staged_cancellable(
+        &mut self,
+        offset: u64,
+        staged: &[u8],
+        cancelled: impl FnMut() -> bool,
+    ) -> io::Result<()> {
+        match self.read_policy {
+            ReadPolicy::AuthenticatedSnapshot => {
+                self.verify_staged_block_snapshot_cancellable(offset, staged, cancelled)
+            }
+            ReadPolicy::MutableVerified => {
+                self.verify_staged_range_cancellable(offset, staged, cancelled)
+            }
+        }
+    }
+
     /// Drop optional cache-owned allocations without allocating replacements.
     /// Source buffer/authentication stay live. Allocator page retention means
     /// this is not an assertion that process RSS immediately decreases.
@@ -153,9 +261,16 @@ impl CachedLocalReader {
         length: usize,
         mut cancelled: impl FnMut() -> bool,
     ) -> io::Result<&[u8]> {
-        // Authenticated sessions must not serve stale payload from this LRU.
-        // The source re-verifies its SHA-256 block manifest on every range call.
-        if self.slots.is_empty() || self.source.is_authenticated() {
+        // Mode A (default): authenticated sessions bypass this LRU so the source
+        // re-reads and re-verifies its SHA-256 block manifest on every range call,
+        // detecting any in-place source mutation between calls. Mode B
+        // (AuthenticatedSnapshot) instead serves authenticated sources through the
+        // LRU: every block entering the cache is manifest-verified on the miss path
+        // below (`read_authenticated_range` fails closed on any mismatch), so cache
+        // hits reuse already-authenticated retained bytes with no second source read.
+        let bypass_cache = self.slots.is_empty()
+            || (self.source.is_authenticated() && self.read_policy == ReadPolicy::MutableVerified);
+        if bypass_cache {
             increment(&mut self.metrics.source_read_calls)?;
             return self
                 .source
@@ -516,5 +631,265 @@ mod tests {
                 .kind(),
             io::ErrorKind::InvalidData
         );
+    }
+
+    #[test]
+    fn staged_block_snapshot_without_auth_uses_default_verification() {
+        let file = Fixture::new();
+        let mut reader = file.reader(0);
+        reader
+            .verify_staged_block_snapshot_cancellable(0, b"ab", || false)
+            .unwrap();
+        std::fs::write(&file.0, b"changed-size-and-bytes").unwrap();
+        assert!(reader
+            .verify_staged_block_snapshot_cancellable(0, b"ab", || false)
+            .is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn staged_block_snapshot_verifies_without_reread_and_fails_closed() {
+        use sha2::{Digest, Sha256};
+        use std::io::{Seek, SeekFrom, Write};
+        let fixture = Fixture::new();
+        let expected = format!("{:x}", Sha256::digest(std::fs::read(&fixture.0).unwrap()));
+        let modified = std::fs::metadata(&fixture.0).unwrap().modified().unwrap();
+        let mut source = BoundedLocalReader::open(&fixture.0, 8, 16).unwrap();
+        source
+            .authenticate_model(&expected, 8, 128 * 1024, || false)
+            .unwrap();
+        let mut cached = CachedLocalReader::new(source, 0).unwrap();
+
+        // Full aligned authentic block (bytes 8..16 = "ijklmnop") verifies with
+        // no source read: this is the re-read elimination the fast path exists for.
+        let before = cached.source_bytes_read();
+        cached
+            .verify_staged_block_snapshot_cancellable(8, b"ijklmnop", || false)
+            .unwrap();
+        assert_eq!(cached.source_bytes_read(), before);
+
+        // A tampered full block fails closed, still touching no source byte.
+        assert_eq!(
+            cached
+                .verify_staged_block_snapshot_cancellable(8, b"XXXXXXXX", || false)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(cached.source_bytes_read(), before);
+
+        // Rewrite block 1 in place, preserving size and identity timestamp.
+        let mut writer = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&fixture.0)
+            .unwrap();
+        writer.seek(SeekFrom::Start(8)).unwrap();
+        writer.write_all(b"XXXXXXXX").unwrap();
+        writer
+            .set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+
+        // Immutable-snapshot semantics: the authentic staged bytes still verify
+        // against the manifest after in-place mutation, with no source read.
+        cached
+            .verify_staged_block_snapshot_cancellable(8, b"ijklmnop", || false)
+            .unwrap();
+        assert_eq!(cached.source_bytes_read(), before);
+
+        // The default mutable-source verification still rejects the mutation.
+        assert_eq!(
+            cached
+                .verify_staged_range_cancellable(8, b"ijklmnop", || false)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn staged_block_snapshot_falls_back_and_reads_for_partial_ranges() {
+        use sha2::{Digest, Sha256};
+        let fixture = Fixture::new();
+        let expected = format!("{:x}", Sha256::digest(std::fs::read(&fixture.0).unwrap()));
+        let mut source = BoundedLocalReader::open(&fixture.0, 8, 16).unwrap();
+        source
+            .authenticate_model(&expected, 8, 128 * 1024, || false)
+            .unwrap();
+        let mut cached = CachedLocalReader::new(source, 0).unwrap();
+        let before = cached.source_bytes_read();
+        // A partial (sub-block) staged range cannot be a single manifest block,
+        // so it routes through the default re-read path, which does touch disk.
+        cached
+            .verify_staged_block_snapshot_cancellable(8, b"ijkl", || false)
+            .unwrap();
+        assert!(cached.source_bytes_read() > before);
+    }
+
+    // ---- Mode B (AuthenticatedSnapshot) read-policy integration tests ----
+
+    #[cfg(target_os = "linux")]
+    fn snapshot_reader(fixture: &Fixture, slots: usize) -> CachedLocalReader {
+        use sha2::{Digest, Sha256};
+        let expected = format!("{:x}", Sha256::digest(std::fs::read(&fixture.0).unwrap()));
+        let mut source = BoundedLocalReader::open(&fixture.0, 8, 16).unwrap();
+        source
+            .authenticate_model(&expected, 8, 128 * 1024, || false)
+            .unwrap();
+        let budget = 8 + slots * (8 + std::mem::size_of::<Slot>());
+        let mut cached = CachedLocalReader::new(source, budget).unwrap();
+        cached.set_read_policy(ReadPolicy::AuthenticatedSnapshot);
+        cached
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn snapshot_policy_reuses_verified_block_without_second_read() {
+        let fixture = Fixture::new();
+        let mut cached = snapshot_reader(&fixture, 4);
+        assert_eq!(cached.read_policy(), ReadPolicy::AuthenticatedSnapshot);
+        // First touch of block 0 reads and manifest-verifies it.
+        assert_eq!(
+            cached.read_range_cancellable(0, 2, || false).unwrap(),
+            b"ab"
+        );
+        let after_first = cached.source_bytes_read();
+        assert!(after_first > 0);
+        let hits = cached.metrics().block_hits;
+        // A second request inside the same block is served from the retained,
+        // already-authenticated bytes: zero source I/O and no re-hash.
+        assert_eq!(
+            cached.read_range_cancellable(2, 4, || false).unwrap(),
+            b"cdef"
+        );
+        assert_eq!(cached.source_bytes_read(), after_first);
+        assert!(cached.metrics().block_hits > hits);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn snapshot_policy_serves_retained_authentic_bytes_after_in_place_mutation() {
+        use std::io::{Seek, SeekFrom, Write};
+        let fixture = Fixture::new();
+        let modified = std::fs::metadata(&fixture.0).unwrap().modified().unwrap();
+        let mut cached = snapshot_reader(&fixture, 4);
+        // Cache block 1 = "ijklmnop", verified against the manifest on fill.
+        assert_eq!(
+            cached.read_range_cancellable(8, 2, || false).unwrap(),
+            b"ij"
+        );
+        let after_fill = cached.source_bytes_read();
+        // Rewrite block 1 in place, preserving size and identity timestamp.
+        let mut writer = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&fixture.0)
+            .unwrap();
+        writer.seek(SeekFrom::Start(8)).unwrap();
+        writer.write_all(b"XXXXXXXX").unwrap();
+        writer
+            .set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        // Mode B content authenticity (master spec §5): retained bytes matching the
+        // trusted manifest are reused on a cache hit even though the live mutable
+        // source has since changed, with no second source read.
+        assert_eq!(
+            cached.read_range_cancellable(10, 3, || false).unwrap(),
+            b"klm"
+        );
+        assert_eq!(cached.source_bytes_read(), after_fill);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn snapshot_policy_rejects_newly_fetched_changed_block_on_miss() {
+        use std::io::{Seek, SeekFrom, Write};
+        let fixture = Fixture::new();
+        let modified = std::fs::metadata(&fixture.0).unwrap().modified().unwrap();
+        // Single slot so block 2 is never resident when first requested.
+        let mut cached = snapshot_reader(&fixture, 1);
+        assert_eq!(
+            cached.read_range_cancellable(0, 2, || false).unwrap(),
+            b"ab"
+        );
+        // Rewrite the uncached block 2 = [16,24) in place (same identity).
+        let mut writer = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&fixture.0)
+            .unwrap();
+        writer.seek(SeekFrom::Start(16)).unwrap();
+        writer.write_all(b"ZZZZZZZZ").unwrap();
+        writer
+            .set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        // A miss fetches fresh bytes that no longer match the manifest: Mode B
+        // fails closed on newly fetched changed bytes (master spec §5).
+        assert_eq!(
+            cached
+                .read_range_cancellable(16, 2, || false)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn default_policy_authenticated_still_bypasses_cache_and_rereads() {
+        use sha2::{Digest, Sha256};
+        let fixture = Fixture::new();
+        let expected = format!("{:x}", Sha256::digest(std::fs::read(&fixture.0).unwrap()));
+        let mut source = BoundedLocalReader::open(&fixture.0, 8, 16).unwrap();
+        source
+            .authenticate_model(&expected, 8, 128 * 1024, || false)
+            .unwrap();
+        let budget = 8 + 4 * (8 + std::mem::size_of::<Slot>());
+        let mut cached = CachedLocalReader::new(source, budget).unwrap();
+        // Default is Mode A: the accessor confirms it and the LRU is bypassed.
+        assert_eq!(cached.read_policy(), ReadPolicy::MutableVerified);
+        assert_eq!(
+            cached.read_range_cancellable(0, 2, || false).unwrap(),
+            b"ab"
+        );
+        let after = cached.source_bytes_read();
+        assert_eq!(
+            cached.read_range_cancellable(2, 2, || false).unwrap(),
+            b"cd"
+        );
+        // Same block is re-read and re-hashed, never cached, under the default path.
+        assert!(cached.source_bytes_read() > after);
+        assert_eq!(cached.metrics().block_hits, 0);
+    }
+
+    #[test]
+    fn snapshot_policy_on_unauthenticated_source_keeps_lru_and_detects_change() {
+        let fixture = Fixture::new();
+        let mut reader = fixture.reader(2);
+        // The snapshot policy only changes authenticated behavior; an unauthenticated
+        // source keeps the ordinary identity-checked LRU and still rejects a change.
+        reader.set_read_policy(ReadPolicy::AuthenticatedSnapshot);
+        assert_eq!(
+            reader.read_range_cancellable(0, 2, || false).unwrap(),
+            b"ab"
+        );
+        std::fs::write(&fixture.0, b"changed-size").unwrap();
+        assert!(reader.read_range_cancellable(0, 2, || false).is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn snapshot_policy_cache_hit_still_honors_cancellation() {
+        let fixture = Fixture::new();
+        let mut cached = snapshot_reader(&fixture, 4);
+        cached.read_range_cancellable(0, 2, || false).unwrap();
+        let bytes = cached.source_bytes_read();
+        // A cache hit must not bypass cancellation (master spec §10).
+        assert_eq!(
+            cached
+                .read_range_cancellable(0, 2, || true)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::Interrupted
+        );
+        assert_eq!(cached.source_bytes_read(), bytes);
     }
 }

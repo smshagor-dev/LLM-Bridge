@@ -1,0 +1,119 @@
+{
+  "artifact": "authenticated_snapshot_manifest_verification",
+  "utc": "2026-11-24T08:59:53Z",
+  "branch": "local/streamed-metadata-admission",
+  "git": {
+    "code_commit": "cda3089",
+    "docs_commit": "986cfc1",
+    "parent_pushed_checkpoint": "abb544a",
+    "note": "Release CLI built from the working tree that became cda3089 (additive-only change); numerical path unchanged from abb544a."
+  },
+  "scope": "Audit of the authenticated read path, an additive opt-in manifest range-verification primitive with adversarial tests, Rust regressions, and a genuine Qwen2.5-7B no-regression + teacher-forced parity run. NOT a multi-reader before/after 7B wall-clock benchmark: the new primitive is intentionally not wired into the default decoder (see limitations).",
+  "environment": {
+    "host": "WSL2 (not bare metal)",
+    "kernel": "6.18.33.1-microsoft-standard-WSL2",
+    "logical_cpus": 12,
+    "mem_total": "6.7Gi",
+    "filesystem": "ext4 (model under /home); repo on /mnt/e (NTFS via WSL)",
+    "rustc": "1.85.1 (4eb161250 2025-03-15)",
+    "cargo": "1.85.1 (d73d2caf9 2024-12-31)",
+    "sha2_crate": "0.10.9",
+    "cpu_sha_ni": true,
+    "hashing_note": "sha2 selects the x86 SHA-NI backend at runtime via cpufeatures; re-hash is already hardware-accelerated. No untapped SHA-NI optimization."
+  },
+  "model": {
+    "repo": "bartowski/Qwen2.5-7B-Instruct-GGUF",
+    "revision": "8911e8a47f92bac19d6f5c64a2e2095bd2f7d031",
+    "file": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+    "size_bytes": 4683074240,
+    "sha256": "65b8fcd92af6b4fefa935c625d1ac27ea29dcb6ee14589c55a8f115ceaaa1423",
+    "committed_as_binary": false
+  },
+  "implementation": {
+    "primitive": "BoundedLocalReader::verify_block_bytes_against_manifest(offset, bytes) -> io::Result<bool>",
+    "consumer": "CachedLocalReader::verify_staged_block_snapshot_cancellable(offset, staged, cancelled)",
+    "semantics": "content-addressed: Ok(true)=full aligned block matches trusted manifest (no source I/O); Ok(false)=not a full aligned block (caller falls back to mutable-source re-read path); Err=full aligned block that does not match manifest (fail closed).",
+    "default_path_changed": false,
+    "opt_in": true,
+    "trust_root": "per-block SHA-256 list anchored to the verified whole-file digest at authenticate_model time (process-memory TCB)."
+  },
+  "regressions": {
+    "fmt_check_exit": 0,
+    "clippy_default_all_targets_D_warnings_exit": 0,
+    "clippy_native_all_targets_D_warnings_exit": 0,
+    "no_default_features_build_exit": 0,
+    "lib_unit_tests": "229 passed; 0 failed",
+    "targeted_tests_passed": [
+      "storage::auth::tests::manifest_block_verification_authenticates_without_source_io",
+      "storage::auth::tests::manifest_block_verification_fails_closed_on_tampered_full_block",
+      "storage::auth::tests::manifest_block_verification_signals_fallback_for_partial_or_unaligned_ranges",
+      "storage::auth::tests::manifest_block_verification_trusts_bytes_despite_in_place_source_mutation",
+      "storage::auth::tests::manifest_block_verification_requires_authentication",
+      "read_cache::tests::staged_block_snapshot_verifies_without_reread_and_fails_closed",
+      "read_cache::tests::staged_block_snapshot_falls_back_and_reads_for_partial_ranges",
+      "read_cache::tests::staged_block_snapshot_without_auth_uses_default_verification",
+      "local_lookahead::tests::consumption_time_authentication_rejects_mutation_after_prefetch",
+      "local_lookahead::tests::authenticated_ranges_match_source_and_reject_in_place_mutation"
+    ],
+    "preserved_guarantee": "The two existing consumption-time mutation-detection tests still pass unchanged; the default verify_staged_range_cancellable semantics are untouched."
+  },
+  "manifest_verification_effect": {
+    "measured_by": "unit tests on an authenticated 8-byte-chunk fixture",
+    "full_aligned_block_source_bytes_on_verify": 0,
+    "tampered_full_block_outcome": "InvalidData (fail closed), 0 source bytes",
+    "after_in_place_mutation": "authentic staged bytes still verify via manifest with 0 source bytes; default re-read path reports 'block changed'",
+    "partial_range_fallback": "routes through default path and does read the source (source_bytes_read increases)"
+  },
+  "inference_7b": {
+    "command": "taskset -c 0,1 llmbridge chat <model> --prompt 'The capital of France is' --max-tokens 2 --ctx 128 --threads 2 --backend streamed --metrics --sha256 <sha> --address-space-mb 2048 --workspace-mb 48",
+    "build_exit": 0,
+    "exit": 0,
+    "output": " Paris.",
+    "ttft_first_logits_s": 32.93,
+    "decode_tokens_per_second": 0.182,
+    "total_s": 38.43,
+    "peak_rss_bytes": 79351808,
+    "integrity_verified": 1,
+    "blocks_verified": 755540,
+    "sha256_match": true,
+    "source_bytes_read": 54198018112,
+    "range_read_calls": 1144144,
+    "weight_read_calls": 382760,
+    "cache_block_hits": 0,
+    "cache_block_misses": 0,
+    "address_space_mb": 2048,
+    "cpu_affinity": "0,1",
+    "note": "2-token authenticated streamed run on the freshly built binary; same primary path as abb544a (the new primitive is not on this path). Confirms no regression and that the CLI builds from the changed source."
+  },
+  "parity_7b": {
+    "command": "taskset -c 0,1 llmbridge logit-diff <model> --prompt 'The capital of France is' --ctx 128 --threads 2 --top-k 10 --workspace-mb 48",
+    "exit": 0,
+    "vocab": 152064,
+    "streamed_top1": 12095,
+    "resident_top1": 12095,
+    "top1_agree": true,
+    "rmse": 0.148253734,
+    "max_abs_err": 0.792853355,
+    "mean_abs_err": 0.118447594,
+    "streamed_nonfinite": 0,
+    "resident_nonfinite": 0,
+    "topk_overlap": 9,
+    "note": "Bit-identical to the pre-change binary's logit-diff, confirming the additive change does not alter numerical execution."
+  },
+  "security_posture": {
+    "sha256_whole_file_authentication": "unchanged (fail closed)",
+    "per_block_manifest": "unchanged; now also usable for content-addressed range verification",
+    "source_identity_and_mutation_detection": "unchanged on the default path (tests pass)",
+    "sealed_metadata_memfd": "unchanged",
+    "new_path_fail_closed": true,
+    "bounded_memory": "unchanged; primitive operates on bounded in-memory staged bytes, no new allocation arena"
+  },
+  "limitations": [
+    "The opt-in manifest verification primitive is NOT wired into the default 7B decode path (by design: it changes consumption-time mutation-detection semantics). It therefore yields no end-to-end 7B wall-clock delta by itself; a production immutable-snapshot decode mode plus a multi-reader before/after 7B benchmark is remaining work.",
+    "Under bounded memory + an untrusted local writer, the primary per-token weight re-read and re-hash are intrinsic and were not (and cannot safely be) eliminated; this is a documented architectural result, not a pending task.",
+    "Resident-backend generated text remains host-RAM blocked on this 6.7 GiB host; parity logits are obtained via the mmap logit-diff path.",
+    "Only the 2048 MiB address-space setting was exercised this session (the 2048/1024/512/256 ladder was validated on 2026-11-24 in the prior evidence and the primary path is unchanged).",
+    "WSL2, not bare metal; repo on NTFS via /mnt/e."
+  ],
+  "classification": "COMPLETE (evidence-backed) for: git checkpoint sync, read-path audit, snapshot trust boundary, the implemented+tested opt-in manifest range-verification primitive, regressions, and 7B no-regression + parity. PARTIALLY COMPLETE for the broader optimization objective: the safe win is implemented as an opt-in building block; eliminating the primary streamed re-read/re-hash is a documented blocker under the stated constraints."
+}

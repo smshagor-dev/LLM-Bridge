@@ -1,0 +1,99 @@
+{
+  "schema": "llmbridge.stories110m-kquant-fullcoverage.v1",
+  "recorded_date": "2026-11-23",
+  "summary": "A genuine larger model (stories110M, ~110 MB Q6_K / ~86 MB Q4_K) whose every weight dimension is divisible by 256 was converted and quantized with pinned llama.cpp tooling and run through the streamed decoder. Unlike the prior mixed-quant stories15M fixtures, EVERY eligible weight tensor is a real K-quant superblock (86 Q6_K, or 73 Q4_K + 13 Q6_K) with zero 32-element fallback. Streamed output is byte-identical to the resident llama.cpp reference over 16 greedy tokens; a new multi-position logit comparison shows top-1 agreement at all 16 positions with bounded per-position RMSE; and the 110 MB model runs out-of-core in a 64 MB address space at ~19 MB peak RSS. This closes the prior session's 'fully-K-quant UNTESTED' gap.",
+  "source": {
+    "branch": "local/streamed-metadata-admission",
+    "code_commit": "5f12397",
+    "prior_pushed_checkpoint": "2e8c60c",
+    "code_modified_this_experiment": false,
+    "note": "No decoder code changed for the larger model; the K-quant allowlist (001f1c5) and the multi-position harness (5f12397) are the committed code under test. This file is evidence only. git dirty at record: this evidence file + .vscode/ untracked."
+  },
+  "environment": {
+    "host": "WSL2 on Windows 11", "distro": "Ubuntu 26.04.1 LTS",
+    "kernel": "6.18.33.1-microsoft-standard-WSL2",
+    "cpu": "12th Gen Intel(R) Core(TM) i5-12400F", "cpu_cores_logical": 12, "mem_total_kb": 6998672,
+    "rustc": "1.85.1", "cargo": "1.85.1", "cmake": "4.2.3", "cc": "gcc 15.2.0",
+    "filesystem": "ext4 (native WSL2 disk)",
+    "llama_cpp_pin": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+    "tools": "build/reference-avx2/bin/llama-convert-llama2c-to-ggml (built this session from the pinned source) and llama-quantize"
+  },
+  "model_provenance": {
+    "checkpoint": {"name": "karpathy/tinyllamas stories110M", "url": "https://huggingface.co/karpathy/tinyllamas/resolve/main/stories110M.bin", "bytes": 438381596, "license": "MIT (Karpathy TinyStories / llama2.c lineage)", "note": "llama2.c checkpoint, not a GGUF"},
+    "f32_gguf": {"bytes": 537153728, "sha256": "1e92613ae001f20c05b690a7cb5044058b6f605457c0f0bbb8b5f61e9cc62630", "conversion": "llama-convert-llama2c-to-ggml --copy-vocab-from-model <stories15M-q8_0.gguf> --llama2c-model stories110M.bin", "note": "vocab copied from the existing stories15M q8_0 fixture (llama2 32000 SentencePiece)"},
+    "architecture": {"general.architecture": "llama", "embedding_length": 768, "feed_forward_length": 2048, "block_count": 12, "attention.head_count": 12, "head_dim": 64, "vocab": 32000, "all_weight_dims_divisible_by_256": true, "tensor_naming": "standard (token_embd.weight, blk.N.*, output.weight) - passes the streamed decoder's metadata allowlist and tensor-count check", "decoder_accepted": true},
+    "derived_kquant": [
+      {"id": "stories110M-Q6_K.gguf", "bytes": 110800160, "sha256": "b02548b7d0b2cec82b724fb881cec09e7e5bc7b824105518a9fa3d63c1e496ad", "quantize": "llama-quantize <f32> <out> Q6_K 2"},
+      {"id": "stories110M-Q4_K.gguf", "bytes": 85912352, "sha256": "20a676c77ba80374b11a7069adcece8d6d83fd85a4d445d68ad8175710a09729", "quantize": "llama-quantize <f32> <out> Q4_K 2"}
+    ],
+    "note_not_committed": "No model binaries (checkpoint, F32 GGUF, or quantized GGUFs) are committed; they are gitignored WSL-local artifacts."
+  },
+  "tensor_coverage": {
+    "Q6_K": {"total_tensors": 111, "eligible_weight_tensors": 86, "kquant_tensors": 86, "kquant_breakdown": {"Q6_K": 86}, "non_kquant_fallback_32bit": 0, "f32_norm_tensors": 25, "unsupported": 0, "note": "100% of eligible weight tensors are genuine Q6_K 256-element superblocks; only RMSNorm weights remain F32, as expected."},
+    "Q4_K": {"total_tensors": 111, "eligible_weight_tensors": 86, "kquant_tensors": 86, "kquant_breakdown": {"Q4_K": 73, "Q6_K": 13}, "non_kquant_fallback_32bit": 0, "f32_norm_tensors": 25, "unsupported": 0, "note": "Standard Q4_K_M policy keeps token_embd/output/some tensors at Q6_K; all 86 eligible weights are K-quant superblocks, none fell back to 32-element quants."},
+    "kquant_path_observable": "ffn_down, ffn_gate, ffn_up, attn_q/k/v/output, token_embd and output are all K-quant and are exercised through the decoder's read_row (to_float) and matvec (vec_dot via Q8_K activation) on every forward pass."
+  },
+  "real_inference": {
+    "prompt": "Once upon a time", "settings": {"ctx": 128, "max_tokens": 16, "threads": 2, "workspace_mb": 16, "greedy": true},
+    "runs": [
+      {"format": "Q6_K", "streamed": ", there was a little girl named Lily. She loved to play outside in", "resident": ", there was a little girl named Lily. She loved to play outside in", "token_parity": "EXACT 16/16"},
+      {"format": "Q4_K", "streamed": ", there was a little girl named Lily. She loved to play outside in", "resident": ", there was a little girl named Lily. She loved to play outside in", "token_parity": "EXACT 16/16"}
+    ],
+    "note_workspace": "stories110M needs workspace_mb >= ~10 (KV+activations for 12 layers x 128 ctx x 768 kvdim); the 8 MB default is correctly rejected with 'streamed KV/activation workspace exceeds budget' - a bounded admission check, not a crash."
+  },
+  "multi_position_logit_validation": {
+    "method": "llmbridge logit-diff --max-tokens 16: per-position comparison of streamed vs resident logits over the greedy-decoded sequence; prefix_identical_through counts leading positions whose argmax agrees across backends (alignment validity bound).",
+    "Q6_K": {"prefix_identical_through": 16, "position_count": 16, "single_position_max_abs_err": 0.109148264, "single_position_mean_abs_err": 0.006730697, "single_position_rmse": 0.013584668, "multi_position_rmse_min": 0.013584668, "multi_position_rmse_max": 0.178793257, "top1_agree_all_positions": true, "top10_overlap_position0": "10/10"},
+    "Q4_K": {"prefix_identical_through": 16, "position_count": 16, "single_position_max_abs_err": 0.123067379, "single_position_mean_abs_err": 0.041596402, "single_position_rmse": 0.043708849, "multi_position_rmse_min": 0.019230599, "multi_position_rmse_max": 0.240884803, "top1_agree_all_positions": true, "top10_overlap_position0": "10/10"}
+  },
+  "numerical_root_cause": {
+    "question": "Why do streamed logits differ from resident llama.cpp when generated tokens match?",
+    "conclusion": "Permissible FP32 forward-pass precision differences between two independent implementations - NOT quantization error and NOT a defect. No code change made.",
+    "evidence": [
+      "Quantization-independent: Q8_0 (near-lossless weights) shows position-0 RMSE 0.185, LARGER than Q6_K's 0.0136 and comparable to Q4_K - so the divergence is dominated by forward-pass arithmetic, not weight quantization.",
+      "Depth-independent: stories110M Q6_K (12 layers) position-0 RMSE 0.0136 is LOWER than stories15M Q6_K (6 layers) 0.057 - a per-layer accumulating defect would grow with depth, not shrink.",
+      "Bounded and benign: top-1 agrees at every one of 16 positions for both models and all six formats; top-10 overlap 9-10/10; zero non-finite values.",
+      "Likely contributors (equivalent-but-not-bit-identical paths, not isolated to one op): FP32 accumulation order in ggml vec_dot vs the decoder's row loop, padded softmax (decoder pads attention to 256 and uses ggml_vec_soft_max_f32), incremental RoPE angle recurrence, and RMSNorm double accumulation."
+    ],
+    "decision": "No production correction (Task J): forcing bit-exactness would require replacing the custom out-of-core decoder with llama.cpp's in-memory graph, defeating the bounded-memory design. The correctness bar is deterministic token + top-k agreement, met in full; the observed logit-RMSE envelope (<= ~0.25 per position) is documented as the justified tolerance."
+  },
+  "bounded_memory": {
+    "enforced_limit": "64 MB RLIMIT_AS (--address-space-mb 64)", "settings": {"ctx": 64, "max_tokens": 8, "threads": 2, "workspace_mb": 16, "backend": "streamed"},
+    "runs": [
+      {"format": "Q6_K", "exit": 0, "peak_rss_bytes": 19050496, "maximum_resident_kbytes": 18604, "source_bytes_read": 999002764, "weight_bytes_requested": 998272392, "max_range_read_bytes": 65520, "cache_allocated_bytes": 0},
+      {"format": "Q4_K", "exit": 0, "peak_rss_bytes": 19349504, "maximum_resident_kbytes": 18896, "source_bytes_read": 776378692, "weight_bytes_requested": 775648320, "max_range_read_bytes": 65520, "cache_allocated_bytes": 0}
+    ],
+    "interpretation": "A 110 MB (Q6_K) / 86 MB (Q4_K) model runs in a 64 MB enforced address space at ~19 MB peak RSS, streaming ~0.8-1.0 GB of weight reads across the run in <=65 KB ranges with zero cache allocation. Out-of-core bounded-memory inference is preserved at ~4-5x the previous model size; peak RSS is dominated by the fixed workspace (KV+activations+logits), not model size.",
+    "read_amplification_note": "~9x source bytes vs model size over 16 tokens reflects per-token re-streaming of all weights (out-of-core) plus the authenticated mutation-detection re-read; this is the documented synchronous design, not a regression.",
+    "threads": "2 logical threads used; CPU affinity was not pinned (documented limitation)."
+  },
+  "security_regression": {
+    "note": "No decoder or security code changed for this experiment. The committed code under test keeps authentication, sealed-manifest verification, source-mutation detection, deadline/cancellation, worker lifecycle, memory admission and isfinite guards intact.",
+    "regression_after_latest_code": {"fmt": "exit 0", "clippy_non_native_D_warnings": "exit 0", "clippy_native_D_warnings": "exit 0", "tests_non_native_lib": "219 passed; 0 failed", "tests_native_all_targets": "exit 0", "windows_native_lane": "NOT RUN (WSL2/gcc this session)"}
+  },
+  "compatibility_matrix": [
+    {"model": "stories110M Q6_K (110 MB)", "arch": "llama", "parse": "PASS", "kquant_coverage": "86/86 eligible weights Q6_K", "real_inference": "PASS", "logit_parity": "PASS (top-1 all 16 positions; rmse 0.014-0.179)", "bounded_memory": "PASS (64 MB AS, 19 MB RSS)", "status": "VERIFIED"},
+    {"model": "stories110M Q4_K (86 MB)", "arch": "llama", "parse": "PASS", "kquant_coverage": "86/86 eligible weights K-quant (73 Q4_K + 13 Q6_K)", "real_inference": "PASS", "logit_parity": "PASS (top-1 all 16 positions; rmse 0.019-0.241)", "bounded_memory": "PASS (64 MB AS, 19 MB RSS)", "status": "VERIFIED"},
+    {"model": "stories15M Q4_K/Q5_K/Q6_K (mixed-quant)", "arch": "llama", "parse": "PASS", "kquant_coverage": "ffn_down only (288-dim blocks fallback)", "real_inference": "PASS", "logit_parity": "PASS", "bounded_memory": "PASS", "status": "VERIFIED (prior session)"},
+    {"model": "larger enforced limits (256/512/1024/2048 MB)", "arch": "llama", "parse": "n/a", "kquant_coverage": "n/a", "real_inference": "UNTESTED (64 MB already far below need; larger limits trivially pass and were not separately recorded)", "logit_parity": "n/a", "bounded_memory": "UNTESTED (headroom only)", "status": "UNTESTED"},
+    {"model": "modern architectures (Qwen2/Llama-3)", "arch": "llama/qwen2", "parse": "REJECTED", "kquant_coverage": "n/a", "real_inference": "UNSUPPORTED", "logit_parity": "n/a", "bounded_memory": "n/a", "status": "UNSUPPORTED (metadata allowlist / extra tensors / NEOX rope, unchanged)"}
+  ],
+  "limitations": [
+    "Deterministic greedy decoding; sampling-based decoding not compared.",
+    "Logit comparison at 16 positions with ctx 128; longer contexts and larger max_tokens not swept.",
+    "Enforced memory tested at 64 MB (already ~3x headroom over ~19 MB RSS); 256/512/1024/2048 MB limits were not separately recorded because they pass trivially.",
+    "CPU affinity not pinned to 2 logical processors (2 threads used).",
+    "WSL2 virtualized, not physical hardware; memory numbers are address-space/RSS bounds.",
+    "cgroup memory.max not tested (no passwordless sudo); RLIMIT_AS used as the enforced bound.",
+    "Windows native (MSVC) lane not run.",
+    "Per-token TTFT/decode throughput for stories110M not isolated in this evidence; source-read and RSS metrics are recorded instead."
+  ],
+  "commands": {
+    "download": "curl -sSL -o stories110M.bin https://huggingface.co/karpathy/tinyllamas/resolve/main/stories110M.bin",
+    "convert": "llama-convert-llama2c-to-ggml --copy-vocab-from-model stories15M-q8_0.gguf --llama2c-model stories110M.bin --llama2c-output-model stories110M-f32.gguf",
+    "quantize": "llama-quantize stories110M-f32.gguf stories110M-Q6_K.gguf Q6_K 2",
+    "inference": "llmbridge chat stories110M-Q6_K.gguf --prompt 'Once upon a time' --max-tokens 16 --ctx 128 --threads 2 --backend streamed --workspace-mb 16",
+    "multi_logit_diff": "llmbridge logit-diff stories110M-Q6_K.gguf --prompt 'Once upon a time' --ctx 128 --threads 2 --top-k 10 --max-tokens 16 --workspace-mb 16",
+    "bounded": "/usr/bin/time -v llmbridge chat stories110M-Q6_K.gguf --prompt 'Once upon a time' --max-tokens 8 --ctx 64 --threads 2 --backend streamed --address-space-mb 64 --workspace-mb 16 --metrics"
+  }
+}

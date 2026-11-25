@@ -47,10 +47,20 @@
                                                       },
                                        "windows_benchmark_json":  "5015cd350e8533d89b7d48258fb52f10d957478e3953b1d323ad45dec10145ed",
                                        "windows_example":  "265a26c1007a4ea51275b0ea087770cc80126f3e3cad6b3ef387d4cba31e5e9f",
-                                       "model_sha256":  "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b",
+                                       "model_sha256":  "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
                                        "pinned_reference_revision":  "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
                                        "pinned_reference_sha256":  "a533a71a09cbaef3adafa4ecaa1951645867275a788203ff5beb368ac1e352b1"
                                    },
+    "corrections":  [
+                        {
+                            "field":  "source_and_artifact_sha256.model_sha256",
+                            "issue":  "recorded as a 63-character truncation; trailing hex digit dropped during transcription",
+                            "previous_value":  "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b",
+                            "corrected_value":  "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+                            "verification":  "sha256sum of models/stories15M-q8_0.gguf (26671328 bytes) recomputed 2026-11-23; equals source_and_artifact_sha256.windows[models/stories15M-q8_0.gguf] and the LLMBRIDGE_INTEGRITY logs in sibling evidence files",
+                            "corrected_on":  "2026-11-23"
+                        }
+                    ],
     "optimization":  "Replace 2 ms consumer park polling with recv_timeout to wake on completed worker results while keeping bounded cancellation/deadline polling.",
     "findings":  {
                      "added_prefetch_source_bytes":  120965472,

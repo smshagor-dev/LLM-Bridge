@@ -1,0 +1,215 @@
+{
+  "schema": "llmbridge.lookahead-vs-synchronous-benchmark.v1",
+  "recorded_date": "2026-11-23",
+  "summary": "Paired, counterbalanced sync-vs-lookahead inference benchmark on native ext4 (WSL2). Synchronous is consistently faster and reads fewer bytes; lookahead's prefetch is redundant with a mandatory consumption-time source re-read (mutation detection), yielding ~1.78x read amplification and a net slowdown. No safe optimization is implemented; synchronous remains the default.",
+  "source": {
+    "branch": "local/streamed-metadata-admission",
+    "commit": "ffebed53ac4d4f9445a035afb7affe4f63b43cc4",
+    "code_modified_for_benchmark": false,
+    "note": "Benchmark binary built from the committed source with no local edits; metrics reflect committed source."
+  },
+  "environment": {
+    "host": "WSL2 on Windows 11",
+    "distro": "Ubuntu 26.04.1 LTS",
+    "kernel": "6.18.33.1-microsoft-standard-WSL2",
+    "cpu": "12th Gen Intel(R) Core(TM) i5-12400F",
+    "cpu_cores_logical": 12,
+    "mem_total_kb": 6998672,
+    "rustc": "1.85.1",
+    "cargo": "1.85.1",
+    "cmake": "4.2.3",
+    "cc": "gcc 15.2.0 (Ubuntu 15.2.0-16ubuntu1)",
+    "filesystem": "ext4 (native WSL2 disk, /dev/sdc); NOT a /mnt DrvFs path",
+    "cache_condition": "OS page cache uncontrolled; model pre-copied to ext4; trials progressively warm. Sync and lookahead are interleaved in balanced pairs within the same cache state, so each pair compares equal warmth."
+  },
+  "build": {
+    "profile": "release",
+    "features": [
+      "native"
+    ],
+    "pinned_llama_cpp": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+    "binary_sha256": "5a6323a2b5e55b5c043f93d082da58f8c2da48bb04ec1423723f61fb98071c38"
+  },
+  "model": {
+    "path_on_ext4": "~/llmbridge-bench/model.gguf (copied from models/stories15M-q8_0.gguf)",
+    "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6",
+    "bytes": 26671328
+  },
+  "workload": {
+    "prompt": "Once upon a time",
+    "context_tokens": 64,
+    "max_tokens": 8,
+    "chunk_bytes": 65536,
+    "workspace_bytes": 8388608,
+    "cache_bytes": 0,
+    "integrity": "unsealed local source; identical policy for synchronous and lookahead benchmark pairs",
+    "lookahead_limits": {
+      "staging_bytes": 4194304,
+      "max_outstanding_reads": 2,
+      "fixed_overhead_bytes": 2097152,
+      "worker_stack_bytes": 1048576
+    }
+  },
+  "methodology": {
+    "driver": "crates/llmbridge-core/examples/lookahead_parity.rs",
+    "pairs_per_run": 4,
+    "runs": 3,
+    "total_pairs": 12,
+    "counterbalanced": "two lookahead-first and two synchronous-first pairs per run, each pair adjacent in time",
+    "parity": "every trial's output text and logits verified byte-identical to the synchronous reference before timing is accepted",
+    "wall_clock_commands": [
+      "cp models/stories15M-q8_0.gguf ~/llmbridge-bench/model.gguf",
+      "export CARGO_TARGET_DIR=$HOME/.cache/llmbridge-wsl-target-native",
+      "cargo build --release -p llmbridge-core --features native --example lookahead_parity",
+      "for r in 1 2 3: /usr/bin/time -v lookahead_parity ~/llmbridge-bench/model.gguf OUTDIR 1"
+    ]
+  },
+  "results": {
+    "synchronous": {
+      "wall_seconds": {
+        "median": 0.5183,
+        "p95": 0.5336,
+        "min": 0.5042,
+        "max": 0.541,
+        "n": 12
+      },
+      "first_token_ms": {
+        "median": 495.8434,
+        "p95": 507.0077,
+        "min": 481.9633,
+        "max": 518.2618,
+        "n": 12
+      },
+      "decode_steps_per_second": {
+        "median": 338.9565,
+        "p95": 369.0123,
+        "min": 273.4421,
+        "max": 369.6359,
+        "n": 12
+      },
+      "source_bytes_read": {
+        "median": 155384503.0,
+        "p95": 155384503.0,
+        "min": 155384503.0,
+        "max": 155384503.0,
+        "n": 12
+      }
+    },
+    "lookahead": {
+      "wall_seconds": {
+        "median": 0.5935,
+        "p95": 0.6139,
+        "min": 0.5751,
+        "max": 0.6326,
+        "n": 12
+      },
+      "first_token_ms": {
+        "median": 536.7981,
+        "p95": 552.3819,
+        "min": 516.862,
+        "max": 565.5931,
+        "n": 12
+      },
+      "decode_steps_per_second": {
+        "median": 122.6413,
+        "p95": 129.2343,
+        "min": 107.8111,
+        "max": 130.0619,
+        "n": 12
+      },
+      "source_bytes_read": {
+        "median": 155384503.0,
+        "p95": 155384503.0,
+        "min": 155384503.0,
+        "max": 155384503.0,
+        "n": 12
+      },
+      "lookahead_worker_source_bytes_read": {
+        "median": 120965472.0,
+        "p95": 120965472.0,
+        "min": 120965472.0,
+        "max": 120965472.0,
+        "n": 12
+      },
+      "overhead_ms": {
+        "queue_wait": {
+          "median": 32.5043,
+          "p95": 36.1984,
+          "min": 29.7562,
+          "max": 37.7615,
+          "n": 12
+        },
+        "revalidation_reread": {
+          "median": 20.8585,
+          "p95": 22.3404,
+          "min": 20.0236,
+          "max": 23.0758,
+          "n": 12
+        },
+        "worker_read": {
+          "median": 18.8063,
+          "p95": 21.183,
+          "min": 17.8742,
+          "max": 22.2873,
+          "n": 12
+        },
+        "consumer_wait": {
+          "median": 7.7128,
+          "p95": 11.2197,
+          "min": 4.6841,
+          "max": 12.1569,
+          "n": 12
+        },
+        "staging_copy": {
+          "median": 2.1696,
+          "p95": 2.2964,
+          "min": 2.0669,
+          "max": 2.3276,
+          "n": 12
+        }
+      }
+    },
+    "peak_rss_kb": {
+      "synchronous_and_lookahead": "18556-20032 across runs (/usr/bin/time -v Maximum resident set size)"
+    },
+    "comparison": {
+      "lookahead_wall_vs_sync_pct": 14.5,
+      "read_amplification_x": 1.778,
+      "interpretation": "Lookahead reads the same consumer bytes as synchronous PLUS the worker's prefetch bytes; total physical reads are ~1.78x synchronous."
+    }
+  },
+  "read_amplification_root_cause": {
+    "mechanism": "generate_streamed_with_lookahead consumes a worker-prefetched range via LocalLookahead::take_exact, then calls BoundedLocalReader/CachedLocalReader::verify_staged_range_cancellable, which RE-READS the same source range on the consumer reader to detect mutation after prefetch (read_cache.rs). The worker's prefetch bytes are therefore never a substitute for a source read; every range is read twice.",
+    "code_refs": [
+      "crates/llmbridge-core/src/streamed.rs:293 (take_exact)",
+      "crates/llmbridge-core/src/streamed.rs:313 (verify_staged_range_cancellable)",
+      "crates/llmbridge-core/src/read_cache.rs:114 (verify re-reads via read_range_cancellable)"
+    ],
+    "measured_extra_bytes_per_inference": 120965472,
+    "security_dependency": "The re-read is the mechanism behind consumption_time_authentication_rejects_mutation_after_prefetch; removing it would weaken mutation detection.",
+    "confirmed_on": [
+      "ext4 (this evidence)",
+      "Windows NTFS (source_bytes_sync == source_bytes_lookahead == 155384503, worker +120965472)"
+    ]
+  },
+  "bottleneck_ranking_lookahead_overhead_ms_median": "queue_wait > revalidation(re-read) > worker_read > consumer_wait > staging_copy (see results.lookahead.overhead_ms); synchronous wall is dominated by time-to-first-token (prefill + out-of-core weight streaming).",
+  "optimization_decision": {
+    "implemented": "none",
+    "rationale": "Lookahead is consistently slower with 1.78x read amplification because the mandatory consumption-time re-read (mutation detection) defeats the prefetch. No safe optimization exists for a mutable local source without either (a) immutable-source / stable-object snapshot semantics (Phase 5 remote storage) or (b) verifying staged ranges against the in-memory sealed-manifest hash instead of re-reading - a security-semantics change that only applies to the authenticated Linux path, cannot be measured with the current unsealed benchmark, and requires explicit design review. Per the assignment, the existing implementation is retained and synchronous remains the default.",
+    "synchronous_default_unchanged": true,
+    "future_opportunity": "Evaluate sealed-manifest staged-range verification (no re-read) on the authenticated path, and immutable-source semantics in Phase 5, with authenticated-lookahead benchmarks."
+  },
+  "correctness_preserved": {
+    "output_logit_parity": "PASS (every trial byte-identical to synchronous reference)",
+    "deadline_in_flight_expiry": "PASS (partial output allowed, late_delivery=false, worker_terminated=true, reserved=0, outstanding=0)",
+    "recovery_after_expiry": "PASS (fresh lookahead inference matches synchronous output/logits, clean cleanup)",
+    "phase2_unit_tests_unchanged": true
+  },
+  "limitations": [
+    "WSL2 virtualized ext4, not bare-metal; no 2 GB/dual-core physical hardware claim (peak RSS ~19 MB is development-host only).",
+    "Windows NTFS benchmark pairs were not captured this session: the driver's integer-second deadline-protocol window is hard to hit on this NTFS host (expiry too short reports source_bytes=0; too long lets inference complete before expiry). The read-amplification pattern was still confirmed on NTFS from the parity section.",
+    "Small tiny-model workload (stories15M, 26 MB; 64 context / 8 new tokens); absolute times are not representative of large models.",
+    "No injected hardware performance counters (perf) under WSL2; timing is from in-process instrumentation and /usr/bin/time.",
+    "Historical Windows baseline (median wall 7.748 s) is much slower than this ext4 median (0.518 s); likely a different/slower host or I/O-bound filesystem. Not directly comparable."
+  ]
+}

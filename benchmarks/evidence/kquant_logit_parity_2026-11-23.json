@@ -1,0 +1,118 @@
+{
+  "schema": "llmbridge.kquant-logit-parity.v1",
+  "recorded_date": "2026-11-23",
+  "summary": "Two tightly-coupled increments. (A) A streamed-vs-resident logit-diff harness: an additive resident FFI returns the llama.cpp logit vector at the final prompt position, and a pure-Rust metrics module quantifies the difference against the streamed decoder's step-0 logits. (B) K-quant decoder support (Q4_K/Q5_K/Q6_K) plus the Q5_0/Q5_1 32-element fallbacks, enabled by replacing the hardcoded 32-element block check with ggml_blck_size and broadening the type allowlist; all dequant/dot kernels remain the pinned ggml traits. Genuine K-quant fixtures were derived with the pinned llama-quantize and run through streamed inference: output is byte-identical to the resident reference, logits agree on top-1 and top-10, and execution stays out-of-core under a 32 MB address-space limit.",
+  "source": {
+    "branch": "local/streamed-metadata-admission",
+    "logit_harness_commit": "e2e9972",
+    "q6_k_commit": "66456fe",
+    "q5_k_commit": "bca262e",
+    "q4_k_commit": "001f1c5",
+    "prior_pushed_checkpoint": "cfcf860",
+    "code_modified": true,
+    "git_dirty_at_record": "doc-comment corrections (streamed.rs, llmbridge.h) and this evidence file pending commit; .vscode/ untracked",
+    "note": "Validation binaries were built from the working tree committed across the four commits above; only doc comments and this evidence changed afterward (no decoder behaviour change)."
+  },
+  "environment": {
+    "host": "WSL2 on Windows 11",
+    "distro": "Ubuntu 26.04.1 LTS",
+    "kernel": "6.18.33.1-microsoft-standard-WSL2",
+    "cpu": "12th Gen Intel(R) Core(TM) i5-12400F",
+    "cpu_cores_logical": 12,
+    "mem_total_kb": 6998672,
+    "rustc": "1.85.1", "cargo": "1.85.1", "cmake": "4.2.3", "cc": "gcc 15.2.0",
+    "filesystem": "ext4 (native WSL2 disk)",
+    "llama_cpp_pin": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+    "quantize_tool": "build/reference-avx2/bin/llama-quantize (pinned llama.cpp build)"
+  },
+  "objective_a_logit_diff_harness": {
+    "native_api": "llmbridge_resident_prompt_logits_v1 (additive, ABI version unchanged, exceptions caught): loads the model, tokenizes with add_special+parse_special (identical to the streamed path and to generate()), decodes the prompt with output logits at the final position, and emits the full n_vocab logit vector once. Samples/generates nothing.",
+    "position_equivalence": "Streamed step-0 logits (after prefilling tokens[0..n-1], predicting token[n]) are compared against resident llama_get_logits_ith(ctx,-1) at the same final prompt position with identical tokenization.",
+    "metrics_module": "crates/llmbridge-core/src/logit_diff.rs computes max/mean absolute error, RMSE, max relative error (denominator floor 1e-6), top-1 agreement, top-k overlap, and the selected-token rank of each backend's argmax within the other's logits. Non-finite values are counted, never hidden. 4 CI-safe unit tests.",
+    "cli": "Opt-in `llmbridge logit-diff <model> --prompt <text> [--ctx --threads --top-k --workspace-mb]`; normal `chat` inference is unchanged.",
+    "key_finding": "Token parity is NOT logit equivalence. The streamed decoder is an independent custom FP32 forward pass; its logits differ measurably from llama.cpp's graph even where the greedy token sequence is identical.",
+    "results_ctx128_threads1_topk10": [
+      {"model": "stories15M-q8_0 (Q8_0)", "max_abs_err": 0.238881826, "mean_abs_err": 0.170640553, "rmse": 0.185463499, "max_rel_err": 42.889565072, "top1_agree": true, "top1_token": 29892, "topk_overlap": "10/10", "selected_token_rank": 0},
+      {"model": "stories15M-derived-q4_0 (Q4_0)", "max_abs_err": 0.207192421, "mean_abs_err": 0.096505162, "rmse": 0.104514700, "max_rel_err": 17.406085205, "top1_agree": true, "top1_token": 29892, "topk_overlap": "10/10", "selected_token_rank": 0},
+      {"model": "stories15M-derived-q4_1 (Q4_1)", "max_abs_err": 0.202498436, "mean_abs_err": 0.122493004, "rmse": 0.132604502, "max_rel_err": 21.726254301, "top1_agree": true, "top1_token": 29892, "topk_overlap": "9/10", "selected_token_rank": 0},
+      {"model": "derived Q6_K", "max_abs_err": 0.309910297, "mean_abs_err": 0.049864366, "rmse": 0.057040341, "max_rel_err": 37.547547548, "top1_agree": true, "top1_token": 29892, "topk_overlap": "10/10", "selected_token_rank": 0},
+      {"model": "derived Q5_K", "max_abs_err": 0.327244759, "mean_abs_err": 0.060527350, "rmse": 0.067231046, "max_rel_err": 31.786744815, "top1_agree": true, "top1_token": 29892, "topk_overlap": "10/10", "selected_token_rank": 0},
+      {"model": "derived Q4_K", "max_abs_err": 0.361788750, "mean_abs_err": 0.192094758, "rmse": 0.203190673, "max_rel_err": 6.256120352, "top1_agree": true, "top1_token": 29892, "topk_overlap": "10/10", "selected_token_rank": 0}
+    ],
+    "note_max_rel_err": "The large max relative error is an artefact of near-zero reference logits divided by the 1e-6 floor; the absolute error, RMSE, and rank metrics are the meaningful signals here."
+  },
+  "objective_b_kquant": {
+    "decoder_change": "native/src/streamed.cpp: streamed_supported_type() admits {F32, Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, Q4_K, Q5_K, Q6_K}; the geometry check now uses ggml_blck_size(type) (F32=1, 32-element quants=32, K-quant superblocks=256) instead of a hardcoded 32. Dequant (to_float) and matvec (vec_dot via the Q8_0/Q8_1/Q8_K activation path) are the pinned ggml reference traits; no hand-written K-quant kernels were added.",
+    "kernel_delegation_confirmed": "Each admitted type decodes real weights through ggml_get_type_traits(type)->to_float and ggml_get_type_traits_cpu(type)->vec_dot; the existing dynamic checks reject any type whose traits or activation quantizer are unavailable.",
+    "fixture_derivation": "Genuine K-quant fixtures were produced from the committed q8_0 stories15M model with the pinned llama-quantize --allow-requantize (q8_0->K-quant and q8_0->F16 are otherwise disabled by llama.cpp). Fixtures are gitignored and NOT committed.",
+    "stories15M_288_dim_constraint": "stories15M embedding_length is 288, which is not a multiple of the 256-element K-quant superblock, so only ffn_down (ne0=768 = 3 superblocks) becomes a genuine K-quant tensor; sub-256-wide tensors fall back to 32-element quants. The fixtures are therefore MIXED-quant and genuinely exercise the K-quant dequant+matvec path on the ffn_down tensors, but are not all-K-quant models. A fully-K-quant dense-llama needs all dims divisible by 256 (e.g. stories110M, not downloaded this session).",
+    "fixtures": [
+      {"id": "derived model_Q6_K.gguf", "bytes": 26349920, "sha256": "cf74555b14f2f4923ea5a04f85b7700eefa7b6ea1a563afff361ce53d6a1672d", "tensor_types": {"Q6_K": "6 (ffn_down, genuine 256-superblock)", "Q8_0": "~38 (kept)", "F32": 13}},
+      {"id": "derived model_Q5_K.gguf", "bytes": 21952736, "sha256": "b66b1d9317290c28bff36e395c5628a534508cb13930971f1553fd7793d13ea5", "tensor_types": {"Q5_K": "4 (genuine)", "Q6_K": "2 (ffn_down)", "Q5_1": "35 (fallback)", "Q8_0": "few (kept)", "F32": 13}},
+      {"id": "derived model_Q4_K.gguf", "bytes": 20986208, "sha256": "7d550be38cf70dc32ae1716392b9cae711abd8acaf2f90ca67aa122494c034c0", "tensor_types": {"Q4_K": "4 (genuine)", "Q6_K": "2 (ffn_down)", "Q5_0": "35 (fallback)", "Q8_0": "few (kept)", "F32": 13}}
+    ],
+    "base_model": {"id": "stories15M-q8_0.gguf", "bytes": 26671328, "sha256": "2eda49203f2f044f3dddf29a7dd7cc861ef5a0340f518a19613d73ba6d9c06b6", "license": "fixture derived from llama2.c / TinyStories lineage"}
+  },
+  "real_inference": {
+    "prompt": "Once upon a time",
+    "settings": {"ctx": 128, "max_tokens": 16, "threads": 1, "greedy": true},
+    "runs": [
+      {"format": "Q6_K", "streamed": ", there was a little girl named Lily. She loved to play outside in", "resident": ", there was a little girl named Lily. She loved to play outside in", "token_parity": "EXACT 16/16"},
+      {"format": "Q5_K", "streamed": ", there was a little girl named Lily. She loved to play outside in", "resident": ", there was a little girl named Lily. She loved to play outside in", "token_parity": "EXACT 16/16"},
+      {"format": "Q4_K", "streamed": ", there was a little girl named Lily. She loved to play outside in", "resident": ", there was a little girl named Lily. She loved to play outside in", "token_parity": "EXACT 16/16"}
+    ]
+  },
+  "bounded_memory": {
+    "enforced_limit": "32 MB RLIMIT_AS (--address-space-mb 32)",
+    "settings": {"ctx": 64, "max_tokens": 8, "threads": 2, "backend": "streamed"},
+    "runs": [
+      {"format": "Q6_K", "exit": 0, "peak_rss_bytes": 14761984, "maximum_resident_kbytes": 14416, "source_bytes_read": 151527607, "cache_allocated_bytes": 0},
+      {"format": "Q5_K", "exit": 0, "peak_rss_bytes": 14446592, "maximum_resident_kbytes": 14108, "source_bytes_read": 133320319, "cache_allocated_bytes": 0},
+      {"format": "Q4_K", "exit": 0, "peak_rss_bytes": 14344192, "maximum_resident_kbytes": 14008, "source_bytes_read": 128633767, "cache_allocated_bytes": 0}
+    ],
+    "interpretation": "Each ~21-26 MB K-quant model streams >128 MB of weight reads in <=65 KB ranges and runs in a 32 MB address space at ~14-14.8 MB peak RSS with zero cache allocation. Out-of-core bounded memory is preserved for K-quant formats; weights are never fully resident."
+  },
+  "regression": {
+    "fmt_check": "exit 0",
+    "clippy_non_native_D_warnings": "exit 0",
+    "clippy_native_D_warnings": "exit 0",
+    "tests_non_native_lib": "217 passed; 0 failed",
+    "tests_native_lib": "259 passed; 0 failed",
+    "tests_workspace_all_targets": "exit 0 (all test binaries passed)",
+    "new_tests": [
+      "logit_diff::tests (4): identical/length-mismatch/disagreement-rank/nonfinite-counting",
+      "gguf_index::tests::kquant_and_extended_block_geometry_is_exact (Q5_0/Q5_1/Q4_K/Q5_K/Q6_K geometry + 256-divisibility)"
+    ],
+    "windows_native_lane": "NOT RUN (native build is WSL2/gcc this session; Rust non-native lanes are platform-independent and green)."
+  },
+  "compatibility_matrix": [
+    {"format": "Q8_0", "parse": "PASS", "kernel": "PASS", "real_inference": "PASS", "logit_parity": "PASS (top-1, top-10; rmse 0.185)", "bounded_memory": "PASS", "status": "SUPPORTED"},
+    {"format": "Q4_0", "parse": "PASS", "kernel": "PASS", "real_inference": "PASS", "logit_parity": "PASS (rmse 0.105)", "bounded_memory": "PASS", "status": "SUPPORTED"},
+    {"format": "Q4_1", "parse": "PASS", "kernel": "PASS", "real_inference": "PASS", "logit_parity": "PASS (rmse 0.133)", "bounded_memory": "PASS", "status": "SUPPORTED"},
+    {"format": "Q6_K", "parse": "PASS", "kernel": "PASS", "real_inference": "PASS (6 genuine Q6_K ffn_down tensors)", "logit_parity": "PASS (rmse 0.057)", "bounded_memory": "PASS", "status": "SUPPORTED (validated on mixed-quant fixture)"},
+    {"format": "Q5_K", "parse": "PASS", "kernel": "PASS", "real_inference": "PASS (4 Q5_K + 2 Q6_K ffn_down tensors)", "logit_parity": "PASS (rmse 0.067)", "bounded_memory": "PASS", "status": "SUPPORTED (validated on mixed-quant fixture)"},
+    {"format": "Q4_K", "parse": "PASS", "kernel": "PASS", "real_inference": "PASS (4 Q4_K + 2 Q6_K ffn_down tensors)", "logit_parity": "PASS (rmse 0.203)", "bounded_memory": "PASS", "status": "SUPPORTED (validated on mixed-quant fixture)"},
+    {"format": "Q5_0 / Q5_1", "parse": "PASS", "kernel": "PASS", "real_inference": "PASS (as fallback tensors in the Q4_K/Q5_K fixtures)", "logit_parity": "covered by the host-model runs", "bounded_memory": "PASS", "status": "SUPPORTED (fallback 32-element quants)"},
+    {"format": "fully-K-quant dense-llama (all dims div 256)", "parse": "UNTESTED", "kernel": "n/a", "real_inference": "UNTESTED", "logit_parity": "UNTESTED", "bounded_memory": "UNTESTED", "status": "UNTESTED (no such compatible model available/downloaded; stories15M dim 288 blocks it)"},
+    {"format": "modern architectures (Qwen2/Llama-3)", "parse": "REJECTED", "kernel": "n/a", "real_inference": "UNSUPPORTED", "logit_parity": "n/a", "bounded_memory": "n/a", "status": "UNSUPPORTED (metadata allowlist / extra tensors / NEOX rope blockers, unchanged)"}
+  ],
+  "security_and_correctness_preserved": {
+    "note": "The decoder change only widens the admitted tensor-type set and generalizes the block-size check; authentication, sealed-manifest verification, source-mutation detection, deadline/cancellation, worker lifecycle, memory admission, and the isfinite guards are unchanged. The resident logit API is a separate opt-in diagnostic path and does not touch normal inference. ABI version unchanged.",
+    "real_inference_confirmed": true
+  },
+  "limitations": [
+    "K-quant validation used MIXED-quant fixtures: only ffn_down (ne0=768) is a genuine K-quant superblock tensor because stories15M's 288-wide tensors cannot be K-quantized. A fully-K-quant model (dims divisible by 256, e.g. stories110M) was not obtained this session.",
+    "Fixtures were derived with llama-quantize --allow-requantize from an already-q8_0 model (lossy source); this is valid for parity (streamed and resident decode identical bytes) but the fixtures are not independently published upstream models.",
+    "Parity is deterministic greedy tokens PLUS a quantitative logit diff at the first generated position; multi-position logit diffs were not collected.",
+    "WSL2 virtualized, not physical 2 GB/dual-core hardware; memory numbers are address-space/RSS bounds.",
+    "cgroup memory.max enforcement not tested (no passwordless sudo); RLIMIT_AS used as the enforced bound.",
+    "Windows native (MSVC) regression lane not run this session."
+  ],
+  "commands": {
+    "build": "CARGO_TARGET_DIR=$HOME/.cache/llmbridge-wsl-target-native cargo build --release -p llmbridge",
+    "derive_fixture": "llama-quantize --allow-requantize stories15M-q8_0.gguf model_Q6_K.gguf Q6_K 1",
+    "inference": "llmbridge chat MODEL --prompt 'Once upon a time' --max-tokens 16 --ctx 128 --threads 1 --backend {streamed|resident}",
+    "logit_diff": "llmbridge logit-diff MODEL --prompt 'Once upon a time' --ctx 128 --threads 1 --top-k 10",
+    "bounded": "/usr/bin/time -v llmbridge chat MODEL --prompt 'Once upon a time' --max-tokens 8 --ctx 64 --threads 2 --backend streamed --address-space-mb 32 --metrics"
+  }
+}

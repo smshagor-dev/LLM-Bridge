@@ -3,7 +3,25 @@ pub mod gguf_index;
 pub mod hardware;
 #[cfg(feature = "native")]
 pub mod inference;
+pub mod latent_moe_ffn;
+pub mod latent_moe_routing;
+pub mod logit_diff;
+pub mod mamba2_block;
+pub mod mamba2_conv;
+pub mod mamba2_ssm;
 pub mod models;
+#[cfg(feature = "native")]
+pub mod native_dequant;
+pub mod native_kernels;
+pub mod nemotron_attention;
+#[cfg(feature = "native")]
+pub mod nemotron_expert_stream;
+pub mod nemotron_hybrid;
+#[cfg(feature = "native")]
+pub mod nemotron_model;
+#[cfg(feature = "native")]
+pub mod nemotron_nano;
+pub mod nemotron_tokenizer;
 
 pub mod admission_queue;
 pub mod f32_chain;
@@ -47,3 +65,6 @@ pub mod native_cpu;
 #[cfg(target_os = "linux")]
 mod cgroup_memory;
 pub mod worker_plan;
+
+#[cfg(feature = "remote")]
+pub mod remote;

@@ -1,0 +1,151 @@
+{
+  "artifact": "qwen2_7b_truncated_artifact_and_streamed_health_2026-11-24",
+  "utc_timestamp": "2026-11-24T08:00:00Z",
+  "summary": "Attempt to validate genuine Qwen2.5-7B-Instruct Q4_K_M streamed inference. The on-disk 7B GGUF is an INCOMPLETE download (2,466,843,849 of ~4,683,074,240 expected bytes; 2,216,230,391 bytes / ~47% missing, including the entire output projection and upper transformer layers). The custom out-of-core streamed backend and all index/plan tools correctly and safely REJECT the truncated file (bounded ~6 MB peak RSS, clean exit 1, 'GGUF tensor range exceeds file length') with no crash, no OOM, no partial/garbage inference. Genuine 7B inference, resident parity, teacher-forced logit comparison and bounded-memory 7B experiments are therefore BLOCKED on the artifact, not on the code. To isolate the blocker to the artifact, the SAME HEAD binary runs genuine streamed greedy inference on the COMPLETE Qwen2.5-1.5B (identical qwen2 decode path) under an enforced 1024 MiB RLIMIT_AS with 62.9 MB peak RSS and coherent output. The 7B's tied/untied output status is determined from its intact header: UNTIED (independent output.weight at Q6_K distinct from token_embd.weight at Q4_K).",
+  "classification": "PARTIALLY COMPLETE - 7B inference blocked by incomplete model download; backend health, safe-rejection, provenance and untied-output determination verified.",
+  "git": {
+    "branch": "local/streamed-metadata-admission",
+    "head_commit": "54307e2a3b12c70f730c839ec877d3e98066901f",
+    "working_tree": "clean except untracked .vscode/ (preserved, not committed)",
+    "note": "Evidence produced against committed HEAD source. Binary built from this commit with --features native."
+  },
+  "environment": {
+    "host": "Windows 11 Pro 10.0.26300 + WSL2 Ubuntu (kernel 6.18.33.1-microsoft-standard-WSL2)",
+    "cpu_logical": 12,
+    "cpu_affinity_used": "taskset -c 0,1 (verified allowed set 0-11)",
+    "ram_total": "6.7 GiB, swap 0",
+    "rustc": "1.85.1",
+    "cargo": "1.85.1",
+    "cmake": "4.2.3",
+    "gpp": "15.2.0 (Ubuntu 15.2.0-16ubuntu1)",
+    "llama_cpp_pin": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+    "cargo_target_dir": "$HOME/.cache/llmbridge-wsl-target-native (ext4)",
+    "build_command": "CARGO_TARGET_DIR=$HOME/.cache/llmbridge-wsl-target-native cargo build --release -p llmbridge --features native",
+    "build_exit": 0,
+    "cpu_only": true
+  },
+  "qwen2_7b_provenance": {
+    "declared_identity": "Qwen2.5-7B-Instruct (general.name 'Qwen2.5 7B Instruct', arch qwen2, finetune Instruct)",
+    "publisher_base_model": "Qwen (https://huggingface.co/Qwen/Qwen2.5-7B)",
+    "license": "apache-2.0 (https://huggingface.co/Qwen/Qwen2.5-7B-Instruct/blob/main/LICENSE)",
+    "local_path": "/home/smshagor/llmbridge-bench/qwen25-7b/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+    "file_bytes_actual": 2466843849,
+    "sha256_actual_partial_file": "65f0d5fd4a78b57e73ef0159d83d6067b0c5ec7032f1413408e8c89afc7e0832",
+    "sha256_note": "This is the SHA-256 of the INCOMPLETE file. It is NOT a valid Qwen2.5-7B Q4_K_M digest and must not be trusted as a model identity.",
+    "gguf_version": 3,
+    "declared_tensors": 339,
+    "metadata_entries": 38,
+    "quantization": "Q4_K_M (general.file_type=15); imatrix quant (quantize.imatrix.dataset=/training_dir/calibration_datav3.txt, entries 196, chunks 128, imatrix.file under /models_out/Qwen2.5-7B-Instruct-GGUF/)",
+    "tensor_type_distribution": {"Q4_K": 169, "F32": 141, "Q6_K": 29},
+    "tokenizer": {"model": "gpt2", "pre": "qwen2", "vocab_tokens": 152064, "token_type_entries": 152064, "merges": 151387, "bos": 151643, "eos": 151645, "pad": 151643, "add_bos": false}
+  },
+  "qwen2_7b_architecture_audit": {
+    "architecture": "qwen2",
+    "block_count": 28,
+    "embedding_length": 3584,
+    "feed_forward_length": 18944,
+    "attention_head_count": 28,
+    "attention_head_count_kv": 4,
+    "gqa_ratio": "7:1",
+    "head_dim": 128,
+    "rope_freq_base": 1000000.0,
+    "rms_norm_epsilon": 9.999999974752427e-07,
+    "context_length": 32768,
+    "vocab_size": 152064,
+    "compat_vs_tested_models": "Same qwen2 decoder family as the validated 0.5B/1.5B (which use head_count 12-14, kv 2). 7B widens to 28 heads / 4 kv (GQA 7:1), embd 3584, ffn 18944. Architecture is representable by the existing qwen2 path; no incompatible metadata key detected in the header. Not executed (payload truncated)."
+  },
+  "truncation_verdict": {
+    "method": "Independent read-only GGUF parser (python3 -I) walking the KV metadata and full 339-entry tensor table, plus the repo's own CLI validators.",
+    "tensor_data_section_start": 5954240,
+    "max_tensor_offset_plus_size_relative": 4677120000,
+    "expected_absolute_data_end_bytes": 4683074240,
+    "actual_file_bytes": 2466843849,
+    "missing_bytes": 2216230391,
+    "missing_fraction": 0.473,
+    "expected_full_size_note": "~4.683 GB is the canonical size of an imatrix Qwen2.5-7B-Instruct Q4_K_M GGUF; the present file is ~52.7% of that.",
+    "conclusion": "INCOMPLETE / TRUNCATED DOWNLOAD. The GGUF header (metadata + tensor table) is intact and fully parseable, but ~47% of the tensor payload is absent."
+  },
+  "untied_output_determination": {
+    "result": "UNTIED (independent output projection present in header)",
+    "token_embd.weight": {"dims": [3584, 152064], "type": "Q4_K", "data_offset_relative": 0, "nbytes": 306561024},
+    "output.weight": {"dims": [3584, 152064], "type": "Q6_K", "data_offset_relative": 3446282240, "nbytes": 447068160},
+    "output_norm.weight": {"dims": [3584], "type": "F32", "data_offset_relative": 4677105664, "nbytes": 14336},
+    "evidence": "A distinct output.weight tensor exists with a DIFFERENT quant type (Q6_K) than token_embd.weight (Q4_K); distinct type proves these are not the same (tied) tensor. This matches the common pattern for 7B-class models.",
+    "executable_caveat": "output.weight begins at absolute offset ~3.452 GB, which is INSIDE the missing/truncated region. The untied projection therefore CANNOT be executed or numerically validated from this artifact. Determination is header-only."
+  },
+  "safe_rejection_tests": {
+    "cli_binary": "$HOME/.cache/llmbridge-wsl-target-native/release/llmbridge (HEAD 54307e2, --features native)",
+    "models_verify_correct_sha": {"exit": 0, "disk_bytes_read": 2466843849, "buffer_bytes": 262144, "status": "entire local file SHA-256 verified with bounded reusable buffer; not an executable model proof"},
+    "models_verify_wrong_sha": {"exit": 1, "error": "SHA-256 mismatch; reject model bytes"},
+    "chat_streamed_truncated_7b": {"exit": 1, "error": "GGUF tensor range exceeds file length", "peak_rss_bytes": 6520832, "address_space_mb": 2048, "note": "clean rejection, no crash/OOM, bounded ~6.5 MB RSS"},
+    "models_tensor_index_truncated_7b": {"exit": 1, "error": "GGUF tensor range exceeds file length"},
+    "models_plan_truncated_7b": {"exit": 1, "error": "GGUF tensor range exceeds file length"},
+    "native_index_probe_truncated_7b": {"exit": 1, "error": "GGUF tensor range exceeds file length"},
+    "guarantee_confirmed": "GGUF tensor-bounds validation holds at every entry point including the native inference path; a truncated/malformed artifact never reaches unsafe native execution."
+  },
+  "backend_health_complete_model": {
+    "purpose": "Isolate the 7B blocker to the artifact by running the SAME HEAD binary and SAME qwen2 decode path on a COMPLETE model.",
+    "model": "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf",
+    "sha256": "1adf0b11065d8ad2e8123ea110d1ec956dab4ab038eab665614adba04b6c3370",
+    "file_bytes": 986048768,
+    "arch": "qwen2 (block_count 28, embd 1536, ffn 8960, heads 12, kv 2, rope_base 1e6)",
+    "prompt": "The capital of France is",
+    "backend": "streamed (custom out-of-core CPU decoder)",
+    "decoding": "greedy",
+    "threads": 2,
+    "cpu_affinity": "taskset -c 0,1",
+    "max_tokens": 10,
+    "ctx": 128,
+    "generated_text": " Paris. The capital of Italy is Rome. The",
+    "runs": [
+      {"address_space_mb": null, "exit": 0, "peak_rss_bytes": 62652416, "ttft_first_logits_ns": 6997587203, "decode_steps_per_second": 0.7435367896},
+      {"address_space_mb": 2048, "exit": 0, "peak_rss_bytes": 62861312, "ttft_first_logits_ns": 6564289610, "decode_steps_per_second": 0.8358809485},
+      {"address_space_mb": 1024, "exit": 0, "peak_rss_bytes": 62865408, "ttft_first_logits_ns": 6386549515, "decode_steps_per_second": 0.8400114273}
+    ],
+    "integrity": {"verified": 1, "blocks_verified": 403724, "accounted_bytes": 6498560},
+    "io_amplification_10_tokens": {
+      "source_bytes_read": 27444363520,
+      "weight_bytes_requested": 12955601128,
+      "range_read_calls": 967029,
+      "weight_read_calls": 206036,
+      "max_range_read_bytes": 65520,
+      "reader_buffer_bytes": 65536,
+      "cache_allocated_bytes": 0,
+      "bytes_per_token_source_read": 2744436352,
+      "amplification_vs_file": 27.8,
+      "interpretation": "Per-token full-weight re-streaming. ~2.74 GB source read per generated token for a 986 MB model. Extrapolated to the complete 4.68 GB 7B this implies on the order of ~4.7 GB source read per token before caching."
+    },
+    "bounded_memory_conclusion": "Complete qwen2 1.5B runs correctly under an enforced 1024 MiB RLIMIT_AS at 62.9 MB peak RSS. WSL2 RLIMIT_AS is NOT a claim about physical 2 GB RAM hardware."
+  },
+  "observations": {
+    "broken_pipe_exit_101": "Piping the CLI's stdout/stderr into `head -N` closes the pipe early and produces a Rust broken-pipe (EPIPE) panic, exit 101. This is a benign CLI-consumer artifact (standard Rust SIGPIPE=SIG_IGN behavior), NOT an inference failure: draining the output (e.g. `tail`) yields exit 0 with full correct generation. No model/FFI defect; no code change made (code is correct).",
+    "resident_backend_with_sha256": "`chat --backend resident --sha256 ...` errors with 'verification requires streamed backend with verification-mb in 1..64'. Expected: in-flight SHA verification is a streamed-backend feature. Not a defect."
+  },
+  "blocked_items": [
+    "Genuine 7B streamed inference (token generation).",
+    "7B resident llama.cpp reference parity.",
+    "7B teacher-forced logit-level comparison.",
+    "7B bounded-memory (2048/1024/512/256 MiB) acceptance.",
+    "7B source-read amplification on a complete payload.",
+    "Execution/numerical validation of the untied output.weight (it is in the missing region)."
+  ],
+  "remediation": {
+    "required": "Obtain a COMPLETE Qwen2.5-7B-Instruct Q4_K_M GGUF (~4.683 GB) from a verified source, record its authoritative SHA-256, and re-run the full matrix.",
+    "likely_source": "imatrix Q4_K_M with Q6_K output and general.file_type=15 is characteristic of a standard community/official Qwen2.5-7B-Instruct-GGUF publisher; exact source URL of the partial is NOT recorded, so provenance must be re-established on re-download.",
+    "disk_available": "931 GB free on WSL / - ample.",
+    "action_pending_user_approval": "A fresh multi-GB network download was not performed autonomously; awaiting user confirmation of source/approval."
+  },
+  "security_regression_status": {
+    "sha256_authentication": "verified (correct passes, wrong rejected)",
+    "gguf_tensor_bounds_validation": "verified (truncated file rejected at all entry points)",
+    "bounded_memory_rejection": "verified (~6.5 MB peak RSS on rejected 7B)",
+    "in_flight_integrity_verification": "verified on complete 1.5B (blocks_verified 403724)",
+    "note": "Full Rust/C++ regression suite (fmt/clippy/tests) not re-run this session; no source code was modified, so prior green state at HEAD 54307e2 stands unchanged."
+  },
+  "commands": {
+    "sha256_7b": "sha256sum Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+    "inspect_7b": "llmbridge models inspect <7b.gguf>",
+    "reject_7b_streamed": "llmbridge chat <7b.gguf> --prompt Hello --max-tokens 4 --threads 2 --backend streamed --metrics --sha256 <sha> --address-space-mb 2048",
+    "health_15b": "taskset -c 0,1 llmbridge chat <1.5b.gguf> --prompt 'The capital of France is' --max-tokens 10 --ctx 128 --threads 2 --backend streamed --metrics --sha256 <sha> --address-space-mb 1024 --workspace-mb 16"
+  }
+}

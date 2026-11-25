@@ -37,6 +37,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         cache_bytes: 0,
         authentication_budget_bytes: 8 * 1024 * 1024,
         collect_performance: true,
+        snapshot_reuse: false,
     };
     let cancelled = AtomicBool::new(false);
     let mut sync_text = Vec::new();

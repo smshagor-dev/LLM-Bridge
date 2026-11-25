@@ -35,6 +35,21 @@ extern "C" {
         error: *mut c_char,
         error_capacity: usize,
     ) -> i32;
+
+    fn llmbridge_dequant_matvec_v1(
+        ggml_type: u32,
+        tensor_offset: u64,
+        tensor_bytes: u64,
+        columns: u32,
+        rows: u32,
+        max_chunk_bytes: usize,
+        callback: RangeCallback,
+        userdata: *mut c_void,
+        input: *const f32,
+        output: *mut f32,
+        error: *mut c_char,
+        error_capacity: usize,
+    ) -> i32;
     fn llmbridge_generate_cpu_polled(
         path: *const c_char,
         prompt: *const c_char,
@@ -678,9 +693,265 @@ fn q8_0_matvec_internal(
     Ok(output)
 }
 
+/// Type-generic bounded quantized matrix-vector product: `W * activation` for a
+/// rank-2 GGUF tensor `W` of shape `[columns, rows]` of any ggml type that has a
+/// pinned `to_float` dequantizer (IQ2_XXS, IQ4_NL, Q4_K, Q5_K, Q6_K, Q8_0, F32,
+/// ...). The matrix is streamed one row at a time through the bounded reader and
+/// never materialized, so this is the arithmetic primitive the LatentMoE experts
+/// and Mamba-2 projections use. `region` must be indexed in the GGUF the `reader`
+/// is opened on; the native read is confined to the tensor payload. This caps
+/// explicitly managed scratch, not process RSS or the native allocator.
+pub fn dequant_matvec(
+    region: &crate::gguf_index::TensorRegion,
+    reader: &mut BoundedLocalReader,
+    activation: &[f32],
+    cancelled: &AtomicBool,
+    workspace_budget_bytes: usize,
+) -> Result<Vec<f32>, String> {
+    crate::native_cpu::ensure_compatible()?;
+    if region.dimensions.len() != 2 {
+        return Err("dequant_matvec requires a rank-2 GGUF tensor".to_string());
+    }
+    let columns = u32::try_from(region.dimensions[0]).map_err(|_| "too many tensor columns")?;
+    let rows = u32::try_from(region.dimensions[1]).map_err(|_| "too many tensor rows")?;
+    if columns == 0
+        || columns > (1 << 17)
+        || rows == 0
+        || rows > (1 << 20)
+        || activation.len() != columns as usize
+        || !activation.iter().all(|f| f.is_finite())
+    {
+        return Err("invalid matvec dimensions or activation".to_string());
+    }
+    let row_bytes = usize::try_from(region.byte_len / u64::from(rows))
+        .map_err(|_| "tensor row does not fit address space")?;
+    // Bounded workspace accounting mirrors q8_0_matvec: reader chunk + one packed
+    // row + two activation-sized operands + the result + reserve. Not an RSS cap.
+    let operand_bytes = (columns as usize)
+        .checked_mul(std::mem::size_of::<f32>())
+        .ok_or("activation allocation size overflow")?;
+    let result_bytes = (rows as usize)
+        .checked_mul(std::mem::size_of::<f32>())
+        .ok_or("result allocation size overflow")?;
+    let scratch_bytes = reader
+        .allocated_chunk_bytes()
+        .checked_add(row_bytes)
+        .and_then(|sum| sum.checked_add(operand_bytes))
+        .and_then(|sum| sum.checked_add(operand_bytes))
+        .and_then(|sum| sum.checked_add(result_bytes))
+        .and_then(|sum| sum.checked_add(64 * 1024))
+        .ok_or("operator workspace arithmetic overflow")?;
+    if scratch_bytes > workspace_budget_bytes
+        || row_bytes > reader.allocated_chunk_bytes()
+        || cancelled.load(Ordering::Acquire)
+    {
+        return Err("operator workspace exceeds budget or request cancelled".to_string());
+    }
+    let mut output = vec![0f32; rows as usize];
+    let mut state = ReaderState {
+        reader,
+        failure: None,
+        cancelled: Some(cancelled),
+        allowed_range: Some((region.file_offset, region.file_offset + region.byte_len)),
+    };
+    let mut diagnostic = [0 as c_char; 1024];
+    // SAFETY: all borrowed buffers and callback state outlive this synchronous C
+    // call; native checks bounds before writes and contains all exceptions. A
+    // failed call discards output instead of exposing partial rows.
+    let status = unsafe {
+        llmbridge_dequant_matvec_v1(
+            region.ggml_type,
+            region.file_offset,
+            region.byte_len,
+            columns,
+            rows,
+            state.reader.allocated_chunk_bytes(),
+            read_range_callback,
+            (&mut state as *mut ReaderState<'_>).cast(),
+            activation.as_ptr(),
+            output.as_mut_ptr(),
+            diagnostic.as_mut_ptr(),
+            diagnostic.len(),
+        )
+    };
+    if status != 0 || cancelled.load(Ordering::Acquire) {
+        let native = unsafe { CStr::from_ptr(diagnostic.as_ptr()) }.to_string_lossy();
+        return Err(format!(
+            "bounded dequant matvec failed: {native}; source: {}",
+            state.failure.as_deref().unwrap_or("no reader failure")
+        ));
+    }
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Write a single rank-2 quantized tensor as a minimal GGUF (no KV), payload
+    /// at offset 0. Returns the file path.
+    fn write_quant_fixture(
+        name: &str,
+        columns: u64,
+        rows: u64,
+        ggml_type: u32,
+        payload: &[u8],
+    ) -> std::path::PathBuf {
+        use std::io::Write;
+        use std::sync::atomic::AtomicU64;
+        static SERIAL: AtomicU64 = AtomicU64::new(0);
+        let mut b = b"GGUF".to_vec();
+        b.extend_from_slice(&3u32.to_le_bytes());
+        b.extend_from_slice(&1u64.to_le_bytes());
+        b.extend_from_slice(&0u64.to_le_bytes());
+        b.extend_from_slice(&(name.len() as u64).to_le_bytes());
+        b.extend_from_slice(name.as_bytes());
+        b.extend_from_slice(&2u32.to_le_bytes());
+        b.extend_from_slice(&columns.to_le_bytes());
+        b.extend_from_slice(&rows.to_le_bytes());
+        b.extend_from_slice(&ggml_type.to_le_bytes());
+        b.extend_from_slice(&0u64.to_le_bytes());
+        while b.len() % 32 != 0 {
+            b.push(0);
+        }
+        b.extend_from_slice(payload);
+        let path = std::env::temp_dir().join(format!(
+            "llmbridge-matvec-{}-{}",
+            std::process::id(),
+            SERIAL.fetch_add(1, Ordering::Relaxed),
+        ));
+        std::fs::File::create(&path).unwrap().write_all(&b).unwrap();
+        path
+    }
+
+    #[test]
+    fn dequant_matvec_matches_trusted_q8_0_operator() {
+        // 32x4 Q8_0 tensor, scale 1.0 per block, varied int8 weights per row.
+        let (columns, rows) = (32u64, 4u64);
+        let mut payload = Vec::new();
+        for r in 0..rows {
+            payload.extend_from_slice(&[0x00, 0x3c]); // f16 1.0
+            for c in 0..32u8 {
+                payload.push(((r as u8).wrapping_mul(7).wrapping_add(c)) as i8 as u8);
+            }
+        }
+        let path = write_quant_fixture("w", columns, rows, 8, &payload);
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let region = index.tensor("w").unwrap();
+        let input: Vec<f32> = (0..columns).map(|i| (i as f32) * 0.1 - 1.3).collect();
+        let stop = AtomicBool::new(false);
+        let mut r1 = BoundedLocalReader::open(&path, 128, 256).unwrap();
+        let generic = dequant_matvec(region, &mut r1, &input, &stop, 1 << 20).unwrap();
+        let mut r2 = BoundedLocalReader::open(&path, 128, 256).unwrap();
+        let trusted = q8_0_matvec(&index, &mut r2, "w", &input, &stop).unwrap();
+        assert_eq!(
+            generic, trusted,
+            "generic matvec must equal trusted Q8_0 operator"
+        );
+        assert_eq!(generic.len(), rows as usize);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn dequant_matvec_iq4nl_matches_independent_reference() {
+        use crate::native_dequant::iq4nl_reference_block;
+        let (columns, rows) = (32u64, 4u64);
+        let mut payload = Vec::new();
+        let mut ref_rows: Vec<[f32; 32]> = Vec::new();
+        for r in 0..rows {
+            let mut qs = [0u8; 16];
+            for (j, q) in qs.iter_mut().enumerate() {
+                *q = (((r as usize * 13 + j * 7) & 0xff) as u8).rotate_left(1);
+            }
+            payload.extend_from_slice(&[0x00, 0x3c]); // f16 1.0
+            payload.extend_from_slice(&qs);
+            ref_rows.push(iq4nl_reference_block(1.0, &qs));
+        }
+        let path = write_quant_fixture("w", columns, rows, 20, &payload);
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let region = index.tensor("w").unwrap();
+        let input: Vec<f32> = (0..columns).map(|i| ((i % 7) as f32) - 3.0).collect();
+        let mut reader = BoundedLocalReader::open(&path, 64, 128).unwrap();
+        let got = dequant_matvec(
+            region,
+            &mut reader,
+            &input,
+            &AtomicBool::new(false),
+            1 << 20,
+        )
+        .unwrap();
+        let mut max_abs = 0f64;
+        for (r, refrow) in ref_rows.iter().enumerate() {
+            let want: f64 = (0..32).map(|c| refrow[c] as f64 * input[c] as f64).sum();
+            max_abs = max_abs.max((got[r] as f64 - want).abs());
+        }
+        assert!(
+            max_abs < 1e-3,
+            "IQ4_NL matvec vs independent reference max abs = {max_abs}"
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    // Real-model bounded matvec on a genuine rank-2 Q8_0 tensor, cross-checked
+    // against dequantize_rows + an independent FP32 dot. Gated on
+    // LLMBRIDGE_NEMOTRON_DIR; also skip while the shard hash is reading G: to
+    // avoid competing I/O on the slow disk.
+    #[test]
+    fn real_nemotron_latent_up_matvec_matches_dequant_reference() {
+        use crate::gguf_index::SplitGgufIndex;
+        use crate::native_dequant::dequantize_rows;
+        let dir = match std::env::var("LLMBRIDGE_NEMOTRON_DIR") {
+            Ok(d) => d,
+            Err(_) => {
+                eprintln!("skip: LLMBRIDGE_NEMOTRON_DIR unset (real-model matvec test)");
+                return;
+            }
+        };
+        let shards: Vec<String> = (1..=3)
+            .map(|i| {
+                format!("{dir}/NVIDIA-Nemotron-3-Super-120B-A12B-UD-IQ2_XXS-0000{i}-of-00003.gguf")
+            })
+            .collect();
+        let index = SplitGgufIndex::inspect(&shards).expect("real split index");
+        let name = "blk.0.ffn_latent_up.weight"; // [1024, 4096] Q8_0, rank-2
+        let (member, region) = index.tensor(name).expect("latent_up tensor present");
+        assert_eq!(region.ggml_type, 8, "expected Q8_0 latent projection");
+        let columns = region.dimensions[0] as usize;
+        let rows = region.dimensions[1] as usize;
+        let input: Vec<f32> = (0..columns)
+            .map(|i| ((i % 11) as f32 - 5.0) * 0.01)
+            .collect();
+        let stop = AtomicBool::new(false);
+
+        // Reference: read the whole encoded tensor, dequantize to FP32, dot rows.
+        let gi = member.index.as_ref().unwrap();
+        let mut rdr = BoundedLocalReader::open(&member.path, 1 << 16, 1 << 17).unwrap();
+        let mut encoded = Vec::with_capacity(region.byte_len as usize);
+        gi.stream_tensor_cancellable(&mut rdr, name, &stop, |chunk| {
+            encoded.extend_from_slice(chunk);
+            Ok(())
+        })
+        .unwrap();
+        let decoded = dequantize_rows(8, columns as u32, rows as u32, &encoded).unwrap();
+        let mut reference = vec![0f32; rows];
+        for r in 0..rows {
+            let row = &decoded[r * columns..(r + 1) * columns];
+            let sum: f64 = (0..columns).map(|c| row[c] as f64 * input[c] as f64).sum();
+            reference[r] = sum as f32;
+        }
+
+        let mut mv_reader = BoundedLocalReader::open(&member.path, 1 << 16, 1 << 17).unwrap();
+        let got = dequant_matvec(region, &mut mv_reader, &input, &stop, 1 << 20).unwrap();
+        assert_eq!(got.len(), rows);
+        let mut max_abs = 0f64;
+        for (a, b) in got.iter().zip(&reference) {
+            max_abs = max_abs.max((*a as f64 - *b as f64).abs());
+        }
+        assert!(
+            max_abs < 1e-2,
+            "real matvec vs dequant reference max abs = {max_abs}"
+        );
+    }
 
     #[test]
     fn q8_tensor_larger_than_operator_workspace_executes_with_bounded_reads() {

@@ -1,0 +1,110 @@
+{
+  "schema": "llmbridge.linux-authenticated-deadline-validation.v1",
+  "recorded_date": "2026-11-23",
+  "recorded_utc": "2026-11-23T07:08:58Z",
+  "summary": "Deterministic Linux validation that an authenticated lookahead request can make real source-read progress and then have its own deadline expire in-flight without publishing any bytes, with bounded worker termination, zeroed accounting, and successful recovery. Also covers a separate already-expired-request variant and a shutdown-deadlock fix in an existing stress test.",
+  "source": {
+    "branch": "local/streamed-metadata-admission",
+    "commit": "ddf07bfe7698dbf9b9c92fe6b0c37ebd556cbca3",
+    "working_tree_clean_except_untracked": [".vscode/"],
+    "validated_files": {
+      "crates/llmbridge-core/src/local_lookahead.rs": {
+        "git_blob_id": "ce37f1f16543a8dd59cc581a53e1601204f7e32d",
+        "content_sha256": "baa75177f9f980614d8074013733c3e77e5f5b55f2801212be684b4419413538",
+        "note": "content_sha256 equals the working-tree hash the stress runs executed against; file is LF, core.autocrlf=true made no change on commit"
+      }
+    }
+  },
+  "environment": {
+    "host": "WSL2 on Windows 11",
+    "distro": "Ubuntu 26.04.1 LTS",
+    "kernel": "6.18.33.1-microsoft-standard-WSL2",
+    "rustc": "rustc 1.85.1 (4eb161250 2025-03-15)",
+    "cargo": "cargo 1.85.1 (d73d2caf9 2024-12-31)",
+    "cmake": "cmake version 4.2.3",
+    "cc": "cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+    "cpu_cores": 12,
+    "page_size_bytes": 4096,
+    "cargo_target_dir": "$HOME/.cache/llmbridge-wsl-target (non-native) and $HOME/.cache/llmbridge-wsl-target-native (native); isolated from Windows build artifacts"
+  },
+  "authentication": {
+    "path": "BoundedLocalReader::authenticate_model (Linux memfd sealed-metadata, whole-file SHA-256, real verification path)",
+    "fixture": "synthetic 32-byte file 'abcdefghijklmnopqrstuvwxyz012345' created per test; authenticated by its own computed SHA-256",
+    "note": "Validates the deadline/authentication/worker contract at unit level on a synthetic fixture. NOT a full GGUF-model inference run; does not touch models/stories15M-q8_0.gguf."
+  },
+  "commands": [
+    "export CARGO_TARGET_DIR=$HOME/.cache/llmbridge-wsl-target",
+    "cargo fmt --all -- --check",
+    "cargo clippy -p llmbridge-core --no-default-features --all-targets -- -D warnings",
+    "cargo test -p llmbridge-core --no-default-features --lib",
+    "cargo test -p llmbridge-core --no-default-features --lib authenticated_same_request_in_flight_deadline_blocks_publication_and_recovers",
+    "export CARGO_TARGET_DIR=$HOME/.cache/llmbridge-wsl-target-native",
+    "cargo test -p llmbridge-core --features native --lib local_lookahead"
+  ],
+  "results": {
+    "linux_non_native": {
+      "fmt": "pass",
+      "clippy_deny_warnings": "pass",
+      "lib_suite": { "passed": 211, "failed": 0, "ignored": 0, "exit_code": 0 }
+    },
+    "linux_native": {
+      "build": "ok (llama.cpp compiled; finished in 1m 22s)",
+      "lib_local_lookahead": { "passed": 14, "failed": 0, "ignored": 0, "filtered_out": 239, "exit_code": 0 },
+      "includes_tests": [
+        "authenticated_deadline_after_progress_halts_delivery_and_recovers",
+        "authenticated_same_request_in_flight_deadline_blocks_publication_and_recovers"
+      ]
+    },
+    "windows_non_native_regression": {
+      "fmt": "pass",
+      "clippy_deny_warnings": "pass",
+      "lib_suite_repeated": "6 of 6 runs passed",
+      "note": "Windows-side; exercises the bounded_channels deadlock fix (not Linux-gated). Full Windows native lane was not run this session."
+    },
+    "stress": {
+      "full_suite_non_native_runs": { "attempted": 12, "passed": 12, "per_run_timeout_s": 120 },
+      "same_request_test_isolated_runs": { "attempted": 25, "passed": 25, "per_run_timeout_s": 60 },
+      "note": "Finite stress; does not prove absence of every possible race. Before the fix, one parallel full-suite run deadlocked for ~13 minutes (cargo 0 CPU; procfs showed the worker and test threads both parked on futex_do_wait)."
+    }
+  },
+  "same_request_in_flight_deadline": {
+    "test": "authenticated_same_request_in_flight_deadline_blocks_publication_and_recovers",
+    "mechanism": "A test-only after_read coordination hook runs in the worker AFTER the source read completes and records progress (worker_source_bytes stored) but BEFORE the post-read deadline check and any publication. Production passes None for this hook.",
+    "ordering": [
+      "1. Create synthetic fixture; authenticate via real SHA-256 (authenticate_model).",
+      "2. Schedule one range read with an initially-valid monotonic deadline (now + 500ms).",
+      "3. Worker performs the authenticated read; records source progress; reaches the after_read sync point and blocks.",
+      "4. Test confirms real same-request progress (source_bytes_read() > 0, only reachable post-successful-read).",
+      "5. Test crosses the request's own deadline with a bounded wait tied to that deadline (thread::sleep(deadline - now)); no arbitrary sleep, no timeout inflation.",
+      "6. Test releases the worker; its post-read deadline check now observes genuine expiry (Instant::now() >= deadline).",
+      "7. Consumer take() returns Interrupted; zero bytes published after expiry."
+    ],
+    "deadline_state_transitions": "valid at read start -> read completes with real progress -> deadline crossed while parked at sync point -> expired at post-read check -> terminal Interrupted, no publication",
+    "post_expiration_publication_count": 0,
+    "terminal_error_kind": "Interrupted",
+    "distinction_enforced": "The worker performed internal source I/O for the request, but published zero bytes to the consumer after expiry (required property: zero NEW delivery after expiration)."
+  },
+  "resource_safety": {
+    "worker_terminated": true,
+    "worker_panic": null,
+    "outstanding_reads_after_cleanup": 0,
+    "reserved_bytes_after_cleanup": 0,
+    "new_work_rejected_after_expiry": "schedule() returns BrokenPipe",
+    "recovery": "A fresh authenticated worker schedules and reads the same range successfully (bytes 'ijklmnop'); reserved_bytes back to 0.",
+    "deadlock_observed_after_fix": false
+  },
+  "deadlock_fix": {
+    "test": "bounded_channels_saturate_without_unbounded_requests_and_shutdown_drains",
+    "defect": "The before_read test hook blocked on barriers for every read. After release, under parallel load the worker could finish request 1 and re-enter the hook for request 2, blocking on the barrier's next generation while shutdown() waited for the worker to finish and never re-entered the barrier.",
+    "fix": "Block only the first read at the barrier; later reads pass through so the worker drains and shuts down without re-entering the barrier.",
+    "scope": "Test-only. Production never installs a blocking before_read hook (passes None), so production has no such deadlock."
+  },
+  "limitations": [
+    "WSL2 virtualized environment, not bare-metal; kernel is microsoft-standard-WSL2.",
+    "Deadline/authentication/worker contract validated on a synthetic 32-byte fixture via the real SHA-256 memfd path; NOT a full GGUF-model inference run.",
+    "source_bytes_read() counts include authentication whole-file hashing reads; the proof the same request completed a real read is that the after_read sync point is reached (only post-successful-read).",
+    "Finite stress (12 full-suite + 25 isolated) does not prove absence of every possible race.",
+    "Windows regression this session covered the non-native lib suite and clippy only; the full Windows native lane was not executed.",
+    "No 2 GB / dual-core physical hardware feasibility claim is made here."
+  ]
+}

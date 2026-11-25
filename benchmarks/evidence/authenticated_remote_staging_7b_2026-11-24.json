@@ -1,0 +1,150 @@
+{
+  "artifact": "authenticated_remote_staging_7b",
+  "utc": "2026-11-24T14:01:57Z",
+  "branch": "local/streamed-metadata-admission",
+  "git": {
+    "feat_remote_commit": "6d1040d",
+    "feat_cli_commit": "a87574a",
+    "parent_pushed_checkpoint": "1677262",
+    "note": "CLI + range_server built from a87574a with --features remote (native default also on). Model served over a localhost HTTP Range server; staged through the implemented adapter; no fabricated transfer."
+  },
+  "scope": "Genuine end-to-end validation of the vendor-neutral remote staging pipeline: remote (localhost HTTP Range) -> bounded transfer -> whole-file SHA-256 verification -> atomic local publication -> authenticated Mode B inference, with output parity against direct-local Mode B. Also summarises the deterministic adversarial transport/staging test suite and regressions. HTTPS-to-public-internet and S3 are deferred (documented).",
+  "environment": {
+    "host": "WSL2 (not bare metal)",
+    "kernel": "6.18.33.1-microsoft-standard-WSL2",
+    "logical_cpus": 12,
+    "mem_total_mib": 6834,
+    "filesystem": "model + staging on ext4 (/home, /dev/sdc); repo on /mnt/e (NTFS via WSL)",
+    "rustc": "1.85.1",
+    "cargo": "1.85.1",
+    "transport": "std-only HTTP/1.1 Range adapter (crate feature `remote`); no TLS, no async runtime, no new dependencies"
+  },
+  "adapter": {
+    "type": "HttpRangeSource (http scheme only)",
+    "server": "examples/range_server.rs (std-only loopback HTTP/1.1 Range file server)",
+    "endpoint": "http://127.0.0.1:38217/model",
+    "allow_private_endpoints": true,
+    "comment": "Loopback is permitted only via the explicit trusted-endpoint opt-in (--allow-private); the default policy rejects private/loopback/link-local targets (SSRF guard)."
+  },
+  "model": {
+    "repo": "bartowski/Qwen2.5-7B-Instruct-GGUF",
+    "revision": "8911e8a47f92bac19d6f5c64a2e2095bd2f7d031",
+    "file": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+    "trusted_size_bytes": 4683074240,
+    "trusted_sha256": "65b8fcd92af6b4fefa935c625d1ac27ea29dcb6ee14589c55a8f115ceaaa1423",
+    "committed_as_binary": false,
+    "already_present": "re-used the locally verified file from the prior session; not re-downloaded over the internet"
+  },
+  "transfer": {
+    "command": "llmbridge stage http://127.0.0.1:38217/model --sha256 <sha> --size 4683074240 --output /home/smshagor/staged-qwen.gguf --chunk-mb 8 --allow-private --staging-dir /home/smshagor",
+    "chunk_bytes": 8388608,
+    "stage_exit": 0,
+    "bytes_transferred": 4683074240,
+    "chunks_transferred": 559,
+    "chunks_resumed": 0,
+    "elapsed_s": 18.554,
+    "object_validator_etag": "\"range-server-v1\"",
+    "retry_traffic": "none observed (localhost, no transient errors)",
+    "published_sha256": "65b8fcd92af6b4fefa935c625d1ac27ea29dcb6ee14589c55a8f115ceaaa1423",
+    "published_size_bytes": 4683074240,
+    "published_equals_original_bytewise": true,
+    "leftover_part_or_state_files": 0,
+    "original_untouched": true
+  },
+  "staging_properties_verified": {
+    "whole_file_sha256_gates_publication": true,
+    "atomic_publication": "rename within staging dir + directory fsync",
+    "private_part_file": "0600 + O_NOFOLLOW",
+    "resume_sidecar": "digest+size-bound completed-chunk bitmap (LBPART1 header)",
+    "fail_closed_on_mismatch": "partial/corrupt/mismatched file never published",
+    "no_original_deletion": true
+  },
+  "inference": {
+    "common": "taskset -c 0,1 llmbridge chat <model> --prompt 'The capital of France is' --max-tokens 8 --ctx 128 --threads 2 --backend streamed --metrics --sha256 <sha> --address-space-mb 2048 --workspace-mb 48 --cache-mb 32 --snapshot-reuse",
+    "staged_mode_b": {
+      "model": "/home/smshagor/staged-qwen.gguf (remote-acquired, published)",
+      "exit": 0,
+      "output": " Paris. It is located in the northern",
+      "ttft_first_logits_s": 24.473049370,
+      "decode_tokens_per_second": 0.265822401282239,
+      "total_s": 50.818438788,
+      "peak_rss_bytes": 112807936,
+      "integrity_verified": 1,
+      "blocks_verified": 774336,
+      "sha256_match": true,
+      "source_bytes_read": 55429456064,
+      "cache_block_hits": 791684,
+      "cache_block_misses": 774336
+    },
+    "direct_local_mode_b": {
+      "model": "/home/smshagor/Qwen2.5-7B-Instruct-Q4_K_M.gguf (original)",
+      "exit": 0,
+      "output": " Paris. It is located in the northern",
+      "ttft_first_logits_s": 24.443197417,
+      "decode_tokens_per_second": 0.26927163709460455,
+      "total_s": 50.458691279,
+      "peak_rss_bytes": 112807936,
+      "integrity_verified": 1,
+      "blocks_verified": 774336,
+      "sha256_match": true
+    },
+    "output_parity": "identical (bit-for-bit generated text, staged vs direct)",
+    "interpretation": "As expected (master spec §14), staging does not speed up local decode (staged and direct Mode B are within run-to-run noise). The benefit is paying the remote transfer once (18.55 s) rather than on every inference pass; decode remains the local out-of-core re-stream cost."
+  },
+  "security_tests": {
+    "transport": [
+      "valid_range_download_roundtrip_and_identity",
+      "unexpected_200_is_rejected",
+      "wrong_content_range_total_is_object_changed",
+      "content_length_mismatch_rejected",
+      "gzip_encoding_rejected",
+      "redirect_loop_exhausts",
+      "transient_500_then_success_retries",
+      "persistent_503_exhausts_retries",
+      "truncated_body_is_short_read_then_retry_exhausted",
+      "private_endpoint_rejected_without_opt_in",
+      "https_scheme_is_unsupported",
+      "range_overflow_rejected",
+      "cancellation_during_fetch_is_reported",
+      "credentials_are_dropped_on_cross_host_redirect"
+    ],
+    "staging": [
+      "full_download_verifies_and_publishes_atomically",
+      "wrong_sha_fails_closed_and_does_not_publish",
+      "wrong_expected_size_is_object_changed",
+      "resume_completes_after_interruption",
+      "corrupted_resume_state_is_caught_by_whole_file_hash",
+      "output_path_traversal_rejected",
+      "existing_output_is_not_overwritten",
+      "symlink_output_rejected"
+    ],
+    "result": "22 passed; 0 failed"
+  },
+  "regressions": {
+    "fmt_check_exit": 0,
+    "clippy_default_all_targets_D_warnings_exit": 0,
+    "clippy_native_all_targets_D_warnings_exit": 0,
+    "clippy_remote_all_targets_D_warnings_exit": 0,
+    "no_default_features_core_build_exit": 0,
+    "native_lib_tests": "277 passed; 0 failed",
+    "remote_lib_tests": "22 passed; 0 failed",
+    "cli_default_build_exit": 0,
+    "cpp_native_build": "compiled as part of the release build (build.rs builds pinned llama.cpp/ggml)",
+    "windows_msvc_native": "not exercised this session; validated on WSL2/Linux only"
+  },
+  "resource_limits": {
+    "max_chunk_bytes": 8388608,
+    "staging_disk_overhead": "one whole-model .part during transfer (sparse pre-allocated), removed on publish",
+    "address_space_mb": 2048,
+    "peak_rss_bytes": 112807936,
+    "bounded_response_buffer": "one chunk buffer per transfer; bounded header budget 64 KiB; no model-sized allocation"
+  },
+  "limitations": [
+    "Public TLS/HTTPS not implemented: adapter accepts only the http scheme; a TLS-terminating proxy or a future feature is needed for public HTTPS. The genuine 7B experiment therefore used a localhost HTTP Range server, which exercises the full transport/staging/verify/publish/Mode-B contract deterministically.",
+    "S3-compatible adapter deferred: the RemoteSource trait is provider-neutral and ready for one, but no S3 adapter is implemented or validated (needs a maintained SDK and credentials/endpoint not deterministically testable). Not claimed as production-ready.",
+    "WSL2, not bare metal.",
+    "Windows MSVC native path not exercised this session.",
+    "Staging requires the whole model to fit on the staging filesystem; this is not unbounded model-size support and does not add remote computation."
+  ],
+  "classification": "COMPLETE (evidence-backed) for: vendor-neutral RemoteSource contract, strict HTTP Range adapter, object-version binding, bounded resumable fail-closed local staging with atomic publication, Mode B integration, genuine localhost 7B staged inference with bit-identical parity to direct-local, adversarial transport/staging tests, and regressions. DEFERRED (documented): public TLS/HTTPS and the S3-compatible adapter."
+}

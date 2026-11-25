@@ -160,6 +160,17 @@ mod tests {
         let mut pending = queue.request(100).unwrap();
         let refresh = |n| {
             value.store(n, Ordering::Release);
+            // The gate re-samples only when the sample_interval (1ns here) has
+            // elapsed since the last sample. On coarse-granularity monotonic
+            // clocks (notably Windows `Instant`) two rapid calls can read the
+            // same instant (0ns elapsed), so the throttle would skip sampling and
+            // reuse a stale value. Spin until the clock advances past the interval
+            // so every refresh deterministically re-samples. This changes no
+            // assertion; it only removes a cross-platform timing flake.
+            let t = Instant::now();
+            while t.elapsed() < Duration::from_nanos(1) {
+                std::hint::spin_loop();
+            }
             gate.refresh(&queue);
             gate.snapshot().paused
         };

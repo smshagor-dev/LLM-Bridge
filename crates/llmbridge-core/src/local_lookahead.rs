@@ -105,7 +105,7 @@ pub struct LookaheadFinish {
 }
 impl LocalLookahead {
     pub fn start(reader: BoundedLocalReader, limits: LookaheadLimits) -> io::Result<Self> {
-        Self::start_internal(reader, limits, None)
+        Self::start_internal(reader, limits, None, None)
     }
     #[cfg(test)]
     fn start_with_test_hook(
@@ -113,12 +113,23 @@ impl LocalLookahead {
         limits: LookaheadLimits,
         hook: Box<dyn Fn() -> io::Result<()> + Send>,
     ) -> io::Result<Self> {
-        Self::start_internal(reader, limits, Some(hook))
+        Self::start_internal(reader, limits, Some(hook), None)
+    }
+    /// Test-only: run `after_read` once the worker has read and recorded source
+    /// progress but before the post-read deadline check and any publication.
+    #[cfg(all(test, target_os = "linux"))]
+    fn start_with_after_read_hook(
+        reader: BoundedLocalReader,
+        limits: LookaheadLimits,
+        after_read: Box<dyn Fn() + Send>,
+    ) -> io::Result<Self> {
+        Self::start_internal(reader, limits, None, Some(after_read))
     }
     fn start_internal(
         reader: BoundedLocalReader,
         limits: LookaheadLimits,
         before_read: Option<Box<dyn Fn() -> io::Result<()> + Send>>,
+        after_read: Option<Box<dyn Fn() + Send>>,
     ) -> io::Result<Self> {
         let chunk = reader.allocated_chunk_bytes();
         if limits.worker_stack_bytes < MIN_LOOKAHEAD_WORKER_STACK_BYTES {
@@ -174,6 +185,7 @@ impl LocalLookahead {
             .spawn(move || {
                 let mut reader = reader;
                 let before_read = before_read;
+                let after_read = after_read;
                 while let Ok(mut req) = requests.recv() {
                     add_nanos(&worker_queue_wait, req.queued_at.elapsed());
                     let result = (|| {
@@ -223,6 +235,12 @@ impl LocalLookahead {
                         bytes.copy_from_slice(slice);
                         add_nanos(&worker_copy_time, copy_started.elapsed());
                         worker_source_bytes.store(reader.disk_bytes_read(), Ordering::Release);
+                        // Test-only coordination point: the real source read has
+                        // completed and progress is recorded, but nothing has been
+                        // published to the consumer yet. Production passes None.
+                        if let Some(hook) = after_read.as_ref() {
+                            hook();
+                        }
                         if worker_cancel.load(Ordering::Acquire)
                             || deadline.is_some_and(|d| Instant::now() >= d)
                         {
@@ -641,6 +659,12 @@ mod tests {
         let release = Arc::new(std::sync::Barrier::new(2));
         let worker_entered = Arc::clone(&entered);
         let worker_release = Arc::clone(&release);
+        // Hold only the first read at the barrier so the queue-saturation window
+        // stays open; later reads pass through. Re-entering the barrier on a
+        // second read would deadlock against shutdown, which waits for the worker
+        // to finish while never arriving at the barrier's next generation.
+        let first_read = Arc::new(AtomicBool::new(true));
+        let worker_first_read = Arc::clone(&first_read);
         let mut worker = LocalLookahead::start_with_test_hook(
             f.reader(),
             LookaheadLimits {
@@ -650,8 +674,10 @@ mod tests {
                 worker_stack_bytes: TEST_WORKER_STACK,
             },
             Box::new(move || {
-                worker_entered.wait();
-                worker_release.wait();
+                if worker_first_read.swap(false, Ordering::AcqRel) {
+                    worker_entered.wait();
+                    worker_release.wait();
+                }
                 Ok(())
             }),
         )
@@ -780,10 +806,32 @@ mod tests {
         assert!(worker.take(|| false).is_err());
         assert_eq!(worker.reserved_bytes(), 0);
         drop(worker);
+        // Deterministically order the source mutation before the worker's read so
+        // the rejection proves mutation detection, not a lucky read/write race.
         let f = Fixture::new();
-        let worker = f.start(8, 1);
+        let entered = Arc::new(std::sync::Barrier::new(2));
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let worker_entered = Arc::clone(&entered);
+        let worker_release = Arc::clone(&release);
+        let worker = LocalLookahead::start_with_test_hook(
+            f.reader(),
+            LookaheadLimits {
+                staging_bytes: TEST_FIXED_OVERHEAD + 8,
+                max_outstanding_reads: 1,
+                fixed_overhead_bytes: TEST_FIXED_OVERHEAD,
+                worker_stack_bytes: TEST_WORKER_STACK,
+            },
+            Box::new(move || {
+                worker_entered.wait();
+                worker_release.wait();
+                Ok(())
+            }),
+        )
+        .unwrap();
         worker.schedule(0, 8, 0, 16, None).unwrap();
+        entered.wait(); // worker is parked at before-read, prior to any OS read
         fs::write(&f.0, b"replacement contents different").unwrap();
+        release.wait(); // the read now observes the mutated source, never a race
         assert_eq!(
             worker.take(|| false).unwrap_err().kind(),
             io::ErrorKind::InvalidData
@@ -879,6 +927,176 @@ mod tests {
             io::ErrorKind::InvalidData
         );
         drop(staged);
+        assert_eq!(worker.reserved_bytes(), 0);
+    }
+
+    // Deterministically proves authenticated deadline behaviour *after* a real
+    // source read has made progress (not a deadline that expires before any
+    // read). An already-past Instant is monotonic, so expiry is observed without
+    // timeouts or sleeps. Asserts: no bytes are published for the expired
+    // request, no further work is accepted, the worker terminates with zero
+    // outstanding reads and reservations, and a fresh worker recovers.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn authenticated_deadline_after_progress_halts_delivery_and_recovers() {
+        let f = Fixture::new();
+        let digest = format!("{:x}", Sha256::digest(fs::read(&f.0).unwrap()));
+        let authenticated = || {
+            let mut reader = f.reader();
+            reader
+                .authenticate_model(&digest, 8, 128 * 1024, || false)
+                .unwrap();
+            LocalLookahead::start(
+                reader,
+                LookaheadLimits {
+                    staging_bytes: TEST_FIXED_OVERHEAD + 8,
+                    max_outstanding_reads: 1,
+                    fixed_overhead_bytes: TEST_FIXED_OVERHEAD,
+                    worker_stack_bytes: TEST_WORKER_STACK,
+                },
+            )
+            .unwrap()
+        };
+
+        let mut worker = authenticated();
+        // 1) A genuine authenticated read completes and reaches the consumer.
+        worker.schedule(8, 8, 8, 16, None).unwrap();
+        let progressed = worker.take_exact(8, 8, || false).unwrap();
+        assert_eq!(progressed.bytes(), b"ijklmnop");
+        assert!(
+            worker.source_bytes_read() > 0,
+            "authenticated read must touch the verified source before the deadline"
+        );
+        drop(progressed); // release the lease so the next request can be admitted
+
+        // 2) After that progress, a request whose deadline has already passed is
+        //    cut off at read time and never publishes bytes.
+        worker.schedule(8, 8, 8, 16, Some(Instant::now())).unwrap();
+        assert_eq!(
+            worker.take(|| false).unwrap_err().kind(),
+            io::ErrorKind::Interrupted
+        );
+
+        // 3) No new consumer delivery is accepted once expiry has been observed.
+        assert_eq!(
+            worker.schedule(8, 8, 8, 16, None).unwrap_err().kind(),
+            io::ErrorKind::BrokenPipe
+        );
+
+        // 4) The worker terminates with zero outstanding reads and reservations.
+        let finish = worker.shutdown();
+        assert!(finish.worker_terminated);
+        assert_eq!(finish.reserved_bytes, 0);
+        assert_eq!(finish.outstanding_reads, 0);
+        assert!(finish.worker_panic.is_none());
+
+        // 5) Recovery: a fresh authenticated worker reads successfully afterward.
+        let worker = authenticated();
+        worker.schedule(8, 8, 8, 16, None).unwrap();
+        assert_eq!(
+            worker.take_exact(8, 8, || false).unwrap().bytes(),
+            b"ijklmnop"
+        );
+        assert_eq!(worker.reserved_bytes(), 0);
+    }
+
+    // Deterministically proves that a request can begin validly, make real
+    // authenticated source-read progress, and then have its deadline expire
+    // *during the same request* before any bytes are published. A test-only
+    // coordination point parks the worker after the read (progress recorded) but
+    // before the post-read deadline check; the test then crosses the request's
+    // own deadline with a bounded wait tied to that deadline (no arbitrary sleep,
+    // no timeout inflation) and resumes the worker, which observes genuine expiry.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn authenticated_same_request_in_flight_deadline_blocks_publication_and_recovers() {
+        let f = Fixture::new();
+        let digest = format!("{:x}", Sha256::digest(fs::read(&f.0).unwrap()));
+
+        // The worker signals once it has read and recorded source progress, then
+        // blocks until the test releases it (unbounded channels never block send).
+        let (reached_tx, reached_rx) = mpsc::channel::<()>();
+        let (resume_tx, resume_rx) = mpsc::channel::<()>();
+
+        let mut reader = f.reader();
+        reader
+            .authenticate_model(&digest, 8, 128 * 1024, || false)
+            .unwrap();
+        let mut worker = LocalLookahead::start_with_after_read_hook(
+            reader,
+            LookaheadLimits {
+                staging_bytes: TEST_FIXED_OVERHEAD + 8,
+                max_outstanding_reads: 1,
+                fixed_overhead_bytes: TEST_FIXED_OVERHEAD,
+                worker_stack_bytes: TEST_WORKER_STACK,
+            },
+            Box::new(move || {
+                let _ = reached_tx.send(());
+                let _ = resume_rx.recv();
+            }),
+        )
+        .unwrap();
+
+        // The deadline is valid when the read starts, so the read completes and
+        // makes real source progress for this same request.
+        let deadline = Instant::now() + std::time::Duration::from_millis(500);
+        worker.schedule(8, 8, 8, 16, Some(deadline)).unwrap();
+
+        // The worker has read and recorded progress but published nothing yet.
+        reached_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("worker must reach the post-read sync point after real progress");
+        assert!(
+            worker.source_bytes_read() > 0,
+            "the same request must have completed a real authenticated source read"
+        );
+
+        // Cross this request's own deadline with a bounded wait, then resume so
+        // the worker's post-read deadline check observes genuine expiry.
+        let now = Instant::now();
+        if now < deadline {
+            thread::sleep(deadline - now);
+        }
+        let _ = resume_tx.send(());
+
+        // No bytes are published after expiry; the consumer sees the terminal error.
+        assert_eq!(
+            worker.take(|| false).unwrap_err().kind(),
+            io::ErrorKind::Interrupted
+        );
+        // No new work is accepted once expiry has been observed.
+        assert_eq!(
+            worker.schedule(8, 8, 8, 16, None).unwrap_err().kind(),
+            io::ErrorKind::BrokenPipe
+        );
+
+        // Bounded worker termination with zero outstanding reads and reservations.
+        let finish = worker.shutdown();
+        assert!(finish.worker_terminated);
+        assert_eq!(finish.reserved_bytes, 0);
+        assert_eq!(finish.outstanding_reads, 0);
+        assert!(finish.worker_panic.is_none());
+
+        // Recovery: a fresh authenticated worker reads successfully afterward.
+        let mut reader = f.reader();
+        reader
+            .authenticate_model(&digest, 8, 128 * 1024, || false)
+            .unwrap();
+        let worker = LocalLookahead::start(
+            reader,
+            LookaheadLimits {
+                staging_bytes: TEST_FIXED_OVERHEAD + 8,
+                max_outstanding_reads: 1,
+                fixed_overhead_bytes: TEST_FIXED_OVERHEAD,
+                worker_stack_bytes: TEST_WORKER_STACK,
+            },
+        )
+        .unwrap();
+        worker.schedule(8, 8, 8, 16, None).unwrap();
+        assert_eq!(
+            worker.take_exact(8, 8, || false).unwrap().bytes(),
+            b"ijklmnop"
+        );
         assert_eq!(worker.reserved_bytes(), 0);
     }
 }

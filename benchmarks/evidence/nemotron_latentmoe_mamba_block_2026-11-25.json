@@ -1,0 +1,146 @@
+{
+  "title": "Nemotron 3 Super 120B-A12B (nemotron_h_moe): LatentMoE expert FFN + Mamba-2 block assembly",
+  "date": "2026-11-25",
+  "author": "LLM Bridge",
+  "scope": "Executable architecture-level modules with independent FP64 validation. This is component-level validation only; it is NOT a full 120B inference run (see full_model_inference_status).",
+  "git": {
+    "branch": "local/streamed-metadata-admission",
+    "head": "a9da632",
+    "local_only_unpushed": true,
+    "relevant_commits": [
+      {"hash": "a9da632", "summary": "feat(mamba2): assemble complete Mamba-2 block from conv + SSM cores"},
+      {"hash": "45a045c", "summary": "feat(moe): executable Nemotron LatentMoE expert FFN with f64 oracle"},
+      {"hash": "ce35dc6", "summary": "fix(moe): nemotron LatentMoE routing uses sigmoid gating, not softmax"},
+      {"hash": "5e33df0", "summary": "feat(mamba2): selective state-space (SSM) scan with recurrent state"},
+      {"hash": "53478be", "summary": "feat(mamba2): causal depthwise convolution with persistent state"},
+      {"hash": "df0fd4f", "summary": "feat(native): type-generic bounded quantized matrix-vector product"},
+      {"hash": "27ff12f", "summary": "feat(native): pinned-GGML IQ2_XXS/IQ4_NL dequantization"},
+      {"hash": "d729b5b", "summary": "feat(core): multi-shard GGUF indexing + IQ2_XXS/IQ4_NL geometry"}
+    ]
+  },
+  "pinned_reference": {
+    "repo": "ggml-org/llama.cpp",
+    "revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+    "checkout": "build/reference/",
+    "authoritative_sources": [
+      "build/reference/src/models/nemotron-h-moe.cpp (FFN sub-layer wiring: shared expert + latent projections + MoE)",
+      "build/reference/src/llama-graph.cpp build_moe_ffn (per-expert math, gating, selection bias, norm, scale)",
+      "build/reference/src/models/mamba-base.cpp:153 build_mamba2_layer (Mamba-2 block wiring)",
+      "build/reference/ggml/src/ggml-cpu/ops.cpp:9943 ssm_conv, :10155 ssm_scan (kernel math)"
+    ]
+  },
+  "latentmoe_ffn": {
+    "module": "crates/llmbridge-core/src/latent_moe_ffn.rs",
+    "gating": "SIGMOID (LLAMA_EXPERT_GATING_FUNC_TYPE_SIGMOID) — never softmax",
+    "exact_recipe": [
+      "router_logits = ffn_gate_inp . x        (on the full n_embd input)",
+      "routing = route_sigmoid_topk(router_logits, cfg, ffn_exp_probs_b)",
+      "shexp = ffn_down_shexp . relu2(ffn_up_shexp . x)   (shared expert, on full x)",
+      "lat = ffn_latent_down . x                (n_embd -> n_latent)",
+      "per selected expert e: u = relu2(ffn_up_exps[e] . lat); d = ffn_down_exps[e] . u; moe += weight[e] * d",
+      "moe = ffn_latent_up . moe                (n_latent -> n_embd)",
+      "ffn_out = moe + shexp                    (block adds the residual afterwards)"
+    ],
+    "expert_activation": "squared ReLU relu(v)^2 (LLM_FFN_RELU_SQR), up+down, NO gate",
+    "selection_bias": "ffn_exp_probs_b affects ranking only; expert weights come from the UNBIASED sigmoid probabilities",
+    "weight_norm": "sum clamped to F16 minimum 6.103515625e-5 then divide",
+    "weight_scale": 5.0,
+    "config_nemotron": {"n_expert": 512, "n_expert_used": 22, "weights_norm": true, "weights_scale": 5.0},
+    "accumulation": "f32 matvec (mirrors ggml CPU path); only selected experts evaluated (sparse compute)",
+    "independent_validation": {
+      "oracle": "separate FP64 oracle in latent_moe_ffn.rs tests (no shared code with the production path)",
+      "output_tolerances_met": {"max_abs": "< 1e-3", "rmse": "< 1e-4"},
+      "deterministic_fixtures_source_linked": [
+        "multiple_experts_match_oracle_with_metrics: separated router -> selected expert_ids = [15,14,13,12,11]; normalized+scaled weights sum = 5.0",
+        "real_nemotron_config_shapes_route_22_of_512: 22 of 512 selected; weights sum = 5.0; matches sigmoid oracle",
+        "single_selected_expert_matches_oracle: n_expert_used=1 -> single weight = 5.0",
+        "selection_bias_changes_rank_but_not_weight_value: bias pulls expert 0 to rank 0; its weight stays the unbiased sigmoid prob in (0,1]",
+        "squared_relu_zeroes_negative_preactivations: negative up-projection -> routed path vanishes, output == shared expert alone"
+      ],
+      "regression_against_old_defect": "regression_sigmoid_differs_from_softmax_defect: production matches the sigmoid oracle (max_abs < 1e-3) and is NOT the softmax oracle (diff > 1e-3); sigmoid and softmax pick different weights"
+    },
+    "test_count": 9,
+    "all_pass": true
+  },
+  "mamba2_block": {
+    "module": "crates/llmbridge-core/src/mamba2_block.rs",
+    "reuses_validated_cores": ["crates/llmbridge-core/src/mamba2_conv.rs", "crates/llmbridge-core/src/mamba2_ssm.rs"],
+    "exact_composition": [
+      "zxBCdt = ssm_in . cur (in-projection to d_in_proj = 2*d_inner + 2*n_group*d_state + n_head)",
+      "split: z = [0,d_inner); xBC = [d_inner, d_inner + (d_inner + 2*n_group*d_state)); dt = last n_head",
+      "xBC = ssm_conv(conv_state, xBC) over d_inner + 2*n_group*d_state channels",
+      "xBC = silu(xBC + conv_bias)",
+      "split xBC: x = d_inner; B = n_group*d_state; C = n_group*d_state",
+      "dt = dt + dt_bias",
+      "y = ssm_scan(ssm_state, x, dt, A, B, C)  (scalar-A Mamba-2 branch; softplus(dt) inside)",
+      "y = y + x * D  (per-head D skip, broadcast over head_dim)",
+      "y = silu(z) * y  (swiglu_split gate)",
+      "y = grouped_rms_norm(y) * ssm_norm  (n_group groups, eps = ssm_norm_eps)",
+      "cur = ssm_out . y  (out-projection to n_embd)"
+    ],
+    "state": "persistent, session-local conv state (d_conv-1 per channel) + SSM state (n_head*head_dim*d_state); dt bias and gating each applied exactly once",
+    "independent_validation": {
+      "oracle": "wholly separate FP64 re-derivation (its own conv and scan) in mamba2_block.rs tests",
+      "output_tolerances_met": {"max_abs": "< 1e-3", "rmse": "< 1e-4"},
+      "final_ssm_state_match": "< 1e-3",
+      "prefill_equals_sequential_decode": "max_abs < 1e-5 and final state identical",
+      "additional": ["works_without_grouped_norm", "reset_and_session_isolation", "invalid_inputs_and_shapes_are_rejected"]
+    },
+    "test_count": 5,
+    "all_pass": true
+  },
+  "sparse_quantized_expert_reads": {
+    "status": "primitive ready, native end-to-end wiring not yet connected",
+    "available": "llmbridge_dequant_matvec_v1 + inference::dequant_matvec (bounded, streams one row at a time, double-accumulate; validated vs trusted Q8_0 op and independent IQ4_NL reference)",
+    "not_done": "resolving each selected expert's packed tensor subrange via SplitGgufIndex and streaming only its encoded blocks has NOT been assembled; requires the 49 GB model + native feature and cannot be validated safely on this host",
+    "note": "the latent_moe_ffn composition evaluates only the selected experts (sparse compute); the dense f32 weights there are the validation substrate"
+  },
+  "shard_sha256": {
+    "method": "streaming sha256sum on G: (bounded memory), single pass",
+    "measured": "LOCAL ONLY — these are locally-computed digests of the on-disk shards; they are NOT compared against an authoritative upstream manifest, so this does not constitute upstream authentication",
+    "started_utc": "2026-11-25T04:15:21Z",
+    "completed_utc": "2026-11-25T08:17:08Z",
+    "wall_clock": "241m47s (slow G: disk)",
+    "digests": {
+      "NVIDIA-Nemotron-3-Super-120B-A12B-UD-IQ2_XXS-00001-of-00003.gguf": "607b48a77949bea7e633c6116ce8f18105a60cd8cb7117201dc6730fbb47b9c5",
+      "NVIDIA-Nemotron-3-Super-120B-A12B-UD-IQ2_XXS-00002-of-00003.gguf": "5dc451608821796ac93758c80b50414f32fc24aae0e94a3d130af9de5c17edb2",
+      "NVIDIA-Nemotron-3-Super-120B-A12B-UD-IQ2_XXS-00003-of-00003.gguf": "f1e50ef64f8047f726ba58c0ec2b8cc27c543d69dd8dcb4864bab7ddfe03bafc"
+    },
+    "upstream_comparison": "PENDING — no authoritative upstream per-shard SHA-256 for this UD-IQ2_XXS quantization has been obtained; local digests recorded for integrity tracking only"
+  },
+  "memory_and_source_io": {
+    "new_modules": "pure f32 arithmetic on small in-memory fixtures; no disk reads, no model residency",
+    "host_ram": "~13.8 GB total, ~2 GB free",
+    "model_size": "~49 GB across 3 shards",
+    "sha_job": "streaming single-pass read; no competing heavy G: reads were run",
+    "shards_untouched": "no shard was modified, relocated, concatenated or redownloaded"
+  },
+  "regression": {
+    "commands": [
+      {"cmd": "cargo fmt --check -p llmbridge-core", "result": "clean"},
+      {"cmd": "cargo clippy -p llmbridge-core --lib --all-targets -- -D warnings", "result": "clean"},
+      {"cmd": "cargo test -p llmbridge-core --lib", "result": "236 passed; 0 failed"},
+      {"cmd": "cargo build -p llmbridge-core --no-default-features", "result": "builds (new modules are not native-gated)"},
+      {"cmd": "cargo test -p llmbridge-core --lib --features native", "result": "285 passed; 0 failed"}
+    ],
+    "native_lib_tests": "285 passed; 0 failed (no native source changed this round)",
+    "no_tests_weakened": true
+  },
+  "full_model_inference_status": {
+    "attempted": false,
+    "blocked": true,
+    "reasons": [
+      "decoder assembly incomplete: no attention sub-layer yet; no reduced hybrid forward graph; no tokenizer/embedding/output-projection wiring",
+      "sparse quantized expert reads from SplitGgufIndex not connected to native execution",
+      "hardware: ~49 GB model vs ~13.8 GB RAM / ~2 GB free — unsafe to resident-load; no trusted full llama.cpp parity run is runnable here"
+    ],
+    "note": "Validated kernels and assembled blocks are NOT a 120B inference run. No token id or throughput is claimed."
+  },
+  "outstanding_blockers": [
+    "attention sub-layer (per-layer head_count_kv array mixes 0 and 8)",
+    "reduced hybrid forward graph (embedding -> Mamba block -> attention -> LatentMoE FFN -> norm/residual -> output projection) with an independent reference",
+    "native sparse expert streaming (SplitGgufIndex -> dequant_matvec) for real quantized expert tensors",
+    "upstream SHA-256 comparison for the UD-IQ2_XXS shards",
+    "genuine 120B first token (hardware-bound)"
+  ]
+}

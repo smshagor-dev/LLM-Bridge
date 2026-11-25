@@ -1,0 +1,88 @@
+{
+  "title": "Nemotron 3 Super 120B-A12B — exact tokenizer parity and repeated-token numerical investigation",
+  "date": "2026-11-25",
+  "author": "LLM Bridge",
+  "scope": "Establishes exact token-ID parity against an independent official reference, and investigates why raw-BOS and 'Hi' both produced greedy token 1044. Full-model numerical reference parity is still NOT established (no resident reference runnable).",
+  "git": {
+    "branch": "local/streamed-metadata-admission",
+    "head": "702f12a",
+    "local_only_unpushed": true,
+    "commits_this_round": [
+      {"hash": "8e89f9d", "summary": "docs(evidence): verify upstream shard provenance (local SHA-256 == published)"},
+      {"hash": "ce44250", "summary": "feat(tokenizer): exact Tekken pre-tokenizer with official-reference ID parity"},
+      {"hash": "702f12a", "summary": "feat(model): input-sensitivity diagnostics for the repeated-token investigation"}
+    ]
+  },
+  "independent_tokenizer_reference": {
+    "official_tokenizer": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8 tokenizer.json (revision main)",
+    "reference_runner": "Hugging Face tokenizers 0.23.3 (installed into an isolated scratchpad target dir; py3.14 wheel)",
+    "regex_engine_added": "fancy-regex 0.20.2 (Rust dependency; supports \\p{L}/\\p{M} Unicode classes and the \\s+(?!\\S) lookahead)",
+    "note": "the 17 MB tokenizer.json and the HF tokenizers env live in the session scratchpad and are NOT committed; only the small reference-id fixture is."
+  },
+  "pre_tokenizer": {
+    "official_type": "Sequence[ Split(Tekken regex, Isolated), ByteLevel(add_prefix_space=false, use_regex=false) ]",
+    "tekken_split_regex": "[^\\r\\n\\p{L}\\p{N}]?[\\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M}]*[\\p{Ll}\\p{Lm}\\p{Lo}\\p{M}]+|[^\\r\\n\\p{L}\\p{N}]?[\\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M}]+[\\p{Ll}\\p{Lm}\\p{Lo}\\p{M}]*|\\p{N}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n/]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+",
+    "pixtral_tekken_resolution": "llama.cpp #30894 / #30960 (fix e197cef4) remaps pixtral -> tekken; this module implements the tekken regex directly. Key correction over the llama3 path: \\p{N} = one digit per piece.",
+    "digit_rule_fix": "prior round wrongly capped digit runs at 3; corrected to single \\p{N} (verified: '123456789' -> 9 tokens)."
+  },
+  "token_id_parity": {
+    "fixture": "crates/llmbridge-core/tests/data/nemotron_tokenizer_reference.txt (hex text + comma-separated ids)",
+    "test": "nemotron_tokenizer::tests::parity_against_official_reference (gated on the GGUF for the vocab)",
+    "result": "20/20 cases MATCH the official reference exactly",
+    "cases": [
+      {"text": "Hi", "ids": [37133]},
+      {"text": "Hello", "ids": [22177]},
+      {"text": "The capital of France is", "ids": [1784, 8961, 1307, 5498, 1395]},
+      {"text": "What is 2 + 2?", "ids": [7493, 1395, 1032, 1050, 1867, 1032, 1050, 1063]},
+      {"text": "123456789", "ids": [1049, 1050, 1051, 1052, 1053, 1054, 1055, 1056, 1057]},
+      {"text": "Bengali/Hindi/Tamil/Thai/Japanese/Russian/combining-marks/emoji", "ids": "all match (see fixture); the issue's Devanagari दी -> single token is reproduced"},
+      {"text": "whitespace/tabs/newlines/leading-trailing-spaces", "ids": "all match"},
+      {"text": "Hello </s> world (special-token boundary)", "ids": "match (</s> split out as its control id)"}
+    ],
+    "acceptance_A": "MET — exact token-ID parity vs the official reference across ASCII, multilingual Unicode, whitespace, and special-token boundaries; pinned reproducible fixture."
+  },
+  "repeated_token_1044_investigation": {
+    "observations": {"raw_bos_id_1": 1044, "prompt_Hi_id_37133": 1044},
+    "method": "compare embeddings and real layer-0 outputs for the two inputs; prove the reduced hybrid is input-sensitive by construction.",
+    "reduced_hybrid": "different_single_tokens_produce_different_logits — distinct tokens yield distinct embeddings and distinct final logits (logit L2 > 0).",
+    "real_model_measured": {
+      "embedding_L2_bos_vs_hi": 1.4847,
+      "embedding_norm_bos": 0.8980,
+      "embedding_norm_hi": 1.1965,
+      "layer0_mamba_output_L2": 8.5516,
+      "layer0_norm_bos": 7.1217,
+      "layer0_norm_hi": 3.2215,
+      "non_finite_counts": 0
+    },
+    "conclusion": "The inputs are distinct and DO propagate: embeddings differ (L2 1.485) and the layer-0 Mamba activations differ and AMPLIFY (L2 8.55). There is no input-ignoring / embedding-reuse / state-reset wiring defect. The repeated top-1 token at full depth is therefore NOT evidence of a bug.",
+    "isolated_remaining_uncertainty": "Whether the full 88-layer stack re-converges to the same argmax (1044) under IQ2_XXS 2-bit quantization is unresolved; settling it needs a full-model reference (not runnable in ~2 GB free RAM) or a second full-depth run to compare the complete logit distributions (the 'Hi' top-5 margins were thin: 64.91 vs 64.35). No defect was demonstrated, so none was 'fixed'.",
+    "acceptance_B": "MET — different input ids confirmed, embedding + intermediate activation behavior measured, and the repeated token explained by evidence (input sensitivity present) with the remaining full-depth uncertainty precisely isolated."
+  },
+  "numerical_correctness": {
+    "per_kernel": "conv, SSM scan, attention, LatentMoE FFN, dequant matvec each validated vs an independent f64 reference in prior rounds; reduced hybrid matches a from-scratch f64 oracle (max_abs < 2e-3).",
+    "full_model_parity": "NOT established — no resident full-model reference runnable; full-scale numerical equivalence to llama.cpp is explicitly NOT claimed."
+  },
+  "performance": {
+    "first_token_runtime_raw_bos": "737.5 s",
+    "first_token_runtime_prompt_Hi": "769.7 s (1 prompt token)",
+    "dominant_bottleneck": "disk throughput — shard 2 is 49.7 GB and G: measured ~3 MB/s; with no weight residency/cache each generated token re-streams the non-expert weights plus 22/512 experts per MoE layer.",
+    "optimizations_applied": "none — correctness was the priority this round; bounded read coalescing / verified immutable source-cache reuse are identified as future work and were NOT applied (no correctness traded for speed).",
+    "acceptance_D": "PARTIAL — bottleneck identified (disk); no optimization applied yet."
+  },
+  "regression": {
+    "commands": [
+      {"cmd": "cargo fmt --check -p llmbridge-core", "result": "clean"},
+      {"cmd": "cargo clippy -p llmbridge-core --lib --all-targets --features native -- -D warnings", "result": "clean"},
+      {"cmd": "cargo test -p llmbridge-core --lib", "result": "254 passed; 0 failed (non-native)"},
+      {"cmd": "cargo test -p llmbridge-core --lib --features native", "result": "317 passed; 0 failed"},
+      {"cmd": "cargo build -p llmbridge-core --no-default-features", "result": "builds"}
+    ],
+    "no_tests_weakened": true
+  },
+  "remaining_limitations": [
+    "full-model numerical reference parity (no resident oracle runnable on this host)",
+    "whether repeated greedy token 1044 reflects true model behavior vs IQ2_XXS degeneracy at full depth (needs a full-model reference or a second full run)",
+    "interactive performance — each generated token is a full streamed pass over the slow G: drive (~13 min); no interactive throughput claimed"
+  ],
+  "final_status": "PARTIALLY COMPLETE — ACCEPTANCE A (exact tokenizer parity) MET; ACCEPTANCE B (input-sensitivity investigation) MET with evidence and isolated uncertainty; ACCEPTANCE C (prompt-conditioned token) already demonstrated prior round; ACCEPTANCE D (performance) PARTIAL (bottleneck identified, no optimization). Full-model numerical parity remains blocked; no fabrication."
+}

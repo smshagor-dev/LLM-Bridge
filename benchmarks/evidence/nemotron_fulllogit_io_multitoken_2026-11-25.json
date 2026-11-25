@@ -1,0 +1,105 @@
+{
+  "title": "Nemotron 3 Super 120B-A12B — full-logit contrast, source-I/O profile, persistent-state multi-token decoding",
+  "date": "2026-11-25",
+  "author": "LLM Bridge",
+  "scope": "A controlled contrasting-input full-logit comparison, an exact per-token source-read profile, and genuine persistent-state multi-token generation on the real model. Full-model numerical reference parity is still NOT established (no resident reference runnable).",
+  "git": {
+    "branch": "local/streamed-metadata-admission",
+    "head": "d583438",
+    "local_only_unpushed": true,
+    "commits_this_round": [
+      {"hash": "144735f", "summary": "feat(model): source-I/O profile + persistent-state multi-token generation"},
+      {"hash": "d583438", "summary": "test(hybrid): persistent-state split-call equivalence for multi-token decode"},
+      {"hash": "96e4523", "summary": "test(state): deeper multi-token persistence + EOS termination in generate"},
+      {"hash": "124c6fd", "summary": "test(model): real-weight numerical parity for Q5_K and IQ4_NL (gated)"}
+    ],
+    "execution_provenance": "the two-token run executed from the test binary llmbridge_core-777d8b773c built at launch (~commit d583438, before 96e4523 added the EOS early-stop); the EOS change is immaterial to this non-EOS run. Results below are from that binary."
+  },
+  "prompts": {
+    "tokenizer": "exact official parity established previously (20/20); ids below are reference-verified",
+    "Hi": [37133],
+    "note": "step 2's input is the step-1 generated token under advanced recurrent state and position -- a DIFFERENT autoregressive context, NOT a same-position isolated-input test."
+  },
+  "source_io_profile_per_token": {
+    "method": "computed from the tensor table (sizes only; no weight payload read). Each single-token forward reads every recurrent/attention/MoE-non-expert tensor in full, only n_expert_used/n_expert (22/512) of each packed expert tensor, one embedding row, and the output projection once.",
+    "total_mib": 7736.0,
+    "breakdown_mib": {
+      "recurrent_ssm_in_out": 3438.0,
+      "moe_non_expert_latent_shexp_router": 1926.6,
+      "moe_expert_sparse_22_of_512": 1894.9,
+      "output_head": 288.0,
+      "attention_qkvo": 187.0,
+      "embedding_row": 0.002,
+      "norms": 1.391
+    },
+    "effective_throughput_mib_s_at_769_7s": 10.05,
+    "top_three_latency_causes": [
+      "raw disk bandwidth: ~7.6 GiB must be moved per token at ~10 MiB/s on the external G: drive",
+      "recurrent ssm_in/ssm_out Q6_K projections (3.4 GiB/token, 44%)",
+      "MoE non-expert (Q8_0/Q5_K/Q6_K) + sparse expert (IQ2_XXS/IQ4_NL) reads (~3.8 GiB/token combined)"
+    ],
+    "conclusion": "First-token latency is disk-bandwidth-bound: 7736 MiB/token / ~10 MiB/s ~= 770 s, matching the measured 769.7 s."
+  },
+  "io_optimization": {
+    "read_coalescing": "NOT implemented — measurements do not justify it. Each tensor is read exactly once per token in ~64 KiB sequential chunks; coalescing cannot reduce the 7.6 GiB byte volume, and the ~10 MiB/s rate indicates disk bandwidth, not per-read syscall overhead.",
+    "verified_cache": "NOT implemented — there are no repeated reads within a token, and the cross-token working set (7.6 GiB) vastly exceeds any bounded (<=64 MiB) cache admissible within ~2 GiB free RAM; the OS page cache cannot hold it either. A cache would not reduce reads for this model on this host.",
+    "honest_position": "Per the brief, no speculative optimization was added and no speedup invented. The real remedies are faster storage (SSD/NVMe) or enough RAM to hold the hot weights; both are out of scope and out of host budget. Authentication and bounded range reads are unchanged.",
+    "acceptance_B_C": "Reported as measurement-justified NO-OP: coalescing/cache are not warranted for a 7.6 GiB/token working set on this host; no security contract was touched."
+  },
+  "full_logit_contrast": {
+    "method": "persistent-state generate('Hi', n_new=2): step 1 input = prompt token 37133; step 2 input = the step-1 generated token under advanced state/position. Compact per-step diagnostics (top-20, logit-vector L2 NORM, max-abs, non-finite) captured without changing model math. Full logit vectors were NOT retained, so only top-20-scope and per-vector norms are compared (no full-vocab pairwise L2 / cosine).",
+    "status": "PASS",
+    "step0": {"input_ids": [37133], "next_id": 1044, "text": ",", "logit_l2_norm": 17347.59, "max_abs": 64.91, "seconds": 705.7, "top5": [[1044, 64.90741], [1321, 64.351166], [1395, 64.0111], [1319, 63.904255], [1681, 63.526737]], "nonfinite": 0},
+    "step1": {"input_ids": [1044], "next_id": 1032, "text": " ", "logit_l2_norm": 16432.60, "max_abs": 59.15, "seconds": 726.8, "top5": [[1032, 59.146584], [1321, 59.101513], [1278, 58.885372], [1373, 58.364185], [1507, 58.356205]], "nonfinite": 0},
+    "top20_overlap": "2 of 20",
+    "logit_norm_difference": 914.986,
+    "conclusion": "The output distribution clearly evolves as autoregressive context advances: top-1 changes (1044 ',' -> 1032 ' '), top-20 overlap is only 2/20, max-abs drops 64.91 -> 59.15, and the logit-vector norm changes by ~915. This resolves the earlier concern -- the model is NOT stuck on token 1044; feeding 1044 back yields a different next token. This is a context-evolution result, NOT a same-position input-sensitivity experiment (that was shown separately via the embed/layer-0 L2 and the reduced-hybrid structural test)."
+  },
+  "multi_token_generation": {
+    "reduced_fixture_validation": "persistent_state_split_calls_equal_single_call + five_token_stepwise_equals_single_call + concurrent_sessions_are_isolated + reset_restores_fresh_state_exactly (nemotron_hybrid): split/stepwise calls equal single calls in last-position logits (max_abs < 1e-5) and position; sessions are isolated; reset == fresh. Validates persistent recurrent/KV state across call boundaries.",
+    "real_model": {
+      "prompt": "Hi",
+      "prompt_ids": [37133],
+      "token1_id": 1044, "token1_text": ",",
+      "token2_id": 1032, "token2_text": " ",
+      "generated_text": ", ",
+      "final_position": 2,
+      "per_token_seconds": [705.7, 726.8],
+      "total_seconds": 1433.6,
+      "eos": false,
+      "single_persistent_session": true,
+      "exit_code": 0
+    },
+    "acceptance_A": "MET -- two genuine tokens (1044, 1032) generated consecutively through ONE persistent 88-layer streamed session; token 1 fed into step 2; sequence position advanced 1 -> 2; distinct second token confirms real autoregressive feedback (not repeated independent one-token runs).",
+    "acceptance_D": "MET (persistent-state multi-token decoding genuine and resource-safe; ~12 min/token, bandwidth-bound)."
+  },
+  "real_weight_numerical_parity": {
+    "method": "bounded streamed dequant_matvec / PackedExperts vs an independent dequantize_rows + f64 dot over the SAME real tensor bytes (reference does not call the production matvec).",
+    "results": [
+      {"tensor": "blk.7.attn_k.weight", "quant": "Q5_K", "shape": [4096, 256], "max_abs": 7.375e-9, "nonfinite": 0},
+      {"tensor": "blk.1.ffn_down_exps.weight (expert 0)", "quant": "IQ4_NL", "shape": [2688, 1024], "max_abs": 1.835e-9, "nonfinite": 0},
+      {"tensor": "blk.0.ffn_latent_up.weight (prior round)", "quant": "Q8_0", "max_abs": "< 1e-2"},
+      {"tensor": "blk.1.ffn_up_exps.weight expert 0 (prior round)", "quant": "IQ2_XXS", "max_abs": 1.72e-9}
+    ],
+    "acceptance_B_C": "MET -- Q5_K and IQ4_NL real-weight ops match an independent reference to ~1e-9 (plus prior Q8_0 and IQ2_XXS); tensor binding, orientation, block geometry, packed offsets, and reader correctness confirmed on the actual model."
+  },
+  "security": {
+    "preserved": "three-shard SHA-256 provenance, authenticated bounded range reads, SplitGgufIndex bounds, packed-expert slicing, cancellation/deadline, session isolation — all unchanged; no cache/coalescing added that could bypass verification."
+  },
+  "regression": {
+    "commands": [
+      {"cmd": "cargo fmt --check -p llmbridge-core", "result": "clean"},
+      {"cmd": "cargo clippy -p llmbridge-core --lib --all-targets --features native -- -D warnings", "result": "clean"},
+      {"cmd": "cargo test -p llmbridge-core --lib", "result": "256 passed; 0 failed (non-native)"},
+      {"cmd": "cargo test -p llmbridge-core --lib --features native", "result": "324 passed; 0 failed"},
+      {"cmd": "cargo build -p llmbridge-core --no-default-features", "result": "builds"}
+    ],
+    "no_tests_weakened": true
+  },
+  "remaining_limitations": [
+    "full-model numerical reference parity (no resident oracle runnable on this host)",
+    "first-token latency is disk-bandwidth-bound (~7.6 GiB/token at ~10 MiB/s); no bounded in-RAM optimization helps this working set — faster storage or much more RAM is required",
+    "no interactive throughput (~13 min per generated token)"
+  ],
+  "final_status": "PARTIALLY COMPLETE — ACCEPTANCE A (genuine two-token persistent-state generation: 'Hi' -> 1044 ',' -> 1032 ' ') MET; ACCEPTANCE B (logit evolution measured and honestly scoped to top-20 + norms; context-evolution not input-sensitivity) MET; ACCEPTANCE C (real-weight Q5_K + IQ4_NL numerical parity to ~1e-9) MET; ACCEPTANCE D (measured I/O profile preserved, no speculative optimization) MET; ACCEPTANCE E (fmt+clippy clean, 256 non-native + 324 native tests pass, no-default builds) MET. Full-model numerical reference parity remains UNestablished (no resident oracle), and interactive performance remains blocked (~12 min/token, disk-bandwidth-bound). No fabrication; model not declared fully supported."
+}

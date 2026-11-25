@@ -1,0 +1,123 @@
+{
+  "artifact": "llmbridge_native_engine_nemotron30b",
+  "date": "2026-11-25",
+  "status": "PARTIALLY COMPLETE",
+  "summary": "Independence-engine progress on the Nemotron 3 Nano 30B path: an LLM Bridge-owned Q8_0 dequant-matvec kernel (no GGML/FFI) validated on a real Nano tensor and wired into the forward; exact Nano tokenizer parity with no runtime external process; real Windows physical-RAM detection. Remaining quantized types (Q5_0/Q5_1/Q4_K/Q5_K) still use the pinned GGML kernel, so runtime is NOT yet fully GGML-independent.",
+
+  "git": {
+    "branch": "local/streamed-metadata-admission",
+    "base_head_before_work": "e3a76ed598bc0023b10ad2f2bd1616584570f033",
+    "commits": [
+      "13f9722 feat(kernels): LLM Bridge-owned Q8_0 dequant-matvec kernel (no GGML/FFI)",
+      "340ac8b feat(hardware): real Windows physical-RAM and working-set detection",
+      "7c353a7 feat(tokenizer): metadata-prefix load + exact Nano tokenizer parity",
+      "261154c test(memory): make pressure hysteresis test deterministic on coarse clocks"
+    ],
+    "pushed": false
+  },
+
+  "dependency_audit": {
+    "method": "grep of extern \"C\" blocks and used FFI symbols across crates/llmbridge-core/src + build.rs",
+    "production_ffi_symbols": {
+      "llmbridge_dequant_matvec_v1": "GGML to_float + dot; used by inference::dequant_matvec for Nano Q5_0/Q5_1/Q4_K/Q5_K (Q8_0 no longer routes here)",
+      "llmbridge_dequantize_rows_v1": "GGML to_float; used by native_dequant::dequantize_rows for the embedding row and small quantized tensors",
+      "llmbridge_generate_cpu / llmbridge_generate_cpu_polled": "resident llama.cpp generation for the dense Llama/Qwen CLI backend (not the Nano hybrid path)",
+      "llmbridge_generate_streamed_cpu_v2 / _v3 / llmbridge_streamed_forced_logits_v1": "dense-Llama streamed decoder native matvec (not the Nano hybrid path)"
+    },
+    "build_dependency": "build.rs builds native static libs via cmake: llmbridge_native, llama, ggml, ggml-cpu, ggml-base (statically linked; NO subprocess, NO llama.cpp server, NO Ollama)",
+    "classification": {
+      "nano_hybrid_orchestration": "pure Rust (Mamba-2 conv/SSM, attention+RoPE, MoE routing, sparse experts, full forward)",
+      "nano_quant_decode_owned": "Q8_0 (native_kernels::q8_0_dequant_matvec, pure Rust)",
+      "nano_quant_decode_ggml": "Q5_0, Q5_1, Q4_K, Q5_K (still GGML FFI)",
+      "process_level_dependency": "none (no llama.cpp subprocess/server, no Ollama); GGML is a statically-linked in-process kernel + build dependency"
+    }
+  },
+
+  "model": {
+    "path": "E:\\Model\\nvidia_Nemotron-3-Nano-30B-A3B-Q4_K_S.gguf",
+    "file_bytes": 22385593568,
+    "sha256": "bfd41eff6d0ba0595df3f270fb5c37f6afd1016646103d2e32c07a6aae2270bb",
+    "architecture": "nemotron_h_moe (52 blocks: 23 Mamba-2 + 23 MoE + 6 attention)",
+    "tensor_type_histogram": { "F32": 237, "Q5_0": 67, "Q5_1": 39, "Q8_0": 29, "Q4_K": 23, "Q5_K": 6 }
+  },
+
+  "mandatory_A_owned_native_kernel": {
+    "kernel": "native_kernels::q8_0_dequant_matvec (pure Rust, bounded authenticated BoundedLocalReader, no GGML/FFI)",
+    "format": "Q8_0 (f16 block scale + 32 int8)",
+    "wired_into": "nemotron_nano::matvec routes ggml_type==8 to the owned kernel; used in the real forward for output.weight, blk.*.attn_k, ffn_up_shexp, ffn_down_shexp",
+    "validation_tensor": "blk.5.attn_k.weight (Q8_0, columns=2688, rows=256)",
+    "max_abs_vs_ggml": 8.941e-8,
+    "max_abs_vs_fp64_oracle": 9.988e-8,
+    "max_output_magnitude": 0.4228,
+    "tests": [
+      "native_kernels::tests::f16_decode_matches_known_values",
+      "native_kernels::tests::dequantize_row_exact_for_scale_one",
+      "native_kernels::tests::rejects_bad_geometry",
+      "nemotron_nano::tests::owned_q8_0_kernel_matches_ggml_and_fp64_oracle_on_real_nano_tensor (gated)"
+    ],
+    "result": "PASS — owned kernel matches GGML and an independent FP64 oracle to ~1e-7 on a real Nano tensor"
+  },
+
+  "mandatory_B_tokenizer_parity": {
+    "loader": "NemotronTokenizer::from_gguf (self-contained; reads only the GGUF metadata prefix, no external process)",
+    "reference": "tests/data/nemotron_tokenizer_reference.txt (official NVIDIA Nemotron ids via HF tokenizers 0.23.3, committed)",
+    "test": "nemotron_tokenizer::tests::nano_parity_against_official_reference (gated on LLMBRIDGE_NANO_GGUF)",
+    "cases_matched": "20/20 exact, including all ASCII/Latin must-match cases (Hi, Hello, 'The capital of France is', 'What is 2 + 2?', digits, whitespace, tabs/newlines)",
+    "runtime_external_process": "none",
+    "result": "PASS",
+    "note": "The committed reference corpus is ASCII/Latin + whitespace/digits/punctuation. Bangla/Russian/Hindi/emoji reference ids are NOT in the committed fixture, so parity for non-Latin scripts is not asserted here (see limitations)."
+  },
+
+  "mandatory_C_windows_ram_detection": {
+    "implementation": "hardware::profile()/process_memory() Windows branch via kernel32 GlobalMemoryStatusEx + K32GetProcessMemoryInfo (safe FFI, no new crate, no psapi link)",
+    "doctor_json": { "logical_cpus": 12, "total_ram_bytes": 14829105152, "available_ram_bytes_sample": 4030963712 },
+    "process_working_set": "now reported (rss + peak working set) via K32GetProcessMemoryInfo",
+    "test": "hardware::tests::windows_profile_reports_real_physical_ram",
+    "result": "PASS — doctor --json reports valid RAM on the actual Windows host; no fabricated values"
+  },
+
+  "low_memory_fix": {
+    "change": "NemotronTokenizer::from_gguf now reads only the metadata prefix (data_offset bytes) instead of std::fs::read of the whole file",
+    "impact": "Nano tokenizer load dropped from ~990 s (reading 22 GB on a 14 GB host, thrashing) to ~0.21 s; restores the never-resident contract for single-file multi-GB models"
+  },
+
+  "nano_execution": {
+    "note": "The genuine full 52-block forward (prompt 'Hi' -> token 1319 ' (', 98.67 s, ~2.47 GB/token) was recorded in nemotron_nano_30b_ssd_inference_2026-11-25.json BEFORE Q8_0 routing. The owned Q8_0 kernel is validated numerically equivalent to GGML (~1e-7), so forward outputs are unchanged; the full forward was not re-timed with the owned kernel in this pass.",
+    "correctness": "genuine-but-UNVALIDATED end-to-end (no runnable nemotron_h_moe reference; RoPE convention assumed) — unchanged from prior evidence"
+  },
+
+  "hardware": {
+    "cpu": "12th Gen Intel(R) Core(TM) i5-12400F",
+    "physical_cores": 6, "logical_threads": 12,
+    "native_profile": "x86-avx2 (sse2/sse42/avx/avx2/fma/f16c/bmi2 all present)",
+    "os_visible_physical_ram_bytes": 14829105152,
+    "gpu": "AMD RX 580 8 GB (unused)"
+  },
+
+  "regression": {
+    "platform": "Windows 11, MSVC Build Tools 2022, cargo 1.85.1",
+    "commands": [
+      { "cmd": "cargo fmt --all -- --check", "exit": 0 },
+      { "cmd": "cargo clippy -p llmbridge-core --all-targets --features native -- -D warnings", "exit": 0 },
+      { "cmd": "cargo test -p llmbridge-core --features native --release", "exit": 0, "result": "334 passed, 1 ignored, 0 failed (+6 +2 integration)" },
+      { "cmd": "cargo test --workspace (non-native)", "exit": 0 },
+      { "cmd": "cargo build --workspace --no-default-features", "exit": 0 }
+    ],
+    "flaky_fix": "memory_pressure hysteresis test (1ns interval vs coarse Windows Instant) made deterministic; now passes 5/5 in isolation and in the full suite"
+  },
+
+  "remaining_production_dependencies": [
+    "GGML kernel (llmbridge_dequant_matvec_v1 / llmbridge_dequantize_rows_v1) for Nano Q5_0/Q5_1/Q4_K/Q5_K decode and the embedding row",
+    "GGML/llama.cpp native libs for the dense Llama/Qwen resident and streamed backends (separate from the Nano hybrid path)",
+    "build-time: cmake + MSVC + statically-linked llama.cpp/ggml"
+  ],
+
+  "known_limitations": [
+    "Runtime is NOT yet GGML-independent: only Q8_0 is owned; Q5_0/Q5_1/Q4_K/Q5_K and the embedding decode still call GGML.",
+    "Nano end-to-end logits remain genuine-but-UNVALIDATED (no reference; RoPE assumed).",
+    "Tokenizer parity asserted only on the committed ASCII/Latin+whitespace corpus; non-Latin (Bangla/Russian/Hindi/emoji) reference ids are not committed, so not asserted.",
+    "No AVX2-optimized owned kernel yet (scalar reference only); no CPU-kernel speed measurement (optional D not done).",
+    "No LLM Bridge HTTP API server implemented yet (optional E not done).",
+    "Full 52-block forward not re-timed after Q8_0 routing (owned kernel validated numerically equivalent)."
+  ]
+}

@@ -1,0 +1,148 @@
+{
+  "artifact": "qwen2_7b_streamed_inference_parity_bounded_memory_2026-11-24",
+  "utc_timestamp": "2026-11-24T05:00:00Z",
+  "summary": "Genuine Qwen2.5-7B-Instruct Q4_K_M inference on the custom out-of-core streamed CPU decoder, after re-downloading a COMPLETE, SHA-verified GGUF (the prior on-disk artifact was a 47%-truncated partial; see qwen2_7b_truncated_artifact_and_streamed_health_2026-11-24.json). The streamed backend executes the real 7B including its UNTIED output.weight (Q6_K), producing coherent greedy text, under enforced RLIMIT_AS down to 256 MiB at ~79 MB peak RSS. Teacher-forced logit comparison against the pinned llama.cpp resident reference shows top-1 agreement at all 8 positions with per-position RMSE 0.148-0.229 and zero non-finite logits (same permissible FP32-path precision band as all smaller models). Resident chat (generated text) is RAM-admission-blocked on this 6.7 GB host (needs ~4.97 GB); the resident reference logits for parity were obtained via the logit-diff mmap path. No production source code changed.",
+  "classification": "COMPLETE (evidence-backed) for streamed 7B inference, untied-output execution, numerical parity, two-core affinity, and 2048/1024/512/256 MiB bounded memory. Resident generated-text reference BLOCKED by host RAM (documented, not fabricated).",
+  "git": {
+    "branch": "local/streamed-metadata-admission",
+    "head_commit_before": "d648067",
+    "working_tree": "clean except untracked .vscode/ (preserved)",
+    "note": "Binary built from committed HEAD (54307e2 lineage) with --features native; no source changed this session."
+  },
+  "environment": {
+    "host": "Windows 11 Pro 10.0.26300 + WSL2 Ubuntu (kernel 6.18.33.1-microsoft-standard-WSL2)",
+    "cpu_logical": 12,
+    "cpu_affinity_used": "taskset -c 0,1 (verified allowed set 0-11)",
+    "ram_total": "6.7 GiB, swap 0, ~6.0 GiB available",
+    "rustc": "1.85.1",
+    "cmake": "4.2.3",
+    "gpp": "15.2.0",
+    "llama_cpp_pin": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+    "cargo_target_dir": "$HOME/.cache/llmbridge-wsl-target-native (ext4)",
+    "cpu_only": true
+  },
+  "download_and_verification": {
+    "repo": "bartowski/Qwen2.5-7B-Instruct-GGUF",
+    "repo_revision_main": "8911e8a47f92bac19d6f5c64a2e2095bd2f7d031",
+    "file": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+    "remote_lfs_size_bytes": 4683074240,
+    "remote_lfs_sha256": "65b8fcd92af6b4fefa935c625d1ac27ea29dcb6ee14589c55a8f115ceaaa1423",
+    "user_expected_sha256": "65b8fcd92af6b4fefa935c625d1ac27ea29dcb6ee14589c55a8f115ceaaa1423",
+    "resume": "safe resume established: the prior partial (2,466,843,849 B) is a genuine prefix (its GGUF header-declared tensor layout totals exactly 4,683,074,240 B = remote size). Original partial preserved; download performed into a separate temp copy via HTTP range resume (curl -C -).",
+    "remainder_downloaded": "~2.06 GB at ~24 MB/s in ~87 s",
+    "final_size_bytes": 4683074240,
+    "final_sha256": "65b8fcd92af6b4fefa935c625d1ac27ea29dcb6ee14589c55a8f115ceaaa1423",
+    "verify": "VERIFY_OK (exact size match AND exact SHA-256 match; fail-closed gate passed before any inference)",
+    "local_path": "/home/smshagor/llmbridge-bench/qwen25-7b-dl/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+    "license": "apache-2.0",
+    "binary_not_committed": true
+  },
+  "architecture": {
+    "architecture": "qwen2", "block_count": 28, "embedding_length": 3584, "feed_forward_length": 18944,
+    "attention_head_count": 28, "attention_head_count_kv": 4, "gqa_ratio": "7:1", "head_dim": 128,
+    "rope_freq_base": 1000000.0, "rms_norm_epsilon": 9.999999974752427e-07, "context_length": 32768, "vocab_size": 152064,
+    "tensor_type_distribution": {"Q4_K": 169, "F32": 141, "Q6_K": 29},
+    "tensor_count": 339, "tensor_data_offset": 5954240
+  },
+  "untied_output_execution": {
+    "result": "UNTIED and EXECUTED",
+    "output.weight": {"ggml_type": 14, "type_name": "Q6_K", "dims": [3584, 152064], "offset": 3452236480, "size": 447068160, "in_bounds": true},
+    "token_embd.weight": {"ggml_type": 12, "type_name": "Q4_K", "dims": [3584, 152064], "offset": 5954240, "size": 306561024},
+    "output_norm.weight": {"ggml_type": 0, "type_name": "F32", "dims": [3584], "offset": 4683059904, "size": 14336},
+    "evidence": "output.weight (Q6_K) is a distinct tensor from token_embd.weight (Q4_K) and now lies fully within the complete file; the streamed decoder uses it (out_id>=0 path). Coherent greedy output and top-1 parity with the resident reference confirm the untied projection is executed correctly (no fallback to token embeddings)."
+  },
+  "streamed_inference_primary": {
+    "backend": "streamed (custom out-of-core CPU decoder)",
+    "authenticated": true, "sha256": "65b8fcd9...a1423",
+    "prompt": "The capital of France is",
+    "decoding": "greedy", "threads": 2, "cpu_affinity": "taskset -c 0,1", "ctx": 128, "workspace_mb": 48, "max_tokens": 8,
+    "generated_text": " Paris. It is located in the northern",
+    "streamed_top1_token_ids_teacher_forced": [12095, 13, 1084, 374, 7407, 304, 279, 18172],
+    "ttft_first_logits_ns": 31258201936,
+    "first_piece_ns": 31258366884,
+    "decode_steps_per_second": 0.19404863617,
+    "total_ns": 67350336767,
+    "peak_rss_bytes": 79151104,
+    "integrity": {"verified": 1, "blocks_verified": 1566020, "accounted_bytes": 8307872, "sha256_matches_expected": true},
+    "io": {
+      "source_bytes_read": 107313258688,
+      "weight_bytes_requested": 50658401920,
+      "range_read_calls": 1554556,
+      "weight_read_calls": 793172,
+      "max_range_read_bytes": 64680,
+      "reader_buffer_bytes": 65536,
+      "cache_allocated_bytes": 0,
+      "approx_source_bytes_per_generated_token": 13414157336,
+      "note": "Authenticated run bypasses the app cache (0 hits/0 misses): every weight block is re-read AND re-hashed per token. Decode ~5.15 s/token is SHA-bound (hashing ~4.68 GB/token); TTFT ~31 s is the first (partly cold) full weight stream. OS page cache (separate from app cache) holds the 4.68 GB file, so decode reads are warm."
+    }
+  },
+  "bounded_memory_ladder": {
+    "params": "authenticated, taskset -c 0,1, greedy, ctx 128, workspace 48 MB, max_tokens 2",
+    "runs": [
+      {"rlimit_as_mib": 2048, "exit": 0, "peak_rss_bytes": 79204352, "output": " Paris."},
+      {"rlimit_as_mib": 1024, "exit": 0, "peak_rss_bytes": 79163392, "output": " Paris."},
+      {"rlimit_as_mib": 512, "exit": 0, "peak_rss_bytes": 79138816, "output": " Paris."},
+      {"rlimit_as_mib": 256, "exit": 0, "peak_rss_bytes": 79347712, "output": " Paris."}
+    ],
+    "conclusion": "A 4.68 GB model runs genuine authenticated streamed inference under an enforced 256 MiB RLIMIT_AS at ~79 MB peak RSS. The memory floor is vocab/tokenizer-bound (152,064 tokens) plus workspace/KV, NOT weights. The 2 GB process-memory target is massively satisfied for this model+workload. WSL2 RLIMIT_AS is NOT a claim about physical 2 GB RAM hardware.",
+    "lower_than_256_not_tested": "256 MiB is the lowest limit exercised; smaller limits not probed."
+  },
+  "plan_estimate": {
+    "command": "plan --ctx 128 --max-ram-mb 4096 --workspace-mb 64 --json",
+    "selected_context": 128, "training_context": 32768,
+    "native_workspace_bytes": 15777912, "workspace_fixed_bytes": 1096824,
+    "workspace_per_token_bytes": 114696, "kv_bytes_per_token": 114688, "kv_bytes": 14680064,
+    "estimated_additional_bytes": 61306360, "available_after_os_reserve_bytes": 5886300160,
+    "finding": "plan refuses with 'minimum 64-token streamed context does not fit budget' when --workspace-mb is the 8 MB default, INDEPENDENT of --max-ram-mb, because workspace is min'd with workspace_budget_bytes (streamed_plan.rs:118-128) and the 7B's 64-token KV (~7.3 MB) plus fixed workspace exceeds 8 MB. With --workspace-mb 64 the plan succeeds. This is correct conservative behavior, NOT a defect; estimated_additional_bytes (~58 MB) is consistent with the measured ~79 MB peak RSS."
+  },
+  "resident_reference": {
+    "chat_generated_text": "BLOCKED by host RAM",
+    "error": "Insufficient RAM: need 4968286912 bytes, available after reserve 4659431424 bytes",
+    "host_ram": "6.7 GiB total, ~0.68 GiB used; resident needs full model resident (~4.97 GB) which exceeds the reservable headroom by ~0.31 GB",
+    "max_ram_mb_on_resident": "rejected: 'auto-context/auto-cache/admission budgeting requires streamed backend' (admission budgeting is streamed-only)",
+    "resident_logits_for_parity": "OBTAINED via logit-diff (mmap + OS page cache path), enabling genuine teacher-forced comparison below. Not fabricated.",
+    "note": "Resident generated-text reference is an environmental RAM limitation on this host, not a code failure. The streamed backend is the memory-bounded design; the resident backend is the heavyweight reference and legitimately needs a larger RAM budget."
+  },
+  "teacher_forced_parity": {
+    "method": "logit-diff --teacher-forced --max-tokens 8 --ctx 128 --threads 2 --top-k 10 --workspace-mb 48 (resident greedy tokens fed to streamed so every position shares a prefix)",
+    "prefix_identical_through": 8,
+    "position_count": 8,
+    "all_positions_top1_agree": true,
+    "nonfinite_streamed_total": 0,
+    "nonfinite_resident_total": 0,
+    "per_position": [
+      {"position": 0, "rmse": 0.148253734, "max_abs_err": 0.792853355, "mean_abs_err": 0.118447594, "topk_overlap": 9, "streamed_top1": 12095, "resident_top1": 12095, "top1_agree": true},
+      {"position": 1, "rmse": 0.194884886, "max_abs_err": 0.809057236, "mean_abs_err": 0.161032214, "topk_overlap": 10, "streamed_top1": 13, "resident_top1": 13, "top1_agree": true},
+      {"position": 2, "rmse": 0.166420627, "max_abs_err": 0.861443520, "mean_abs_err": 0.132028899, "topk_overlap": 10, "streamed_top1": 1084, "resident_top1": 1084, "top1_agree": true},
+      {"position": 3, "rmse": 0.229147717, "max_abs_err": 1.054111242, "mean_abs_err": 0.187032239, "topk_overlap": 9, "streamed_top1": 374, "resident_top1": 374, "top1_agree": true},
+      {"position": 4, "rmse": 0.171158035, "max_abs_err": 0.844427109, "mean_abs_err": 0.135162215, "topk_overlap": 9, "streamed_top1": 7407, "resident_top1": 7407, "top1_agree": true},
+      {"position": 5, "rmse": 0.173642664, "max_abs_err": 0.910263062, "mean_abs_err": 0.137407032, "topk_overlap": 9, "streamed_top1": 304, "resident_top1": 304, "top1_agree": true},
+      {"position": 6, "rmse": 0.174237957, "max_abs_err": 0.847139120, "mean_abs_err": 0.138692902, "topk_overlap": 9, "streamed_top1": 279, "resident_top1": 279, "top1_agree": true},
+      {"position": 7, "rmse": 0.154151024, "max_abs_err": 0.891337395, "mean_abs_err": 0.120304263, "topk_overlap": 10, "streamed_top1": 18172, "resident_top1": 18172, "top1_agree": true}
+    ],
+    "single_position_final_prompt": {"rmse": 0.148253734, "max_abs_err": 0.792853355, "mean_abs_err": 0.118447594, "top1_agree": true, "streamed_top1": 12095, "resident_top1": 12095},
+    "max_rel_err_note": "Per-position max_rel_err is large (10^3-10^5) purely due to the tiny-denominator relative-error artifact (rel_denominator_floor 1e-6) on near-zero logits; absolute/RMSE metrics are the meaningful ones.",
+    "interpretation": "Streamed custom decoder matches the pinned llama.cpp resident argmax at every teacher-forced position for the real 7B, with per-position RMSE in the same FP32-path precision band observed on Stories/Qwen-0.5B/1.5B/Llama-3.2-1B (q8_0 rmse 0.185 > here). Zero non-finite logits. 8/8 top-1 agreement (cleaner than smaller models' occasional near-tie flips). No structural numerical defect; no code/tolerance change."
+  },
+  "security_regression": {
+    "download_integrity": "exact size + full SHA-256 verified, fail-closed before inference",
+    "in_flight_authentication": "sha256 streamed verification on every run (1,566,020 blocks on the 8-token primary)",
+    "gguf_tensor_bounds_validation": "complete file passes; the earlier truncated partial was safely rejected at all entry points (prior evidence)",
+    "bounded_memory": "256 MiB RLIMIT_AS honored",
+    "source_code_changed": false,
+    "regression_suite": "Not re-run this session because no source changed; prior green state at HEAD 54307e2 stands. Live HEAD binary verified on: complete 7B (inference+parity), complete 1.5B (prior), and safe rejection of the truncated 7B."
+  },
+  "limitations": [
+    "Resident generated-text reference unavailable on this 6.7 GB host (needs ~4.97 GB); parity still obtained via logit-diff resident logits.",
+    "Generation kept short (<=8 tokens) because authenticated decode is SHA-bound at ~5 s/token (~13.4 GB source read/token); interactive-speed 7B is impractical on this host with per-token full-weight re-stream + re-hash.",
+    "RLIMIT_AS below 256 MiB not probed; cgroup memory.max untested (no passwordless sudo).",
+    "WSL2, not bare-metal; RLIMIT_AS is address-space, not a physical-RAM hardware proof."
+  ],
+  "commands": {
+    "download_verify": "curl -L -C - -o <tmp>/Qwen2.5-7B-Instruct-Q4_K_M.gguf 'https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf?download=true' ; sha256sum",
+    "primary": "taskset -c 0,1 llmbridge chat <7b> --prompt 'The capital of France is' --max-tokens 8 --ctx 128 --threads 2 --backend streamed --metrics --sha256 <sha> --workspace-mb 48",
+    "ladder": "... --address-space-mb {2048,1024,512,256} --max-tokens 2",
+    "parity": "taskset -c 0,1 llmbridge logit-diff <7b> --prompt 'The capital of France is' --teacher-forced --max-tokens 8 --ctx 128 --threads 2 --top-k 10 --workspace-mb 48",
+    "plan": "llmbridge plan <7b> --ctx 128 --max-ram-mb 4096 --workspace-mb 64 --json"
+  }
+}

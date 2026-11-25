@@ -41,9 +41,12 @@ typedef size_t (*llmbridge_range_callback)(void *userdata, void *output,
 typedef int32_t (*llmbridge_lookahead_schedule_callback)(void *userdata,
     uint64_t file_offset, size_t length, uint64_t tensor_offset, uint64_t tensor_bytes);
 
-/* Experimental full dense Llama decoder. All weights use bounded range reads;
- * tokenizer-only loading uses path. Workspace budget excludes tokenizer metadata,
- * parser, allocator and OS pages: it is not a hard RSS cap. F32/Q8_0 only.
+/* Experimental full dense decoder for the llama and qwen2 architectures (qwen2
+ * adds NeoX RoPE and Q/K/V projection biases; llama supports the optional
+ * rope_freqs.weight per-pair frequency factors used by llama-3). Weights use bounded range
+ * reads; tokenizer-only loading uses path. Workspace budget excludes tokenizer
+ * metadata, parser, allocator and OS pages: it is not a hard RSS cap. Admits F32,
+ * Q4_0/Q4_1/Q5_0/Q5_1/Q8_0 and the K-quants Q4_K/Q5_K/Q6_K.
  * Logits callback receives the complete vocabulary before greedy sampling. */
 typedef int32_t (*llmbridge_logits_callback)(const float *values, size_t count, void *userdata);
 int32_t llmbridge_generate_streamed_cpu(const char *path, const char *prompt,
@@ -65,6 +68,39 @@ int32_t llmbridge_generate_streamed_cpu_v3(const char *path, const char *prompt,
     llmbridge_lookahead_schedule_callback schedule, llmbridge_token_callback emit,
     llmbridge_logits_callback logits, llmbridge_cancel_poll poll, void *userdata,
     char *error, size_t capacity);
+
+/* Opt-in diagnostic (additive; ABI version unchanged): decode the prompt with
+ * the resident llama.cpp backend and report the full logit vector at the final
+ * prompt position via emit_logits, called exactly once. Samples/generates
+ * nothing. Returns 0 on success, 2 on cancel (unused here), -1 on error.
+ * Intended as an independent reference for streamed step-0 logits. */
+int32_t llmbridge_resident_prompt_logits_v1(const char *path, const char *prompt,
+    uint32_t context_tokens, int32_t threads, llmbridge_logits_callback emit_logits,
+    void *userdata, char *error, size_t capacity);
+
+/* Opt-in multi-position diagnostic (additive; ABI version unchanged): greedy-
+ * decode up to max_tokens and call emit_logits once per step with the full logit
+ * vector BEFORE sampling (same timing as the streamed per-step logits callback).
+ * The chosen token is the argmax of each emitted vector. Returns 0 on success,
+ * 2 if emit_logits requests stop, -1 on error. */
+int32_t llmbridge_resident_decode_logits_v1(const char *path, const char *prompt,
+    uint32_t context_tokens, uint32_t max_tokens, int32_t threads,
+    llmbridge_logits_callback emit_logits, void *userdata, char *error, size_t capacity);
+
+/* Opt-in teacher-forced streamed diagnostic (additive; ABI version unchanged):
+ * prefill the prompt, emit the final-prompt-position logits, then feed each
+ * caller-supplied continuation token in order and emit the logits after each.
+ * Emits forced_count + 1 logit vectors. Unlike the generate path, it samples
+ * nothing: the fed tokens are fixed, so every emitted position shares a prefix
+ * with an independently decoded reference at the same index (valid multi-
+ * position comparison even after greedy sequences would diverge).
+ * tokenizer_prefix behaves as in _v2. Returns 0, 2 on cancel/stop, -1 on error. */
+int32_t llmbridge_streamed_forced_logits_v1(const char *path, const char *prompt,
+    const int32_t *forced_tokens, uint32_t forced_count, uint32_t context,
+    uint64_t file_bytes, size_t max_chunk, uint64_t workspace_budget,
+    uint64_t tokenizer_prefix_bytes, llmbridge_range_callback reader,
+    llmbridge_logits_callback emit_logits, llmbridge_cancel_poll poll,
+    void *userdata, char *error, size_t capacity);
 
 /* Reuses decoder validation without allocating activations, KV or weights.
  * Workspace is the native admission requirement, not process RSS. */
@@ -107,6 +143,44 @@ int32_t llmbridge_q8_0_matvec(uint64_t tensor_offset,
                                float *output,
                                char *error,
                                size_t error_capacity);
+
+/* Dequantize `rows` rows of `columns` elements each, of the given ggml tensor
+ * type, from the in-memory encoded buffer `src` (src_len bytes) into `dst`
+ * (dst_count floats = rows*columns). Uses the pinned ggml type-trait to_float
+ * kernel, not a reimplementation. `columns` must be a whole number of the type's
+ * blocks; `src_len` must equal the exact packed byte length. Output is rejected
+ * if any value is non-finite. Returns 0 on success, -1 on validation/decode
+ * error. This decodes weights to FP32; it is not model execution. */
+int32_t llmbridge_dequantize_rows_v1(uint32_t ggml_type,
+                                     uint32_t columns,
+                                     uint32_t rows,
+                                     const uint8_t *src,
+                                     uint64_t src_len,
+                                     float *dst,
+                                     uint64_t dst_count,
+                                     char *error,
+                                     size_t error_capacity);
+
+/* Generalization of llmbridge_q8_0_matvec to any ggml tensor type with a pinned
+ * to_float dequantizer. Streams one [columns]-wide row at a time through the
+ * caller's bounded reader, dequantizes it with the pinned ggml kernel, and
+ * accumulates the dot product against `input` into output[row]. Shape is
+ * [columns, rows]; columns must be a whole number of the type's blocks. Native
+ * scratch is O(columns); the weight matrix is never materialized. Reader is only
+ * called inside [tensor_offset, tensor_offset + tensor_bytes). Returns 0 on
+ * success, -1 on read/validation error; a failed call's output is discarded. */
+int32_t llmbridge_dequant_matvec_v1(uint32_t ggml_type,
+                                    uint64_t tensor_offset,
+                                    uint64_t tensor_bytes,
+                                    uint32_t columns,
+                                    uint32_t rows,
+                                    size_t max_chunk_bytes,
+                                    llmbridge_range_callback reader,
+                                    void *userdata,
+                                    const float *input,
+                                    float *output,
+                                    char *error,
+                                    size_t error_capacity);
 
 #ifdef __cplusplus
 }

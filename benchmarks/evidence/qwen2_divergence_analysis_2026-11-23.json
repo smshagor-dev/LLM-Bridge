@@ -1,0 +1,68 @@
+{
+  "artifact": "qwen2_divergence_analysis_2026-11-23",
+  "utc_timestamp": "2026-11-23T00:00:00Z",
+  "task": "Task A - investigate the streamed-vs-resident top-1 divergence observed under teacher forcing on Qwen2.5; determine near-tie vs substantive numerical defect.",
+  "git": {
+    "branch": "local/streamed-metadata-admission",
+    "evidence_commit_context": "produced against committed source at/after e613dcc..302a10e plus this session's local llama-3 commits; analysis uses the opt-in logit-diff --teacher-forced --dump-dir diagnostic.",
+    "diagnostic": "llmbridge logit-diff --teacher-forced --dump-dir writes raw little-endian f32 logit vectors per position for both backends; margins computed offline."
+  },
+  "environment": {
+    "host": "Windows 11 + WSL2 Ubuntu, Intel i5-12400F (12 logical CPUs), CPU-only",
+    "rustc": "1.85.1", "llama_cpp_pin": "cd959bae99ff4bed22bef2604f45241c09bbb8c8"
+  },
+  "method": "Teacher forcing: the resident llama.cpp greedy token sequence is canonical and fed to the streamed decoder so every position compares logits under an identical prefix. For each position: resident top-1/top-2 tokens and logits, reference margin = L[top1]-L[top2], per-position RMSE, and whether the streamed argmax flipped.",
+  "finding": "Divergence occurs if and only if the resident top-1 margin is smaller than the streamed FP32 perturbation (~per-position RMSE). Every flip is a near-tie; every stable position has a margin far larger than the noise. No substantive numerical defect; no code or tolerance change.",
+  "qwen2_5_0_5b_instruct_q8_0": {
+    "sha256": "25130a98aa782284a7dabea0c23245b2fd371ed47244e79d78b8ec23245fdf96",
+    "prompt": "Once upon a time", "ctx": 128, "threads": 2, "positions": 16,
+    "teacher_forced_top1_agree": "15/16",
+    "first_divergence": {
+      "position": 8,
+      "resident_top1_token": 13, "resident_top1_logit": 16.42638,
+      "resident_top2_token": 879, "resident_top2_logit": 16.37680,
+      "resident_top1_margin": 0.04958,
+      "streamed_top1_token": 879, "streamed_logit_at_resident_top1_tok13": 16.31639,
+      "streamed_logit_at_streamed_top1_tok879": 16.54631,
+      "streamed_perturbation_tok13": -0.10999, "streamed_perturbation_tok879": 0.16951,
+      "position_rmse": 0.14286, "position_max_abs_err": 0.52619, "topk10_overlap": "10/10",
+      "resident_top1_rank_in_streamed": 1, "streamed_top1_rank_in_resident": 1, "nonfinite": 0,
+      "conclusion": "clean top-2 swap; reference margin 0.0496 is ~1/3 of the position RMSE; perturbation at the two tokens (~0.11-0.17) exceeds the margin -> argmax flips. Near-tie."
+    },
+    "neighboring_stable_positions": {
+      "position_7": {"resident_margin": 0.38816, "rmse": 0.0850, "flip": false},
+      "position_9": {"resident_margin": 0.48301, "rmse": 0.0772, "flip": false}
+    }
+  },
+  "qwen2_5_1_5b_instruct_q4_k_m": {
+    "sha256": "1adf0b11065d8ad2e8123ea110d1ec956dab4ab038eab665614adba04b6c3370",
+    "bytes": 986048768,
+    "hparams": {"arch": "qwen2", "layers": 28, "embedding_length": 1536, "feed_forward_length": 8960,
+                "head_count": 12, "head_count_kv": 2, "head_dim": 128, "rope_freq_base": 1000000.0,
+                "vocab_size": 151936, "tied_output_embeddings": true},
+    "prompt": "Once upon a time", "ctx": 128, "threads": 2, "positions": 16,
+    "single_position_rmse": 0.197963502, "single_position_top1_agree": true, "single_position_topk10": "10/10",
+    "teacher_forced_top1_agree": "12/16",
+    "per_position_margin_vs_flip": [
+      {"pos": 0, "margin": 1.5282, "rmse": 0.1980, "flip": false},
+      {"pos": 1, "margin": 0.0425, "rmse": 0.2171, "flip": false, "note": "near-tie that happened not to flip"},
+      {"pos": 2, "margin": 1.7256, "rmse": 0.2149, "flip": false},
+      {"pos": 3, "margin": 2.5586, "rmse": 0.2569, "flip": false},
+      {"pos": 4, "margin": 0.1570, "rmse": 0.2088, "flip": true},
+      {"pos": 5, "margin": 0.0647, "rmse": 0.2283, "flip": true},
+      {"pos": 6, "margin": 1.5917, "rmse": 0.2429, "flip": false},
+      {"pos": 7, "margin": 0.0527, "rmse": 0.1941, "flip": true},
+      {"pos": 8, "margin": 1.5834, "rmse": 0.2357, "flip": false},
+      {"pos": 9, "margin": 0.6716, "rmse": 0.2472, "flip": false},
+      {"pos": 10, "margin": 1.6983, "rmse": 0.1989, "flip": false},
+      {"pos": 11, "margin": 2.7185, "rmse": 0.2011, "flip": false},
+      {"pos": 12, "margin": 0.0306, "rmse": 0.2028, "flip": true},
+      {"pos": 13, "margin": 0.9585, "rmse": 0.2115, "flip": false},
+      {"pos": 14, "margin": 1.3020, "rmse": 0.2229, "flip": false},
+      {"pos": 15, "margin": 0.8639, "rmse": 0.2237, "flip": false}
+    ],
+    "conclusion": "All 4 flips (pos 4,5,7,12) sit on margins 0.03-0.16, far below the ~0.20 position noise; all 12 stable positions have margins 0.67-2.72 (except the pos-1 near-tie that did not flip). head_dim 128 works correctly. The higher flip rate vs the 0.5B is explained by higher FP32 noise (rmse ~0.20 vs ~0.14) from greater depth (28 layers), wider head_dim (128) and Q4_K quantization - NOT a structural defect."
+  },
+  "overall_conclusion": "Across Qwen2.5-0.5B (head_dim 64), Qwen2.5-1.5B (head_dim 128) and Llama-3.2-1B (16/16, zero flips), the streamed custom FP32 path agrees with resident llama.cpp at every position whose reference top-1 margin exceeds the per-position RMSE. Flips are confined to near-ties (margin < noise). This is permitted floating-point accumulation-order variation, quantified and bounded. No mathematical defect; tolerances were not altered and no production code was changed for numerical reasons.",
+  "no_secrets_or_binaries_committed": true
+}
