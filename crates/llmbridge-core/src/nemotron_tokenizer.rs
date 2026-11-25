@@ -107,9 +107,23 @@ pub struct NemotronTokenizer {
 }
 
 impl NemotronTokenizer {
-    /// Load the tokenizer from a GGUF shard header (the metadata-only shard 1).
+    /// Load the tokenizer from a GGUF header. Reads ONLY the metadata prefix
+    /// (header + KV block + tensor-info table), never the multi-GB tensor
+    /// payload: `data_offset` marks the start of tensor data, which is strictly
+    /// after the KV block [`GgufKv::parse`] needs. This keeps a single-file
+    /// multi-GB model (where the tokenizer shard IS the whole model) from being
+    /// read resident — previously `std::fs::read` loaded the entire file.
     pub fn from_gguf(path: &std::path::Path) -> Result<Self, String> {
-        let bytes = std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+        use std::io::Read;
+        let index = crate::gguf_index::GgufTensorIndex::inspect(path)
+            .map_err(|e| format!("inspect metadata {}: {e}", path.display()))?;
+        let prefix_len =
+            usize::try_from(index.data_offset).map_err(|_| "metadata prefix too large")?;
+        let mut file =
+            std::fs::File::open(path).map_err(|e| format!("open {}: {e}", path.display()))?;
+        let mut bytes = vec![0u8; prefix_len];
+        file.read_exact(&mut bytes)
+            .map_err(|e| format!("read metadata prefix of {}: {e}", path.display()))?;
         let kv = GgufKv::parse(&bytes)?;
 
         let model = kv.string("tokenizer.ggml.model").unwrap_or_default();
@@ -636,6 +650,64 @@ mod tests {
             }
         }
         eprintln!("parity summary: {matched}/{total} cases match the official reference exactly");
+        assert!(
+            must_fail.is_empty(),
+            "ASCII/Latin cases must match the official reference exactly; failed: {must_fail:?}"
+        );
+    }
+
+    // Mandatory acceptance B: exact Nano tokenizer parity against the SAME
+    // committed official reference ids (HF tokenizers 0.23.3), loaded from the
+    // single-file Nano GGUF via from_gguf — no external tokenizer process at
+    // runtime. Gated on LLMBRIDGE_NANO_GGUF. Asserts exact parity on the
+    // ASCII/Latin subset and reports the status of every case.
+    #[test]
+    fn nano_parity_against_official_reference() {
+        let Ok(path) = std::env::var("LLMBRIDGE_NANO_GGUF") else {
+            eprintln!("skip: LLMBRIDGE_NANO_GGUF unset");
+            return;
+        };
+        let tk = NemotronTokenizer::from_gguf(std::path::Path::new(&path)).unwrap();
+        let fixture = include_str!("../tests/data/nemotron_tokenizer_reference.txt");
+        let must_match = [
+            "Hi",
+            "Hello",
+            "The capital of France is",
+            "What is 2 + 2?",
+            "123456789",
+            "a  b",
+            "x\ty\nz",
+            "  lead and trail  ",
+            "New\nline",
+        ];
+        let mut total = 0usize;
+        let mut matched = 0usize;
+        let mut must_fail: Vec<String> = Vec::new();
+        for line in fixture.lines() {
+            if line.starts_with('#') || line.trim().is_empty() {
+                continue;
+            }
+            let (hex, idstr) = line.split_once(' ').unwrap();
+            let bytes: Vec<u8> = (0..hex.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+                .collect();
+            let text = String::from_utf8(bytes).unwrap();
+            let want: Vec<u32> = idstr.split(',').map(|s| s.parse().unwrap()).collect();
+            let got = tk.encode(&text);
+            total += 1;
+            if got == want {
+                matched += 1;
+            } else {
+                eprintln!("NANO_TOK DIFF text={text:?}\n    ref={want:?}\n    got={got:?}");
+                if must_match.contains(&text.as_str()) {
+                    must_fail.push(text);
+                }
+            }
+        }
+        eprintln!(
+            "NANO_TOK parity summary: {matched}/{total} cases match the official reference exactly"
+        );
         assert!(
             must_fail.is_empty(),
             "ASCII/Latin cases must match the official reference exactly; failed: {must_fail:?}"
