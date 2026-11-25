@@ -16,6 +16,8 @@ pub mod nemotron_attention;
 #[cfg(feature = "native")]
 pub mod nemotron_expert_stream;
 pub mod nemotron_hybrid;
+#[cfg(feature = "native")]
+pub mod nemotron_model;
 
 pub mod admission_queue;
 pub mod f32_chain;
