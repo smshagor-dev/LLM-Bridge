@@ -144,6 +144,23 @@ int32_t llmbridge_q8_0_matvec(uint64_t tensor_offset,
                                char *error,
                                size_t error_capacity);
 
+/* Dequantize `rows` rows of `columns` elements each, of the given ggml tensor
+ * type, from the in-memory encoded buffer `src` (src_len bytes) into `dst`
+ * (dst_count floats = rows*columns). Uses the pinned ggml type-trait to_float
+ * kernel, not a reimplementation. `columns` must be a whole number of the type's
+ * blocks; `src_len` must equal the exact packed byte length. Output is rejected
+ * if any value is non-finite. Returns 0 on success, -1 on validation/decode
+ * error. This decodes weights to FP32; it is not model execution. */
+int32_t llmbridge_dequantize_rows_v1(uint32_t ggml_type,
+                                     uint32_t columns,
+                                     uint32_t rows,
+                                     const uint8_t *src,
+                                     uint64_t src_len,
+                                     float *dst,
+                                     uint64_t dst_count,
+                                     char *error,
+                                     size_t error_capacity);
+
 #ifdef __cplusplus
 }
 #endif

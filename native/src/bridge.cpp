@@ -493,6 +493,64 @@ extern "C" int32_t llmbridge_q8_0_matvec(
     }
 }
 
+/* Dequantize whole rows of an arbitrary ggml tensor type with the pinned ggml
+ * to_float trait (the same reference kernel llama.cpp uses). The caller owns the
+ * encoded `src` bytes and the `dst` float buffer; both are borrowed only for the
+ * call. Geometry is validated against the pinned ggml block size / row size, so a
+ * wrong length or a type without a dequantizer is rejected rather than guessed.
+ * No weights are retained and nothing beyond `src` is read. */
+extern "C" int32_t llmbridge_dequantize_rows_v1(
+    uint32_t ggml_type, uint32_t columns, uint32_t rows,
+    const uint8_t *src, uint64_t src_len,
+    float *dst, uint64_t dst_count,
+    char *error, size_t error_capacity) {
+    write_error(error, error_capacity, "");
+    try {
+        if (!src || !dst || columns == 0 || columns > (1u << 20) ||
+            rows == 0 || rows > (1u << 20)) {
+            throw std::invalid_argument("invalid dequantize_rows arguments");
+        }
+        // ggml_get_type_traits asserts (aborts) on an out-of-range id, so the
+        // enum bound is checked here before any ggml call can be reached.
+        if (ggml_type >= static_cast<uint32_t>(GGML_TYPE_COUNT)) {
+            throw std::invalid_argument("ggml tensor type id out of range");
+        }
+        const enum ggml_type type = static_cast<enum ggml_type>(ggml_type);
+        const auto *traits = ggml_get_type_traits(type);
+        if (!traits || !traits->to_float) {
+            throw std::runtime_error("pinned ggml type has no dequantizer");
+        }
+        const int64_t block = ggml_blck_size(type);
+        if (block <= 0 || (columns % static_cast<uint32_t>(block)) != 0) {
+            throw std::invalid_argument("columns is not a whole number of ggml blocks");
+        }
+        const size_t row_bytes = static_cast<size_t>(ggml_row_size(type, columns));
+        // Exact packed length and output count, with overflow-checked products.
+        if (row_bytes == 0 ||
+            src_len != static_cast<uint64_t>(row_bytes) * rows ||
+            dst_count != static_cast<uint64_t>(columns) * rows) {
+            throw std::invalid_argument("src_len or dst_count disagrees with ggml geometry");
+        }
+        for (uint32_t row = 0; row < rows; ++row) {
+            const uint8_t *row_src = src + static_cast<size_t>(row) * row_bytes;
+            float *row_dst = dst + static_cast<size_t>(row) * columns;
+            traits->to_float(row_src, row_dst, static_cast<int64_t>(columns));
+            for (uint32_t col = 0; col < columns; ++col) {
+                if (!std::isfinite(row_dst[col])) {
+                    throw std::runtime_error("non-finite dequantized value rejected");
+                }
+            }
+        }
+        return 0;
+    } catch (const std::exception &e) {
+        write_error(error, error_capacity, e.what());
+        return -1;
+    } catch (...) {
+        write_error(error, error_capacity, "unknown native dequantize exception");
+        return -1;
+    }
+}
+
 /* Additive entry point preserves the existing ABI and legacy callers. */
 extern "C" int32_t llmbridge_generate_cpu_polled(
     const char *model_path, const char *prompt, uint32_t context_tokens,
