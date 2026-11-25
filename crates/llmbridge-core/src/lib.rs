@@ -12,6 +12,7 @@ pub mod mamba2_ssm;
 pub mod models;
 #[cfg(feature = "native")]
 pub mod native_dequant;
+pub mod nemotron_attention;
 
 pub mod admission_queue;
 pub mod f32_chain;
