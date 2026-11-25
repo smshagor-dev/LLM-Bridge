@@ -731,6 +731,132 @@ pub fn run_moe_layer(
     Ok(out)
 }
 
+/// Per-layer recurrent/KV state for a full-model session.
+pub enum FullLayerState {
+    Recurrent(Box<ConvState>, Box<SsmState>),
+    Attention(Box<StreamKvCache>),
+    Moe,
+}
+
+/// Session state for a streamed full-model forward pass.
+pub struct FullSession {
+    states: Vec<FullLayerState>,
+    pos: usize,
+}
+
+impl FullSession {
+    pub fn new(cfg: &NemotronConfig, plan: &ModelPlan) -> Result<Self, String> {
+        let mut states = Vec::with_capacity(plan.layers.len());
+        for l in &plan.layers {
+            states.push(match l.kind {
+                LayerType::Recurrent => FullLayerState::Recurrent(
+                    Box::new(ConvState::zeros(cfg.conv_channels(), cfg.d_conv)?),
+                    Box::new(SsmState::zeros(cfg.ssm_config())?),
+                ),
+                LayerType::Attention => {
+                    FullLayerState::Attention(Box::<StreamKvCache>::default())
+                }
+                LayerType::Moe => FullLayerState::Moe,
+            });
+        }
+        Ok(Self { states, pos: 0 })
+    }
+    pub fn position(&self) -> usize {
+        self.pos
+    }
+}
+
+/// Name of the output (vocabulary) projection: a dedicated `output.weight` when
+/// present, otherwise the tied `token_embd.weight`.
+fn output_tensor_name(index: &SplitGgufIndex) -> &'static str {
+    if index.tensor("output.weight").is_some() {
+        "output.weight"
+    } else {
+        "token_embd.weight"
+    }
+}
+
+/// Run the full 88-layer streamed forward over `tokens` (fed one at a time,
+/// advancing all per-layer state), then return the final-position logits over
+/// the vocabulary. Every weight is read bounded and authenticated from the
+/// shards; no full tensor is materialized and the model is never resident.
+///
+/// This produces genuine model-backed logits. It is NOT validated against a
+/// full-model resident reference (none is runnable on this host); only the
+/// per-layer kernels and the reduced-stack composition are reference-checked.
+pub fn run_full_forward(
+    index: &SplitGgufIndex,
+    cfg: &NemotronConfig,
+    plan: &ModelPlan,
+    session: &mut FullSession,
+    tokens: &[u32],
+    stop: &AtomicBool,
+) -> Result<Vec<f32>, String> {
+    if tokens.is_empty() {
+        return Err("full forward requires at least one token".into());
+    }
+    if session.states.len() != plan.layers.len() {
+        return Err("session does not match plan layer count".into());
+    }
+    let mut last_hidden: Option<Vec<f32>> = None;
+    for &tok in tokens {
+        if stop.load(std::sync::atomic::Ordering::Acquire) {
+            return Err("full forward cancelled".into());
+        }
+        let mut h = embed_token(index, cfg, tok, stop)?;
+        for (li, layer) in plan.layers.iter().enumerate() {
+            let attn_norm = stream_small(index, &tn(layer.index, "attn_norm.weight"), stop)?;
+            let hn = {
+                let ms: f32 = h.iter().map(|v| v * v).sum::<f32>() / h.len() as f32;
+                let inv = 1.0 / (ms + cfg.norm_eps).sqrt();
+                (0..h.len())
+                    .map(|i| h[i] * inv * attn_norm[i])
+                    .collect::<Vec<f32>>()
+            };
+            let out = match (&layer.kind, &mut session.states[li]) {
+                (LayerType::Recurrent, FullLayerState::Recurrent(conv, ssm)) => {
+                    run_mamba_layer(index, cfg, layer.index, conv, ssm, &hn, stop)?
+                }
+                (LayerType::Attention, FullLayerState::Attention(kv)) => {
+                    run_attention_layer(index, cfg, layer.index, kv, &hn, stop)?
+                }
+                (LayerType::Moe, FullLayerState::Moe) => {
+                    run_moe_layer(index, cfg, layer.index, &hn, stop)?
+                }
+                _ => return Err(format!("layer {} state/kind mismatch", layer.index)),
+            };
+            for (hv, ov) in h.iter_mut().zip(&out) {
+                *hv += ov;
+            }
+        }
+        last_hidden = Some(h);
+        session.pos += 1;
+    }
+    // final norm + output projection on the last token
+    let h = last_hidden.ok_or("no hidden state produced")?;
+    let on = stream_small(index, "output_norm.weight", stop)?;
+    let ms: f32 = h.iter().map(|v| v * v).sum::<f32>() / h.len() as f32;
+    let inv = 1.0 / (ms + cfg.norm_eps).sqrt();
+    let hf: Vec<f32> = (0..h.len()).map(|i| h[i] * inv * on[i]).collect();
+    let logits = matvec(index, output_tensor_name(index), &hf, stop)?;
+    if logits.len() != cfg.n_vocab || !logits.iter().all(|v| v.is_finite()) {
+        return Err("invalid full-forward logits".into());
+    }
+    Ok(logits)
+}
+
+/// Greedy argmax token id over a logit vector.
+pub fn greedy_token(logits: &[f32]) -> Option<usize> {
+    logits
+        .iter()
+        .enumerate()
+        .fold(None, |best, (i, &v)| match best {
+            Some((_, bv)) if bv >= v => best,
+            _ => Some((i, v)),
+        })
+        .map(|(i, _)| i)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -836,6 +962,41 @@ mod tests {
 
         eprintln!(
             "model-backed layers ok: embed+mamba(l{rec})+attn(l{att})+moe(l{moe}), all finite"
+        );
+    }
+
+    // Full 88-layer streamed forward on a single raw token. Heavy: reads most of
+    // the non-expert weights (plus 22/512 experts per MoE layer) from the slow G:
+    // drive, so it is gated on BOTH LLMBRIDGE_NEMOTRON_DIR and
+    // LLMBRIDGE_NEMOTRON_FULL to keep it out of normal runs. Produces genuine
+    // finite logits and a greedy token id; it is NOT a reference-parity check.
+    #[test]
+    fn full_88_layer_forward_produces_finite_logits_and_a_token() {
+        let Some(sh) = shards() else {
+            eprintln!("skip: LLMBRIDGE_NEMOTRON_DIR unset");
+            return;
+        };
+        if std::env::var("LLMBRIDGE_NEMOTRON_FULL").is_err() {
+            eprintln!("skip: LLMBRIDGE_NEMOTRON_FULL unset (heavy full-forward test)");
+            return;
+        }
+        let index = SplitGgufIndex::inspect(&sh).unwrap();
+        let cfg = NemotronConfig::NEMOTRON_3_SUPER_120B;
+        let plan = ModelPlan::build(&index, cfg).unwrap();
+        let mut session = FullSession::new(&cfg, &plan).unwrap();
+        let stop = AtomicBool::new(false);
+        // A single real token id (BOS = <s> = 1); a true prompt needs the
+        // tokenizer, which is a separate outstanding deliverable.
+        let t0 = std::time::Instant::now();
+        let logits = run_full_forward(&index, &cfg, &plan, &mut session, &[1u32], &stop).unwrap();
+        let secs = t0.elapsed().as_secs_f64();
+        assert_eq!(logits.len(), cfg.n_vocab);
+        assert!(logits.iter().all(|v| v.is_finite()));
+        let tok = greedy_token(&logits).unwrap();
+        assert_eq!(session.position(), 1);
+        eprintln!(
+            "FULL 88-layer forward ok in {secs:.1}s: finite logits[{}], greedy token id = {tok}",
+            logits.len()
         );
     }
 }
