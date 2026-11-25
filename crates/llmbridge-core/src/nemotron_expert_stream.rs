@@ -531,4 +531,83 @@ mod tests {
 
         std::fs::remove_file(path).unwrap();
     }
+
+    // Real-model: resolve a genuine packed expert tensor from the three G: shards,
+    // stream expert 0 through a bounded authenticated read, and cross-check it
+    // against dequantize_rows over the same sub-slice. Reads only one expert's
+    // bytes (not the whole tensor, not the model). Gated on LLMBRIDGE_NEMOTRON_DIR
+    // so it is skipped by default and never touches G: in CI.
+    #[test]
+    fn real_nemotron_packed_expert_matches_dequant_reference() {
+        use crate::gguf_index::SplitGgufIndex;
+        use std::io::{Read, Seek, SeekFrom};
+        let dir = match std::env::var("LLMBRIDGE_NEMOTRON_DIR") {
+            Ok(d) => d,
+            Err(_) => {
+                eprintln!("skip: LLMBRIDGE_NEMOTRON_DIR unset (real packed-expert test)");
+                return;
+            }
+        };
+        let shards: Vec<String> = (1..=3)
+            .map(|i| {
+                format!("{dir}/NVIDIA-Nemotron-3-Super-120B-A12B-UD-IQ2_XXS-0000{i}-of-00003.gguf")
+            })
+            .collect();
+        let index = SplitGgufIndex::inspect(&shards).expect("real split index");
+        // Layer 1 is a MoE layer; its up experts are a packed rank-3 tensor.
+        let name = "blk.1.ffn_up_exps.weight";
+        let (member, region) = index.tensor(name).expect("ffn_up_exps present");
+        assert_eq!(region.dimensions.len(), 3, "expert tensor must be rank-3");
+        let columns = region.dimensions[0];
+        let rows = region.dimensions[1];
+        let n_expert = region.dimensions[2];
+        let pk = PackedExperts::new(
+            region.file_offset,
+            region.ggml_type,
+            columns,
+            rows,
+            n_expert,
+            region.byte_len,
+        )
+        .expect("packed geometry");
+
+        let latent: Vec<f32> = (0..columns as usize)
+            .map(|i| ((i % 11) as f32 - 5.0) * 0.01)
+            .collect();
+        let stop = AtomicBool::new(false);
+        let e = 0usize;
+
+        // production: bounded authenticated range read of expert e only.
+        let mut reader = BoundedLocalReader::open(&member.path, 1 << 16, 1 << 17).unwrap();
+        let got = pk
+            .project_expert(&mut reader, e, &latent, &stop, 1 << 22)
+            .expect("stream expert 0");
+        assert_eq!(got.len(), rows as usize);
+
+        // reference: read expert e's raw bytes directly, dequantize, dot.
+        let per = pk.per_expert_bytes();
+        let mut f = std::fs::File::open(&member.path).unwrap();
+        f.seek(SeekFrom::Start(region.file_offset + e as u64 * per))
+            .unwrap();
+        let mut bytes = vec![0u8; per as usize];
+        f.read_exact(&mut bytes).unwrap();
+        let decoded =
+            dequantize_rows(region.ggml_type, columns as u32, rows as u32, &bytes).unwrap();
+        let mut max_abs = 0f64;
+        for r in 0..rows as usize {
+            let row = &decoded[r * columns as usize..(r + 1) * columns as usize];
+            let want: f64 = (0..columns as usize)
+                .map(|c| row[c] as f64 * latent[c] as f64)
+                .sum();
+            max_abs = max_abs.max((got[r] as f64 - want).abs());
+        }
+        assert!(
+            max_abs < 1e-2,
+            "real packed expert matvec vs dequant reference max abs = {max_abs}"
+        );
+        eprintln!(
+            "real packed expert ok: {name} e={e} columns={columns} rows={rows} \
+             n_expert={n_expert} per_expert_bytes={per} max_abs={max_abs}"
+        );
+    }
 }
