@@ -6,6 +6,7 @@ pub mod inference;
 pub mod latent_moe_routing;
 pub mod logit_diff;
 pub mod mamba2_conv;
+pub mod mamba2_ssm;
 pub mod models;
 #[cfg(feature = "native")]
 pub mod native_dequant;
