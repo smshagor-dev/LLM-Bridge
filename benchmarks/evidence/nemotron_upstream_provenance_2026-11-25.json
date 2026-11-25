@@ -1,0 +1,62 @@
+{
+  "title": "Nemotron 3 Super 120B-A12B UD-IQ2_XXS — upstream shard provenance verification",
+  "date": "2026-11-25",
+  "author": "LLM Bridge",
+  "scope": "Compares the locally measured per-shard SHA-256 digests and byte sizes against the authoritative published metadata at a pinned Hugging Face revision. No shard was re-hashed or re-downloaded; the 64 GB model was not touched. Upstream metadata was read via the public HF tree API.",
+  "git": {
+    "branch": "local/streamed-metadata-admission",
+    "head": "476987c",
+    "local_only_unpushed": true
+  },
+  "upstream": {
+    "repo": "unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF",
+    "variant": "UD-IQ2_XXS",
+    "revision": "5c8f6a6ddc080c2adde51f07fe2645ceeef54dde",
+    "publisher": "unsloth (GGUF quantization publisher; distinct from the NVIDIA base-model publisher)",
+    "metadata_source": "https://huggingface.co/api/models/unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF/tree/5c8f6a6ddc080c2adde51f07fe2645ceeef54dde/UD-IQ2_XXS",
+    "sha256_field": "lfs.oid (64-hex SHA-256); NOT the top-level git-blob SHA-1 oid and NOT the Xet xetHash"
+  },
+  "comparison": [
+    {
+      "file": "NVIDIA-Nemotron-3-Super-120B-A12B-UD-IQ2_XXS-00001-of-00003.gguf",
+      "published_size_bytes": 7872576,
+      "local_size_bytes": 7872576,
+      "size_match": true,
+      "published_sha256": "607b48a77949bea7e633c6116ce8f18105a60cd8cb7117201dc6730fbb47b9c5",
+      "local_sha256": "607b48a77949bea7e633c6116ce8f18105a60cd8cb7117201dc6730fbb47b9c5",
+      "sha256_match": true,
+      "xet_hash": "cb3a6ec64193257cd9d9fc05c1ea8061e5c5aeb3e448d1409357121915431f4d",
+      "git_blob_oid_sha1": "4aa6a6eee6444a955fff0514085d6f92c0ca4e7d"
+    },
+    {
+      "file": "NVIDIA-Nemotron-3-Super-120B-A12B-UD-IQ2_XXS-00002-of-00003.gguf",
+      "published_size_bytes": 49697120640,
+      "local_size_bytes": 49697120640,
+      "size_match": true,
+      "published_sha256": "5dc451608821796ac93758c80b50414f32fc24aae0e94a3d130af9de5c17edb2",
+      "local_sha256": "5dc451608821796ac93758c80b50414f32fc24aae0e94a3d130af9de5c17edb2",
+      "sha256_match": true,
+      "xet_hash": "e297abb5f9925e14f50695f7d26e9bb9c3a09a6135f7cbf684c8e07bd028f090",
+      "git_blob_oid_sha1": "e0e62fbf5c4723d33faa872382d23a0ada9ca625"
+    },
+    {
+      "file": "NVIDIA-Nemotron-3-Super-120B-A12B-UD-IQ2_XXS-00003-of-00003.gguf",
+      "published_size_bytes": 2971911584,
+      "local_size_bytes": 2971911584,
+      "size_match": true,
+      "published_sha256": "f1e50ef64f8047f726ba58c0ec2b8cc27c543d69dd8dcb4864bab7ddfe03bafc",
+      "local_sha256": "f1e50ef64f8047f726ba58c0ec2b8cc27c543d69dd8dcb4864bab7ddfe03bafc",
+      "sha256_match": true,
+      "xet_hash": "de190174cdcb6b7e832d6e78cb1320d3e373fad1efb3bca06553a85fd65f38d6",
+      "git_blob_oid_sha1": "cbbc3ce7b7e6b30d86a95e91ead51f8977eb1802"
+    }
+  ],
+  "result": "ALL THREE SHARDS MATCH — filename, exact byte size, and SHA-256 all equal the published Unsloth files at the pinned revision.",
+  "trust_assumptions": [
+    "The match proves the previously measured file contents equal the publisher's recorded object at this revision, subject to the validity of the stored local SHA-256 and the upstream metadata.",
+    "It does NOT prove an arbitrarily modified local file is still unchanged; runtime authenticated-range verification in the reader is preserved and unchanged.",
+    "'unsloth' is the GGUF quantization publisher; this provenance is for that artifact, not a direct attestation by the NVIDIA base-model publisher.",
+    "The local SHA-256 digests were measured in a prior round by a single streamed pass (benchmarks/evidence/nemotron_latentmoe_mamba_block_2026-11-25.json); the shards were not re-hashed here."
+  ],
+  "final_status": "COMPLETE for Part I (provenance) — local digests and sizes match the authoritative published metadata at revision 5c8f6a6ddc080c2adde51f07fe2645ceeef54dde."
+}
