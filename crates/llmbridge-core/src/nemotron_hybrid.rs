@@ -848,6 +848,60 @@ mod tests {
     }
 
     #[test]
+    fn five_token_stepwise_equals_single_call() {
+        // Longer persistence check: five tokens fed one-at-a-time across five
+        // forward calls must equal a single five-token call (last-position logits
+        // and final position), covering >3 sequential decode steps.
+        let (model, _raw) = build();
+        let toks = [2u32, 5, 8, 1, 7];
+        let mut step = model.new_state().unwrap();
+        let mut last = Vec::new();
+        for t in &toks {
+            last = model.forward(&mut step, &[*t]).unwrap();
+        }
+        let mut whole = model.new_state().unwrap();
+        let out_whole = model.forward(&mut whole, &toks).unwrap();
+        let whole_last = &out_whole[out_whole.len() - NV..];
+        let max_abs = last
+            .iter()
+            .zip(whole_last)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(max_abs < 1e-5, "5-step vs single-call differ: {max_abs}");
+        assert_eq!(step.position(), 5);
+        assert_eq!(whole.position(), 5);
+    }
+
+    #[test]
+    fn concurrent_sessions_are_isolated() {
+        // Two sessions advanced independently must not leak state into each other:
+        // session A over [1,2,3] then session B over [9] must equal B-alone over
+        // [9] from a fresh state.
+        let (model, _raw) = build();
+        let mut a = model.new_state().unwrap();
+        let _ = model.forward(&mut a, &[1u32, 2, 3]).unwrap();
+        let mut b = model.new_state().unwrap();
+        let b_after_a = model.forward(&mut b, &[9u32]).unwrap();
+        let mut fresh = model.new_state().unwrap();
+        let b_fresh = model.forward(&mut fresh, &[9u32]).unwrap();
+        assert_eq!(b_after_a, b_fresh, "sessions must be fully isolated");
+        assert_eq!(a.position(), 3);
+    }
+
+    #[test]
+    fn reset_restores_fresh_state_exactly() {
+        // A reset session must reproduce a brand-new session's output bit-for-bit.
+        let (model, _raw) = build();
+        let mut s = model.new_state().unwrap();
+        let _ = model.forward(&mut s, &[4u32, 6]).unwrap();
+        s.reset();
+        let after_reset = model.forward(&mut s, &[3u32]).unwrap();
+        let mut fresh = model.new_state().unwrap();
+        let fresh_out = model.forward(&mut fresh, &[3u32]).unwrap();
+        assert_eq!(after_reset, fresh_out, "reset must equal a fresh session");
+    }
+
+    #[test]
     fn different_single_tokens_produce_different_logits() {
         // Structural input-sensitivity proof (reference-free): two different input
         // tokens must yield different embeddings AND different final logits. This

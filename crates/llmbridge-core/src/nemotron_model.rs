@@ -1061,6 +1061,7 @@ pub struct GenRun {
     pub steps: Vec<GenStep>,
     pub generated_text: String,
     pub final_position: usize,
+    pub stopped_on_eos: bool,
 }
 
 /// Genuine persistent-state multi-token generation: a single [`FullSession`] is
@@ -1113,12 +1114,20 @@ pub fn generate(
         });
         generated.push(next as u32);
         cur_input = vec![next as u32];
+        if next as u32 == tokenizer.eos_id {
+            break;
+        }
     }
+    let stopped_on_eos = generated
+        .last()
+        .map(|&t| t == tokenizer.eos_id)
+        .unwrap_or(false);
     Ok(GenRun {
         prompt: prompt.to_string(),
         prompt_ids,
         generated_text: tokenizer.decode(&generated).unwrap_or_default(),
         final_position: session.position(),
+        stopped_on_eos,
         steps,
     })
 }
@@ -1422,8 +1431,13 @@ mod tests {
             .and_then(|s| s.parse().ok())
             .unwrap_or(2);
         let run = generate(&index, &cfg, &plan, &tk, &prompt, n_new, &stop).unwrap();
-        assert_eq!(run.steps.len(), n_new);
-        assert_eq!(run.final_position, run.prompt_ids.len() + (n_new - 1));
+        assert!(run.steps.len() <= n_new && !run.steps.is_empty());
+        // position advances by the prompt length plus one per decode step after
+        // the first (prefill), unless generation stopped early on EOS.
+        assert_eq!(
+            run.final_position,
+            run.prompt_ids.len() + (run.steps.len() - 1)
+        );
         for (k, s) in run.steps.iter().enumerate() {
             assert!(s.next_token_id < cfg.n_vocab && s.nonfinite == 0);
             eprintln!(
