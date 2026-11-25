@@ -1,0 +1,109 @@
+{
+  "title": "Nemotron 3 Super 120B-A12B (nemotron_h_moe): tokenizer, 88-layer tensor-binding plan, model-backed streamed layer execution",
+  "date": "2026-11-25",
+  "author": "LLM Bridge",
+  "scope": "Model-backed execution of the real GGUF weights via bounded authenticated streaming: the full 88-layer tensor-binding plan, one genuine layer of each type through the streamed reader, a full 88-layer forward on a raw token, and a GGUF byte-level BPE tokenizer. NOT a reference-parity check of the full model and NOT the 'capital of France' first token (see status).",
+  "git": {
+    "branch": "local/streamed-metadata-admission",
+    "head": "d8dfa44",
+    "local_only_unpushed": true,
+    "commits_this_round": [
+      {"hash": "2e36dbb", "summary": "feat(model): real 88-layer tensor-binding plan + model-backed streamed layers"},
+      {"hash": "8387ad8", "summary": "feat(model): streamed full 88-layer forward executor + greedy token"},
+      {"hash": "d8dfa44", "summary": "feat(tokenizer): GGUF byte-level BPE loader, decoder, and BPE core"}
+    ]
+  },
+  "pinned_reference": {
+    "repo": "ggml-org/llama.cpp",
+    "revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+    "checkout": "build/reference/"
+  },
+  "tokenizer": {
+    "module": "crates/llmbridge-core/src/nemotron_tokenizer.rs",
+    "loaded_from": "shard-1 GGUF header (self-contained bounded KV reader)",
+    "model": "gpt2 (byte-level BPE)",
+    "pre": "pixtral",
+    "vocab_size": 131072,
+    "special_ids": {"unk": 0, "bos": 1, "eos": 11, "add_bos_token": false},
+    "verified": [
+      "model/pre/vocab_size exact",
+      "tokens[0]=<unk>, [1]=<s>, [2]=</s>",
+      "GPT-2 byte<->unicode map is a bijection over 256 bytes",
+      "decode skips control/unknown/unused tokens by token_type",
+      "decode(encode(x)) == x on ASCII incl. 'The capital of France is'"
+    ],
+    "parity_status": "PARTIAL / honest: loader + decoder exact and verified; BPE merge engine uses the real merge ranks; the pixtral pre-tokenizer is approximated by a documented GPT-2-style splitter (no regex engine available, no runnable llama.cpp reference). Token IDs are NOT claimed byte-identical to the reference for arbitrary text. ACCEPTANCE A: not fully met (reference cross-check impossible in this environment).",
+    "test_count": 4
+  },
+  "model_plan": {
+    "module": "crates/llmbridge-core/src/nemotron_model.rs",
+    "built_from": "SplitGgufIndex over the 3 real shards (tensor table only; no weight payload)",
+    "layers": 88,
+    "layer_type_counts": {"recurrent": 40, "attention": 8, "moe": 40},
+    "attention_layer_indices": [7, 16, 25, 36, 47, 58, 69, 78],
+    "validation": "every required tensor resolved and shape-checked per layer; rejects missing/incompatible tensors before any execution",
+    "real_tensor_types": {
+      "token_embd": "Q4_K [4096,131072]",
+      "output_norm": "F32",
+      "ssm_in": "Q6_K [4096,18560]",
+      "ssm_out": "Q6_K [8192,4096]",
+      "ssm_conv1d/ssm_a/ssm_d/ssm_dt.bias/ssm_norm/attn_norm": "F32",
+      "attn_q/k/v/output": "Q5_K (q,o [4096,4096]; k,v [4096,256])",
+      "ffn_gate_inp": "F32 [4096,512]",
+      "exp_probs_b.bias": "F32 [512]",
+      "ffn_latent_down/up": "Q8_0",
+      "ffn_up_shexp": "Q5_K",
+      "ffn_down_shexp": "Q6_K",
+      "ffn_up_exps": "IQ2_XXS [1024,2688,512]",
+      "ffn_down_exps": "IQ4_NL [2688,1024,512]"
+    }
+  },
+  "model_backed_layer_execution": {
+    "mechanism": "all projections via dequant_matvec (one row streamed at a time); packed experts via PackedExperts (only the 22 selected read); small per-layer F32 params decoded directly; the F32 router via a dense dot. F32/F16/BF16 are decoded directly because ggml has no to_float dequantizer for float formats.",
+    "acceptance_B": "MET — one genuine layer of each required type executes through the streamed reader on the real model",
+    "ran": {
+      "embedding": "token 42 via a single bounded row read (Q4_K) -> finite n_embd vector",
+      "mamba_layer_0": "Q6_K ssm_in/out streamed + F32 conv/A/D/norm + conv/scan math -> finite n_embd",
+      "attention_layer_7": "Q5_K Q/K/V/O streamed + GQA 32:2 causal attention -> finite n_embd",
+      "moe_layer_1": "F32 router + Q8_0 latent + Q5_K/Q6_K shared expert + IQ2_XXS up / IQ4_NL down experts (22/512 selected) -> finite n_embd"
+    },
+    "elapsed_seconds_for_one_layer_of_each_type": 16.66,
+    "memory": "bounded streaming; no full tensor materialized; model never resident"
+  },
+  "full_88_layer_forward": {
+    "module": "run_full_forward + FullSession + greedy_token (crates/llmbridge-core/src/nemotron_model.rs)",
+    "gated_on": "LLMBRIDGE_NEMOTRON_DIR + LLMBRIDGE_NEMOTRON_FULL",
+    "input": "single raw token id 1 (<s> / BOS); a true text prompt needs confirmed tokenizer parity",
+    "status": "PASS — executed end-to-end on the real shards",
+    "elapsed_seconds": 737.5,
+    "logits_len": 131072,
+    "all_logits_finite": true,
+    "greedy_token_id": 1044,
+    "note": "produces genuine finite logits over the 131072 vocabulary and a greedy token id (1044) via bounded streaming; the model is never resident. This is a raw single-token (<s>) forward, NOT the 'capital of France' prompt, so the token is not claimed to be a meaningful continuation. NOT validated against a full-model resident reference (none runnable on this host)."
+  },
+  "shard_sha256": {
+    "measured": "LOCAL ONLY (see nemotron_latentmoe_mamba_block_2026-11-25.json for digests)",
+    "upstream_comparison": "UNVERIFIED — no authoritative upstream per-shard SHA-256 manifest obtained in this environment; local digests preserved as integrity measurements only; the reader's authentication contract was not weakened"
+  },
+  "resource_safety": {
+    "host_ram": "~13.8 GB total, ~2 GB free; model ~49 GB (never loaded)",
+    "disk": "slow external G: drive (full-shard sha256 earlier measured ~3 MB/s)",
+    "streaming": "per-tensor bounded range reads; packed experts read only the selected 22/512; peak working set dominated by a single streamed row plus one activation vector"
+  },
+  "regression": {
+    "commands": [
+      {"cmd": "cargo fmt --check -p llmbridge-core", "result": "clean"},
+      {"cmd": "cargo clippy -p llmbridge-core --lib --all-targets --features native -- -D warnings", "result": "clean"},
+      {"cmd": "cargo test -p llmbridge-core --lib", "result": "248 passed; 0 failed (non-native)"},
+      {"cmd": "cargo test -p llmbridge-core --lib --features native", "result": "312 passed; 0 failed"},
+      {"cmd": "cargo build -p llmbridge-core --no-default-features", "result": "builds"}
+    ],
+    "no_tests_weakened": true
+  },
+  "outstanding_blockers": [
+    "reference-identical tokenizer parity (needs a runnable llama.cpp tokenizer + a regex engine for the pixtral pre-type)",
+    "upstream SHA-256 authentication of the shards",
+    "genuine 'The capital of France is' first token (needs confirmed tokenizer parity feeding the full streamed forward)"
+  ],
+  "final_status": "PARTIALLY COMPLETE — real 88-layer tensor-binding plan validated on the model; ACCEPTANCE B met (one genuine streamed layer of each type executes on the real weights); the full 88-layer streamed forward executed end-to-end on a raw token and produced finite logits[131072] + greedy token id 1044 in 737.5s; tokenizer loader/decoder exact, encoder parity unverified (ACCEPTANCE A partial). Full prompt-driven 120B first token remains blocked on confirmed tokenizer parity; upstream shard authentication remains unverified."
+}
