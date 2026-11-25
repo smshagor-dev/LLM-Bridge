@@ -411,6 +411,12 @@ fn matvec(
     }
     let mut reader = BoundedLocalReader::open(&index.path, CHUNK, CAP)
         .map_err(|e| format!("open {}: {e}", index.path.display()))?;
+    // Q8_0 uses the LLM Bridge-owned pure-Rust kernel (no GGML/FFI); every other
+    // quantized type still routes through the pinned GGML dequant matvec until an
+    // owned kernel for it is implemented and validated.
+    if region.ggml_type == crate::native_kernels::GGML_TYPE_Q8_0 {
+        return crate::native_kernels::q8_0_dequant_matvec(region, &mut reader, x, stop, BUDGET);
+    }
     dequant_matvec(region, &mut reader, x, stop, BUDGET)
 }
 
@@ -1110,5 +1116,79 @@ mod tests {
         eprintln!("NANO_GEN_TOP5 {:?}", r.top5);
         assert_eq!(r.n_prefill, r.token_ids.len());
         assert!(r.next_token_id < cfg.n_vocab);
+    }
+
+    /// Mandatory acceptance A: the LLM Bridge-owned Q8_0 kernel matches BOTH the
+    /// pinned GGML dequant_matvec (test-only reference) AND an independent in-Rust
+    /// FP64 oracle, on a real Nano Q8_0 tensor slice (blk.5.attn_k.weight).
+    #[test]
+    fn owned_q8_0_kernel_matches_ggml_and_fp64_oracle_on_real_nano_tensor() {
+        use std::io::{Read, Seek, SeekFrom};
+        let Some(path) = model_path() else {
+            eprintln!("skip: LLMBRIDGE_NANO_GGUF unset");
+            return;
+        };
+        let index = GgufTensorIndex::inspect(&path).unwrap();
+        let region = index
+            .tensor("blk.5.attn_k.weight")
+            .expect("attn_k present")
+            .clone();
+        assert_eq!(region.ggml_type, crate::native_kernels::GGML_TYPE_Q8_0);
+        let columns = region.dimensions[0] as usize;
+        let rows = region.dimensions[1] as usize;
+        let act: Vec<f32> = (0..columns)
+            .map(|i| ((i % 17) as f32 - 8.0) * 0.01)
+            .collect();
+        let stop = AtomicBool::new(false);
+
+        // Owned pure-Rust kernel (no GGML/FFI).
+        let mut r1 = BoundedLocalReader::open(&index.path, CHUNK, CAP).unwrap();
+        let owned =
+            crate::native_kernels::q8_0_dequant_matvec(&region, &mut r1, &act, &stop, BUDGET)
+                .unwrap();
+        // GGML reference path.
+        let mut r2 = BoundedLocalReader::open(&index.path, CHUNK, CAP).unwrap();
+        let ggml = dequant_matvec(&region, &mut r2, &act, &stop, BUDGET).unwrap();
+        // Independent FP64 oracle (direct file read + f64 arithmetic).
+        let row_bytes = region.byte_len as usize / rows;
+        let mut f = std::fs::File::open(&index.path).unwrap();
+        let mut oracle = vec![0f64; rows];
+        let mut buf = vec![0u8; row_bytes];
+        for (r, o) in oracle.iter_mut().enumerate() {
+            f.seek(SeekFrom::Start(region.file_offset + (r * row_bytes) as u64))
+                .unwrap();
+            f.read_exact(&mut buf).unwrap();
+            let mut acc = 0f64;
+            for b in 0..(columns / 32) {
+                let base = b * 34;
+                let d = crate::native_kernels::f16_to_f32(u16::from_le_bytes([
+                    buf[base],
+                    buf[base + 1],
+                ])) as f64;
+                for i in 0..32 {
+                    let q = buf[base + 2 + i] as i8;
+                    acc += d * f64::from(q) * f64::from(act[b * 32 + i]);
+                }
+            }
+            *o = acc;
+        }
+
+        assert_eq!(owned.len(), rows);
+        assert_eq!(ggml.len(), rows);
+        let mut max_vs_ggml = 0f64;
+        let mut max_vs_oracle = 0f64;
+        let mut max_mag = 1e-12f64;
+        for r in 0..rows {
+            max_vs_ggml = max_vs_ggml.max((owned[r] as f64 - ggml[r] as f64).abs());
+            max_vs_oracle = max_vs_oracle.max((owned[r] as f64 - oracle[r]).abs());
+            max_mag = max_mag.max(oracle[r].abs());
+        }
+        eprintln!(
+            "OWNED_Q8_0 rows={rows} max_abs_vs_ggml={max_vs_ggml:.3e} max_abs_vs_fp64={max_vs_oracle:.3e} max_mag={max_mag:.3e}"
+        );
+        // Owned vs FP64 oracle: f32 rounding only.
+        assert!(max_vs_oracle / max_mag < 1e-4, "owned vs fp64 too large");
+        // Owned vs GGML: both f32, accumulation-order differences only.
+        assert!(max_vs_ggml / max_mag < 1e-3, "owned vs ggml too large");
     }
 }
