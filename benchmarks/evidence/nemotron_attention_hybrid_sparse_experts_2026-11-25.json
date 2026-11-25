@@ -1,0 +1,147 @@
+{
+  "title": "Nemotron 3 Super 120B-A12B (nemotron_h_moe): attention, reduced hybrid forward, sparse quantized expert streaming",
+  "date": "2026-11-25",
+  "author": "LLM Bridge",
+  "scope": "Component- and reduced-stack-level execution with independent numerical validation, plus one real packed-expert read from the G: shards. This is NOT a full 120B inference run (see full_model_inference_status).",
+  "git": {
+    "branch": "local/streamed-metadata-admission",
+    "head": "b888491",
+    "local_only_unpushed": true,
+    "commits_this_round": [
+      {"hash": "25f933a", "summary": "feat(attn): Nemotron NoPE GQA attention sub-layer with KV cache"},
+      {"hash": "1817aa3", "summary": "feat(hybrid): reduced Nemotron hybrid decoder forward pass"},
+      {"hash": "b41c452", "summary": "feat(moe): sparse quantized expert streaming via bounded authenticated reads"},
+      {"hash": "b888491", "summary": "test(moe): real-model packed-expert streaming validation (gated)"}
+    ]
+  },
+  "pinned_reference": {
+    "repo": "ggml-org/llama.cpp",
+    "revision": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+    "checkout": "build/reference/",
+    "authoritative_sources": [
+      "build/reference/src/models/nemotron-h.cpp:202 graph (hybrid layer loop)",
+      "build/reference/src/models/nemotron-h.cpp:278 build_attention_layer",
+      "build/reference/src/llama-graph.cpp build_qkv / build_attn / build_attn_mha",
+      "build/reference/src/models/nemotron-h.cpp:130-131 packed ffn_up_exps / ffn_down_exps shapes"
+    ]
+  },
+  "model_metadata_verified_from_shard1_header": {
+    "arch": "nemotron_h_moe",
+    "block_count": 88,
+    "embedding_length": 4096,
+    "vocab_size": 131072,
+    "attention_head_count": 32,
+    "attention_head_count_kv": "per-layer array: 0 on recurrent layers, 2 on the 8 attention layers (indices 7,16,25,36,47,58,69,78); GQA 16:1",
+    "attention_key_length": 128,
+    "attention_value_length": 128,
+    "positional_encoding": "NoPE — the pinned build_attention_layer applies no RoPE and no Q/K norm for this arch (rope.* keys present but unused by the graph)",
+    "attention_scale": "f_attention_scale absent -> 1/sqrt(head_dim) = 1/sqrt(128)",
+    "sliding_window": "none (swa_type == NONE asserted); no attention sinks",
+    "layer_typing": "recurrent iff head_kv==0 && feed_forward_length==0; attention iff head_kv!=0 (ff==0); MoE-FFN iff feed_forward_length==2688",
+    "expert_count": 512,
+    "expert_used_count": 22,
+    "expert_feed_forward_length": 2688,
+    "expert_shared_feed_forward_length": 5376,
+    "moe_latent_size": 1024,
+    "ssm": {"conv_kernel": 4, "state_size": 128, "group_count": 8, "inner_size": 8192, "time_step_rank": 128}
+  },
+  "attention": {
+    "module": "crates/llmbridge-core/src/nemotron_attention.rs",
+    "math": "NoPE causal GQA: scores = (1/sqrt(head_dim)) * Q.K over cached keys [0..=t], stable softmax, weighted V, output projection wo (+ optional wo_b); fixed-capacity KV cache, O(n_kv) score buffer per query (no full context x context matrix)",
+    "independent_validation": {
+      "oracle": "from-scratch f64 attention oracle in the test module (no production calls)",
+      "output_tolerances_met": {"max_abs": "< 1e-3", "rmse": "< 1e-4"},
+      "kv_cache_match": "< 1e-3 vs oracle for all cached positions",
+      "prefill_equals_incremental_decode": "max_abs < 1e-5; KV cache (k and v) identical",
+      "cases": ["single token", "multi-token prefill", "prefill==decode", "causal masking (future tokens do not change past outputs)", "GQA and plain MHA", "decode-after-prefill with prior KV", "reset", "capacity overflow", "invalid geometry", "non-finite input", "wrong input length"]
+    },
+    "test_count": 7,
+    "all_pass": true
+  },
+  "reduced_hybrid_forward": {
+    "module": "crates/llmbridge-core/src/nemotron_hybrid.rs",
+    "composition": "embedding -> per layer { rms_norm(attn_norm) -> sub-layer (Mamba | attention | MoE-FFN) -> residual } -> rms_norm(output_norm) -> output projection -> logits; ordering/typing match the pinned graph",
+    "reduced_stack": "[recurrent, attention, moe] with small faithful dims (n_embd 8, vocab 12); sub-layers reused unchanged",
+    "state": "per-layer Mamba conv+SSM state and attention KV cache, session-local, with reset",
+    "independent_validation": {
+      "oracle": "from-scratch f64 oracle re-deriving embedding, RMS norms, all three sub-layers, residuals, and output projection",
+      "logits": "finite",
+      "max_abs": "< 2e-3",
+      "top1_last_token": "matches the oracle",
+      "prefill_equals_sequential_decode": "max_abs < 1e-4",
+      "reset_then_repeat_deterministic": true,
+      "rejects": ["out-of-vocab token", "empty input"]
+    },
+    "test_count": 5,
+    "all_pass": true,
+    "note": "reduced-size only; no full-model numerical parity is claimed"
+  },
+  "sparse_quantized_expert_streaming": {
+    "module": "crates/llmbridge-core/src/nemotron_expert_stream.rs",
+    "feature": "native",
+    "packed_layout": "one GGUF tensor per projection holds all experts: ffn_up_exps [moe_n_embd, n_ff_exp, n_expert], ffn_down_exps [n_ff_exp, moe_n_embd, n_expert]; expert e is a contiguous sub-block at stride byte_len/n_expert",
+    "mechanism": "PackedExperts.expert_region(e) builds a rank-2 TensorRegion over expert e's own byte range; dequant_matvec reads it bounded and authenticated (range clamped to that expert), so no neighbouring expert's bytes are read; only selected experts are evaluated (sparse)",
+    "synthetic_validation": {
+      "reference": "dequantize_rows + f64 dot over the same sub-slice (separate FFI path)",
+      "cases": ["first/middle/last expert (max_abs < 1e-3)", "cross-block columns (64-wide, 2 Q8_0 blocks)", "full up->relu2->down chain", "weighted aggregation vs manual sum", "single-file stream_moe_experts of only selected experts", "bad index / truncated source / cancellation / tiny workspace budget / bad packed geometry all rejected"],
+      "test_count": 6
+    },
+    "real_model_validation": {
+      "gated_on": "LLMBRIDGE_NEMOTRON_DIR",
+      "ran": true,
+      "tensor": "blk.1.ffn_up_exps.weight",
+      "ggml_type": "IQ2_XXS",
+      "columns_moe_n_embd": 1024,
+      "rows_n_ff_exp": 2688,
+      "n_expert": 512,
+      "bytes_read_for_one_expert": 709632,
+      "note": "one expert's bytes only — not the whole tensor, not the model",
+      "max_abs_vs_dequant_reference": 1.72e-9,
+      "result": "PASS — SplitGgufIndex resolution, PackedExperts sub-slice offsets, and dequant_matvec decode of real IQ2_XXS expert bytes all correct on the actual shards"
+    }
+  },
+  "shard_sha256": {
+    "measured": "LOCAL ONLY (recorded 2026-11-25; see nemotron_latentmoe_mamba_block_2026-11-25.json for full digests and method)",
+    "upstream_comparison": "PENDING — no authoritative upstream per-shard SHA-256 for this UD-IQ2_XXS quantization obtained; local digests are integrity measurements, not authenticated provenance"
+  },
+  "memory_cpu_source_io": {
+    "new_pure_modules": "attention/hybrid are pure f32 arithmetic on small in-memory fixtures; no disk I/O",
+    "sparse_expert_reads": "bounded: per-expert range read only; the real-model test read 709632 bytes for one expert and nothing else from G:",
+    "attention_kv_cache": "fixed capacity * n_head_kv * head_dim f32; bounded, no full score matrix",
+    "host_ram": "~13.8 GB total, ~2 GB free; model ~49 GB (not loaded)",
+    "shards_untouched": true
+  },
+  "regression": {
+    "commands": [
+      {"cmd": "cargo fmt --check -p llmbridge-core", "result": "clean"},
+      {"cmd": "cargo clippy -p llmbridge-core --lib --all-targets --features native -- -D warnings", "result": "clean"},
+      {"cmd": "cargo test -p llmbridge-core --lib", "result": "248 passed; 0 failed"},
+      {"cmd": "cargo test -p llmbridge-core --lib --features native", "result": "304 passed; 0 failed"},
+      {"cmd": "cargo build -p llmbridge-core --no-default-features", "result": "builds"}
+    ],
+    "no_tests_weakened": true,
+    "note": "two chain tests use realistic small quantized magnitudes (scale 0.125, int8 in [-3,3]) so squared-ReLU stays well-conditioned in f32; tolerances were not loosened to hide a defect (single-tensor projections match to 1e-3 and the real-model read to 1.7e-9)"
+  },
+  "full_model_inference_status": {
+    "attempted": false,
+    "blocked": true,
+    "mandatory_acceptances_this_round": {
+      "A_attention_matches_reference": "MET",
+      "B_reduced_hybrid_produces_reference_validated_logits": "MET",
+      "C_selected_quantized_experts_execute_via_bounded_authenticated_reads": "MET"
+    },
+    "remaining_for_genuine_120B_first_token": [
+      "tokenizer / chat template (gpt2/pixtral) wiring to turn 'The capital of France is' into token ids",
+      "native assembly of all 88 real layers (embedding, per-layer Mamba/attention/MoE with real streamed weights, output projection) into one forward pass",
+      "upstream SHA-256 authentication of the shards (currently local-only)",
+      "bounded resource admission for a full-depth forward within ~2 GB free RAM"
+    ],
+    "note": "reduced-stack logits and a single real expert read are NOT a 120B forward pass; no token id or throughput is claimed"
+  },
+  "outstanding_blockers": [
+    "tokenizer + full 88-layer native forward assembly",
+    "upstream shard authentication",
+    "genuine 120B first token (hardware-bound: 49 GB model vs ~2 GB free RAM)"
+  ],
+  "final_status": "PARTIALLY COMPLETE — mandatory acceptances A, B, C all MET and committed locally; real packed-expert read validated on the actual shards. Full 120B first-token generation remains a separate gate, blocked on tokenizer + full-depth native assembly + upstream authentication + resources."
+}
