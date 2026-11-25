@@ -3,6 +3,7 @@ pub mod gguf_index;
 pub mod hardware;
 #[cfg(feature = "native")]
 pub mod inference;
+pub mod latent_moe_ffn;
 pub mod latent_moe_routing;
 pub mod logit_diff;
 pub mod mamba2_conv;
