@@ -902,6 +902,100 @@ pub fn generate_next_token(
     })
 }
 
+/// Exact per-token source-read volume computed from the tensor table (no weight
+/// payload is read). For each single-token forward the streamed executor reads:
+/// every recurrent/attention/MoE-non-expert tensor in full, only
+/// `n_expert_used / n_expert` of each packed expert tensor, one embedding row,
+/// and the output projection once.
+#[derive(Debug, Clone, Default)]
+pub struct ReadProfile {
+    pub total_bytes: u64,
+    pub embedding_bytes: u64,
+    pub recurrent_bytes: u64,
+    pub attention_bytes: u64,
+    pub moe_non_expert_bytes: u64,
+    pub moe_expert_bytes: u64,
+    pub output_bytes: u64,
+    pub norm_bytes: u64,
+}
+
+/// Compute the per-token source-read profile from the real split index + plan.
+/// Reads only the tensor table (sizes), never weight data.
+pub fn source_read_profile(
+    index: &SplitGgufIndex,
+    cfg: &NemotronConfig,
+    plan: &ModelPlan,
+) -> Result<ReadProfile, String> {
+    let bytes = |name: &str| -> u64 { index.tensor(name).map(|(_, r)| r.byte_len).unwrap_or(0) };
+    let mut p = ReadProfile::default();
+    // one embedding row
+    let tok = index
+        .tensor("token_embd.weight")
+        .map(|(_, r)| r.byte_len)
+        .unwrap_or(0);
+    p.embedding_bytes = tok / cfg.n_vocab as u64;
+    // output projection (dedicated or tied), read once
+    p.output_bytes = bytes(output_tensor_name(index));
+    p.norm_bytes += bytes("output_norm.weight");
+
+    for l in &plan.layers {
+        let i = l.index;
+        p.norm_bytes += bytes(&tn(i, "attn_norm.weight"));
+        match l.kind {
+            LayerType::Recurrent => {
+                for s in [
+                    "ssm_in.weight",
+                    "ssm_conv1d.weight",
+                    "ssm_conv1d.bias",
+                    "ssm_dt.bias",
+                    "ssm_a",
+                    "ssm_d",
+                    "ssm_norm.weight",
+                    "ssm_out.weight",
+                ] {
+                    p.recurrent_bytes += bytes(&tn(i, s));
+                }
+            }
+            LayerType::Attention => {
+                for s in [
+                    "attn_q.weight",
+                    "attn_k.weight",
+                    "attn_v.weight",
+                    "attn_output.weight",
+                ] {
+                    p.attention_bytes += bytes(&tn(i, s));
+                }
+            }
+            LayerType::Moe => {
+                for s in [
+                    "ffn_gate_inp.weight",
+                    "exp_probs_b.bias",
+                    "ffn_latent_down.weight",
+                    "ffn_latent_up.weight",
+                    "ffn_up_shexp.weight",
+                    "ffn_down_shexp.weight",
+                ] {
+                    p.moe_non_expert_bytes += bytes(&tn(i, s));
+                }
+                // only n_expert_used / n_expert of each packed expert tensor is read
+                let up = bytes(&tn(i, "ffn_up_exps.weight"));
+                let down = bytes(&tn(i, "ffn_down_exps.weight"));
+                let used = cfg.n_expert_used as u64;
+                let total = cfg.n_expert as u64;
+                p.moe_expert_bytes += (up / total) * used + (down / total) * used;
+            }
+        }
+    }
+    p.total_bytes = p.embedding_bytes
+        + p.recurrent_bytes
+        + p.attention_bytes
+        + p.moe_non_expert_bytes
+        + p.moe_expert_bytes
+        + p.output_bytes
+        + p.norm_bytes;
+    Ok(p)
+}
+
 /// Deterministic activation summary for diagnostics (no state, no math change):
 /// (L2 norm, mean, population std, max abs, count of non-finite entries).
 pub fn activation_stats(v: &[f32]) -> (f64, f64, f64, f64, usize) {
@@ -932,6 +1026,101 @@ pub fn l2_distance(a: &[f32], b: &[f32]) -> f64 {
         .map(|(x, y)| ((*x - *y) as f64).powi(2))
         .sum::<f64>()
         .sqrt()
+}
+
+/// Top-k (id, logit) pairs, descending by logit then ascending id.
+pub fn top_k(logits: &[f32], k: usize) -> Vec<(usize, f32)> {
+    let mut idx: Vec<usize> = (0..logits.len()).collect();
+    idx.sort_by(|&a, &b| {
+        logits[b]
+            .partial_cmp(&logits[a])
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.cmp(&b))
+    });
+    idx.into_iter().take(k).map(|i| (i, logits[i])).collect()
+}
+
+/// One autoregressive step's diagnostics (compact; no full logit vector kept).
+#[derive(Debug, Clone)]
+pub struct GenStep {
+    pub input_ids: Vec<u32>,
+    pub next_token_id: usize,
+    pub next_token_text: String,
+    pub logit_l2: f64,
+    pub logit_max_abs: f64,
+    pub top20: Vec<(usize, f32)>,
+    pub nonfinite: usize,
+    pub seconds: f64,
+}
+
+/// Result of a persistent-state autoregressive run.
+#[derive(Debug, Clone)]
+pub struct GenRun {
+    pub prompt: String,
+    pub prompt_ids: Vec<u32>,
+    pub steps: Vec<GenStep>,
+    pub generated_text: String,
+    pub final_position: usize,
+}
+
+/// Genuine persistent-state multi-token generation: a single [`FullSession`] is
+/// advanced across steps (Mamba conv + SSM state, attention KV cache, and
+/// sequence position all persist), feeding each greedy token back as the next
+/// input. Step 1 prefills the whole prompt; each later step forwards one token.
+/// Captures compact per-step logit diagnostics without retaining full vectors.
+#[allow(clippy::too_many_arguments)]
+pub fn generate(
+    index: &SplitGgufIndex,
+    cfg: &NemotronConfig,
+    plan: &ModelPlan,
+    tokenizer: &crate::nemotron_tokenizer::NemotronTokenizer,
+    prompt: &str,
+    n_new: usize,
+    stop: &AtomicBool,
+) -> Result<GenRun, String> {
+    if n_new == 0 {
+        return Err("n_new must be >= 1".into());
+    }
+    let prompt_ids = tokenizer.encode(prompt);
+    if prompt_ids.is_empty() {
+        return Err("prompt encoded to zero tokens".into());
+    }
+    if let Some(&bad) = prompt_ids.iter().find(|&&id| id as usize >= cfg.n_vocab) {
+        return Err(format!("encoded token id {bad} out of vocab range"));
+    }
+    let mut session = FullSession::new(cfg, plan)?;
+    let mut steps = Vec::with_capacity(n_new);
+    let mut generated: Vec<u32> = Vec::with_capacity(n_new);
+    let mut cur_input = prompt_ids.clone();
+    for _ in 0..n_new {
+        if stop.load(std::sync::atomic::Ordering::Acquire) {
+            return Err("generation cancelled".into());
+        }
+        let t0 = std::time::Instant::now();
+        let logits = run_full_forward(index, cfg, plan, &mut session, &cur_input, stop)?;
+        let seconds = t0.elapsed().as_secs_f64();
+        let next = greedy_token(&logits).ok_or("no greedy token")?;
+        let (l2, _mean, _std, max_abs, nonfinite) = activation_stats(&logits);
+        steps.push(GenStep {
+            input_ids: cur_input.clone(),
+            next_token_id: next,
+            next_token_text: tokenizer.decode(&[next as u32]).unwrap_or_default(),
+            logit_l2: l2,
+            logit_max_abs: max_abs,
+            top20: top_k(&logits, 20),
+            nonfinite,
+            seconds,
+        });
+        generated.push(next as u32);
+        cur_input = vec![next as u32];
+    }
+    Ok(GenRun {
+        prompt: prompt.to_string(),
+        prompt_ids,
+        generated_text: tokenizer.decode(&generated).unwrap_or_default(),
+        final_position: session.position(),
+        steps,
+    })
 }
 
 /// Greedy argmax token id over a logit vector.
@@ -1169,6 +1358,102 @@ mod tests {
         eprintln!(
             "PROMPT GEN ok: prompt={:?} ids={:?} n_prefill={} next_id={} next_text={:?} top5={:?} prefill={:.1}s",
             r.prompt, r.token_ids, r.n_prefill, r.next_token_id, r.next_token_text, r.top5, r.prefill_seconds
+        );
+    }
+
+    // Cheap: exact per-token source-read volume from the tensor table (no weight
+    // payload read). Gated only because it needs the real shards for the index.
+    #[test]
+    fn source_read_profile_per_token() {
+        let Some(sh) = shards() else {
+            eprintln!("skip: LLMBRIDGE_NEMOTRON_DIR unset");
+            return;
+        };
+        let index = SplitGgufIndex::inspect(&sh).unwrap();
+        let cfg = NemotronConfig::NEMOTRON_3_SUPER_120B;
+        let plan = ModelPlan::build(&index, cfg).unwrap();
+        let p = source_read_profile(&index, &cfg, &plan).unwrap();
+        // sanity: far below the full model size (only 22/512 experts are read)
+        let model_bytes: u64 = 7872576 + 49697120640 + 2971911584;
+        assert!(p.total_bytes > 0 && p.total_bytes < model_bytes);
+        let mb = |b: u64| b as f64 / (1024.0 * 1024.0);
+        eprintln!(
+            "read profile per token (MiB): total={:.1} embed={:.3} recurrent={:.1} attention={:.1} \
+             moe_non_expert={:.1} moe_expert={:.1} output={:.1} norm={:.3}; \
+             effective throughput at 769.7s = {:.2} MiB/s",
+            mb(p.total_bytes),
+            mb(p.embedding_bytes),
+            mb(p.recurrent_bytes),
+            mb(p.attention_bytes),
+            mb(p.moe_non_expert_bytes),
+            mb(p.moe_expert_bytes),
+            mb(p.output_bytes),
+            mb(p.norm_bytes),
+            mb(p.total_bytes) / 769.7
+        );
+    }
+
+    // Heavy: genuine persistent-state multi-token generation on the real model.
+    // Gated on LLMBRIDGE_NEMOTRON_DIR + LLMBRIDGE_NEMOTRON_FULL (each generated
+    // token is a full streamed pass over the slow G: drive). Also serves as the
+    // controlled contrasting-input full-logit comparison (step 1 input is the
+    // prompt; step 2 input is the previous generated token).
+    #[test]
+    fn real_persistent_state_multi_token_generation() {
+        let Some(sh) = shards() else {
+            eprintln!("skip: LLMBRIDGE_NEMOTRON_DIR unset");
+            return;
+        };
+        if std::env::var("LLMBRIDGE_NEMOTRON_FULL").is_err() {
+            eprintln!("skip: LLMBRIDGE_NEMOTRON_FULL unset (heavy multi-token test)");
+            return;
+        }
+        let index = SplitGgufIndex::inspect(&sh).unwrap();
+        let cfg = NemotronConfig::NEMOTRON_3_SUPER_120B;
+        let plan = ModelPlan::build(&index, cfg).unwrap();
+        let tk = crate::nemotron_tokenizer::NemotronTokenizer::from_gguf(
+            &std::path::PathBuf::from(&sh[0]),
+        )
+        .unwrap();
+        let stop = AtomicBool::new(false);
+        let prompt = std::env::var("LLMBRIDGE_NEMOTRON_PROMPT").unwrap_or_else(|_| "Hi".into());
+        let n_new: usize = std::env::var("LLMBRIDGE_NEMOTRON_NTOK")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(2);
+        let run = generate(&index, &cfg, &plan, &tk, &prompt, n_new, &stop).unwrap();
+        assert_eq!(run.steps.len(), n_new);
+        assert_eq!(run.final_position, run.prompt_ids.len() + (n_new - 1));
+        for (k, s) in run.steps.iter().enumerate() {
+            assert!(s.next_token_id < cfg.n_vocab && s.nonfinite == 0);
+            eprintln!(
+                "step {k}: input={:?} -> next_id={} text={:?} l2={:.2} maxabs={:.2} {:.1}s top5={:?}",
+                s.input_ids,
+                s.next_token_id,
+                s.next_token_text,
+                s.logit_l2,
+                s.logit_max_abs,
+                s.seconds,
+                &s.top20[..5.min(s.top20.len())]
+            );
+        }
+        // Controlled full-logit comparison between the two different step inputs.
+        if run.steps.len() >= 2 {
+            let a = &run.steps[0].top20;
+            let b = &run.steps[1].top20;
+            let ids_a: std::collections::HashSet<usize> = a.iter().map(|x| x.0).collect();
+            let overlap = b.iter().filter(|x| ids_a.contains(&x.0)).count();
+            eprintln!(
+                "contrast: step0 top1={} step1 top1={} top20_overlap={}/20 l2(step0,step1 logit-norm diff)={:.3}",
+                a[0].0,
+                b[0].0,
+                overlap,
+                (run.steps[0].logit_l2 - run.steps[1].logit_l2).abs()
+            );
+        }
+        eprintln!(
+            "MULTI-TOKEN ok: prompt={:?} ids={:?} generated_text={:?} final_pos={}",
+            run.prompt, run.prompt_ids, run.generated_text, run.final_position
         );
     }
 }
