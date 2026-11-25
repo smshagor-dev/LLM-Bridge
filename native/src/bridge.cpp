@@ -551,6 +551,74 @@ extern "C" int32_t llmbridge_dequantize_rows_v1(
     }
 }
 
+/* Type-generic bounded quantized matrix-vector product: the arithmetic
+ * primitive the Nemotron LatentMoE experts and Mamba-2 projections need. Mirrors
+ * llmbridge_q8_0_matvec but dequantizes each row with the pinned ggml to_float
+ * for the requested type. Weights stream one row at a time; nothing is retained. */
+extern "C" int32_t llmbridge_dequant_matvec_v1(
+    uint32_t ggml_type, uint64_t tensor_offset, uint64_t tensor_bytes,
+    uint32_t columns, uint32_t rows, size_t max_chunk_bytes,
+    llmbridge_range_callback reader, void *userdata,
+    const float *input, float *output,
+    char *error, size_t error_capacity) {
+    write_error(error, error_capacity, "");
+    try {
+        if (!reader || !userdata || !input || !output ||
+            columns == 0 || columns > (1u << 17) ||
+            rows == 0 || rows > (1u << 20) ||
+            max_chunk_bytes == 0 || max_chunk_bytes > 32 * 1024 * 1024) {
+            throw std::invalid_argument("invalid dequant_matvec arguments");
+        }
+        if (ggml_type >= static_cast<uint32_t>(GGML_TYPE_COUNT)) {
+            throw std::invalid_argument("ggml tensor type id out of range");
+        }
+        const enum ggml_type type = static_cast<enum ggml_type>(ggml_type);
+        const auto *traits = ggml_get_type_traits(type);
+        if (!traits || !traits->to_float) {
+            throw std::runtime_error("pinned ggml type has no dequantizer");
+        }
+        const int64_t block = ggml_blck_size(type);
+        if (block <= 0 || (columns % static_cast<uint32_t>(block)) != 0) {
+            throw std::invalid_argument("columns is not a whole number of ggml blocks");
+        }
+        const size_t row_bytes = static_cast<size_t>(ggml_row_size(type, columns));
+        if (row_bytes == 0 || row_bytes > max_chunk_bytes ||
+            tensor_bytes != static_cast<uint64_t>(row_bytes) * rows ||
+            tensor_offset > UINT64_MAX - tensor_bytes) {
+            throw std::invalid_argument("tensor shape, byte range or chunk budget mismatch");
+        }
+        for (uint32_t col = 0; col < columns; ++col) {
+            if (!std::isfinite(input[col])) {
+                throw std::invalid_argument("non-finite activation rejected");
+            }
+        }
+        std::vector<uint8_t> packed(row_bytes);
+        std::vector<float> decoded(columns);
+        for (uint32_t row = 0; row < rows; ++row) {
+            const uint64_t offset = tensor_offset + static_cast<uint64_t>(row) * row_bytes;
+            if (reader(userdata, packed.data(), offset, row_bytes) != row_bytes) {
+                throw std::runtime_error("bounded GGUF range read failed or was cancelled");
+            }
+            traits->to_float(packed.data(), decoded.data(), static_cast<int64_t>(columns));
+            double sum = 0.0;
+            for (uint32_t col = 0; col < columns; ++col) {
+                sum += static_cast<double>(decoded[col]) * input[col];
+            }
+            if (!std::isfinite(sum) || std::abs(sum) > std::numeric_limits<float>::max()) {
+                throw std::runtime_error("non-finite matvec output rejected");
+            }
+            output[row] = static_cast<float>(sum);
+        }
+        return 0;
+    } catch (const std::exception &e) {
+        write_error(error, error_capacity, e.what());
+        return -1;
+    } catch (...) {
+        write_error(error, error_capacity, "unknown native dequant matvec exception");
+        return -1;
+    }
+}
+
 /* Additive entry point preserves the existing ABI and legacy callers. */
 extern "C" int32_t llmbridge_generate_cpu_polled(
     const char *model_path, const char *prompt, uint32_t context_tokens,

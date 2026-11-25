@@ -161,6 +161,27 @@ int32_t llmbridge_dequantize_rows_v1(uint32_t ggml_type,
                                      char *error,
                                      size_t error_capacity);
 
+/* Generalization of llmbridge_q8_0_matvec to any ggml tensor type with a pinned
+ * to_float dequantizer. Streams one [columns]-wide row at a time through the
+ * caller's bounded reader, dequantizes it with the pinned ggml kernel, and
+ * accumulates the dot product against `input` into output[row]. Shape is
+ * [columns, rows]; columns must be a whole number of the type's blocks. Native
+ * scratch is O(columns); the weight matrix is never materialized. Reader is only
+ * called inside [tensor_offset, tensor_offset + tensor_bytes). Returns 0 on
+ * success, -1 on read/validation error; a failed call's output is discarded. */
+int32_t llmbridge_dequant_matvec_v1(uint32_t ggml_type,
+                                    uint64_t tensor_offset,
+                                    uint64_t tensor_bytes,
+                                    uint32_t columns,
+                                    uint32_t rows,
+                                    size_t max_chunk_bytes,
+                                    llmbridge_range_callback reader,
+                                    void *userdata,
+                                    const float *input,
+                                    float *output,
+                                    char *error,
+                                    size_t error_capacity);
+
 #ifdef __cplusplus
 }
 #endif
